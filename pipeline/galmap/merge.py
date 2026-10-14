@@ -375,13 +375,16 @@ def merge_census(stars: pd.DataFrame, census: pd.DataFrame) -> pd.DataFrame:
 
     # Within the census volume, everything must be confirmed by the census. Unconfirmed rows
     # with imprecise distances are mostly old Hipparcos/Gliese errors ("phantom neighbours").
+    # Rows with precise Gaia parallaxes that are still unconfirmed are duplicates of census objects
+    # whose catalogue position is off (old Gliese coordinates can be wrong by arcminutes).
     plx = s["plx"].to_numpy(dtype=float)
     rel = s["plx_err"].to_numpy(dtype=float) / plx
-    unconfirmed = s["census_row"].isna().to_numpy() & (plx > 1000.0 / CENSUS_LIMIT_PC) & ~s["is_sun"].to_numpy(dtype=bool)
-    drop = unconfirmed & ~(rel < 0.05)
+    drop = s["census_row"].isna().to_numpy() & (plx > 1000.0 / CENSUS_LIMIT_PC) & ~s["is_sun"].to_numpy(dtype=bool)
+    precise = drop & (rel < 0.05)
     log.info(
-        "within %.0f pc: %d rows not in the census; %d with imprecise or unknown parallax dropped",
-        CENSUS_LIMIT_PC, int(unconfirmed.sum()), int(drop.sum()),
+        "within %.0f pc: %d rows not confirmed by the census dropped (%d of them with precise parallaxes: %s)",
+        CENSUS_LIMIT_PC, int(drop.sum()), int(precise.sum()),
+        ", ".join(str(v) for v in s.loc[precise, "gj"].fillna(s.loc[precise, "gaia"].astype(str)).head(10)),
     )
     s = s[~drop].reset_index(drop=True)
     return s

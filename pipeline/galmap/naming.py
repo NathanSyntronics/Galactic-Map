@@ -49,6 +49,7 @@ class Cand:
     de: str | None
     rank: int
     prio: int
+    seq: int = 0
 
 
 def german_of(en: str) -> str | None:
@@ -117,7 +118,10 @@ def candidates(row, ext: dict) -> list[Cand]:
     def add(en, rank, prio, de=None):
         if isinstance(en, str) and en.strip():
             en = en.strip()
-            out.append(Cand(en, de if de and de != en else german_of(en), rank, prio))
+            if rank == Rank.GJ:  # "GJ 1" -> "Gliese 1" (the usual form for the original Gliese numbers)
+                en = gliese_display(en) or en
+                de = None
+            out.append(Cand(en, de if de and de != en else german_of(en), rank, prio, len(out)))
 
     def add_text(text, prio, max_rank=Rank.SURVEY, force_rank=None):
         """Add a free-text name (expanding abbreviated Bayer/Flamsteed forms like 'tau Cet')."""
@@ -181,6 +185,10 @@ def candidates(row, ext: dict) -> list[Cand]:
         en = flamsteed_name(int(flam), con)
         add(_with_comp(en, comp if in_system else None), Rank.FLAMSTEED, P_GENERATED)
     var = row.get("hyg_var")
+    # within 20 pc the census variable-star names are authoritative (HYG sometimes puts the
+    # variable name of a companion on the primary)
+    if pd.notna(row.get("census_row")):
+        var = None
     if isinstance(var, str) and constellation(con):
         b2 = parse_hyg_bayer(var)
         if not (b2 and b2[0].lower() in ("alp", "bet", "gam", "del", "eps", "zet", "eta", "the", "iot", "kap", "lam", "mu", "nu", "xi", "omi", "pi", "rho", "sig", "tau", "ups", "phi", "chi", "psi", "ome")):
@@ -215,7 +223,7 @@ def choose(cands: list[Cand]) -> tuple[Cand | None, list[str]]:
         if iau and best.rank >= Rank.GJ:
             best = iau[0]
     else:
-        best = min(cands, key=lambda c: (c.rank, c.prio, len(c.en)))
+        best = min(cands, key=lambda c: (c.rank, c.prio, c.seq))
     seen = {best.en.lower()}
     alts = []
     for c in sorted(cands, key=lambda c: (c.rank, c.prio)):
@@ -363,6 +371,14 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
                 if old and old != name_en[i]:
                     alt[i] = [old] + [a for a in (alt[i] or []) if a != old and a != name_en[i]][:9]
                 renamed += 1
+        # give the primary its letter too once a companion is called "<base> B"
+        lettered = {int(sid_arr[i]) for i in comp_of if name_en[i] and _COMP_RE.search(name_en[i])}
+        for i, c in comp_of.items():
+            k = int(sid_arr[i])
+            if k in prim_name and k in lettered and name_en[i] == prim_name[k][0] and (flags0[i] & Flag.SYSTEM_PRIMARY):
+                name_en[i] = f"{name_en[i]} {c}"
+                if name_de[i]:
+                    name_de[i] = f"{name_de[i]} {c}"
         log.info("naming: %d system components named after their primary", renamed)
 
     s["name_rank"] = name_rank

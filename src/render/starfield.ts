@@ -43,7 +43,10 @@ void main() {
   float px = 2.0 * aSize * uSizeMul * uScale / depth;
   float intensity = 1.0;
   if (px < uMinPx) {
-    intensity = max(px / uMinPx, uMinAlpha);
+    // stars that would be smaller than the minimum sprite are drawn at the minimum size but
+    // dimmed roughly like their apparent brightness, down to a density-dependent floor
+    float f = px / uMinPx;
+    intensity = max(f * sqrt(f), uMinAlpha);
     px = uMinPx;
   }
   px = min(px, uMaxPx);

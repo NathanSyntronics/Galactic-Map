@@ -99,6 +99,22 @@ def external_names(s: pd.DataFrame, iau_names: pd.DataFrame) -> dict[int, dict]:
     return ext
 
 
+def _write_debug_table(s: pd.DataFrame) -> None:
+    """Nearby stars with their merged attributes, for inspection (pipeline/build/stars_100pc.parquet)."""
+    cols = [c for c in (
+        "x", "y", "z", "dist_pc", "dist_err", "plx", "plx_err", "plx_src", "ra", "dec", "epoch", "gaia", "hip", "hd",
+        "tyc", "gj", "census_name", "common_name", "proper", "simbad_main_id", "simbad_otype", "spect", "teff", "absmag",
+        "logl", "flags", "system_id", "name_rank", "name_en", "name_de", "desig_cat", "desig_str",
+    ) if c in s]
+    d = s.loc[s["dist_pc"] < 100, cols].copy()
+    for c in d.columns:
+        if d[c].dtype == object:
+            d[c] = d[c].astype(str)
+    out = Path(__file__).resolve().parents[1] / "build"
+    out.mkdir(exist_ok=True)
+    d.to_parquet(out / "stars_100pc.parquet", index=False)
+
+
 def build(out: Path, refresh: bool = False, capacity: int = 4096, limit: int | None = None, use_simbad: bool = True) -> dict:
     t0 = time.time()
     phot = Photometry(load_mamajek(fetch(MAMAJEK_URL, MAMAJEK_FILE, refresh=refresh)))
@@ -147,6 +163,7 @@ def build(out: Path, refresh: bool = False, capacity: int = 4096, limit: int | N
     s.loc[sun, ["name_rank", "name_en", "name_de", "desig_cat", "desig_str"]] = [Rank.IAU, "Sun", "Sonne", Desig.STRING, "Sun"]
     s.loc[sun, ["x", "y", "z", "dist_err"]] = 0.0
     sys_table = systems.system_table(s)
+    _write_debug_table(s)
 
     stats = {
         "stars": int(len(s)),

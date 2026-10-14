@@ -16,6 +16,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from scipy.spatial import cKDTree
+
+from ..coords import propagate, unit_vectors
 from ..download import CACHE_DIR, exact_int64, tap_sync
 
 log = logging.getLogger(__name__)
@@ -108,6 +111,40 @@ def attach(stars: pd.DataFrame, basic: pd.DataFrame, ident: pd.DataFrame) -> tup
     sh = stars["hip"].astype("Int64")
     m2 = (row_oid < 0) & sh.isin(h_oid.index).to_numpy()
     row_oid[m2] = h_oid.loc[sh[m2]].to_numpy()
+    # Remaining nearby stars (brown dwarfs and others without Gaia DR3 / HIP ids) by position:
+    # SIMBAD coordinates are ICRS at epoch J2000; our rows carry their own epoch and proper motion.
+    pos_matched = 0
+    plx = stars["plx"].to_numpy(float)
+    todo = np.nonzero((row_oid < 0) & (plx > MIN_PLX * 0.9))[0]
+    taken = set(int(v) for v in row_oid[row_oid >= 0])
+    cand = basic[~basic["oid"].isin(taken)].copy()
+    cand["ra_f"] = pd.to_numeric(cand["ra"], errors="coerce")
+    cand["dec_f"] = pd.to_numeric(cand["dec"], errors="coerce")
+    cand = cand.dropna(subset=["ra_f", "dec_f"])
+    if len(todo) and len(cand):
+        tree = cKDTree(unit_vectors(cand["ra_f"].to_numpy(), cand["dec_f"].to_numpy()))
+        ra, dec = propagate(
+            stars["ra"].to_numpy(float)[todo], stars["dec"].to_numpy(float)[todo],
+            stars["pmra"].to_numpy(float)[todo], stars["pmdec"].to_numpy(float)[todo],
+            2000.0 - stars["epoch"].to_numpy(float)[todo],
+        )
+        dist, k = tree.query(unit_vectors(ra, dec), distance_upper_bound=3.0 / 206264.806)
+        cplx = pd.to_numeric(cand["plx_value"], errors="coerce").to_numpy()
+        coid = cand["oid"].to_numpy()
+        for j, i in enumerate(todo):
+            if not np.isfinite(dist[j]):
+                continue
+            p_s = cplx[k[j]]
+            if np.isfinite(p_s) and abs(p_s - plx[i]) > 0.2 * plx[i]:
+                continue
+            o = int(coid[k[j]])
+            if o in taken:
+                continue
+            row_oid[i] = o
+            taken.add(o)
+            pos_matched += 1
+    log.info("SIMBAD: %d further stars matched by position", pos_matched)
+
     # one SIMBAD object per star row (if two rows claim the same object, the first wins)
     seen: set[int] = set()
     for i in np.nonzero(row_oid >= 0)[0]:

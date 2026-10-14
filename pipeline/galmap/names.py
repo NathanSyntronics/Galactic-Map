@@ -233,6 +233,9 @@ def classify_name(name: str) -> int:
         return Rank.SURVEY
     if re.search(r"\d{5,}", s) or re.match(r"^[A-Z0-9]{2,}[\s+\-]?[A-Z]?\d", s):
         return Rank.OTHER
+    # common names practically never contain numbers ("vMA 2", "Steph 1") – treat as catalogue names
+    if re.search(r"\d", s):
+        return Rank.SURVEY
     return Rank.COMMON
 
 

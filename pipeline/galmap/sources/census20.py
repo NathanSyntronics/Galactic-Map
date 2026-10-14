@@ -164,6 +164,8 @@ def load(refresh: bool = False) -> pd.DataFrame:
         for c in col_group:
             df[c] = vals[c]
 
+    _propagate_to_primary_leaf(df, parent)
+
     sun = df["census_name"].eq("Sun")
     df = df[~sun].copy()
     df["system_size"] = df.groupby("system_row")["is_leaf"].transform("sum")
@@ -180,6 +182,57 @@ def load(refresh: bool = False) -> pd.DataFrame:
         len(df), int(df["is_leaf"].sum()), int((df["brown_dwarf"] & df["is_leaf"]).sum()), int((df["white_dwarf"] & df["is_leaf"]).sum()),
     )
     return df.reset_index(drop=True)
+
+
+def _leaf_component(name: str) -> str | None:
+    m = re.search(r"\s([A-H][a-c]?)$", name)
+    return m.group(1) if m else None
+
+
+def _propagate_to_primary_leaf(df: pd.DataFrame, parent: np.ndarray) -> None:
+    """Names and HIP numbers given only on a system row ("alpha CMi AB": Procyon (A), * alf CMi,
+    HIP 37279) are moved to the component they belong to: the one named in a "(A)"-style marker,
+    otherwise the first (primary) leaf below the system row."""
+    n = len(df)
+    children: dict[int, list[int]] = {}
+    for i in range(n):
+        if parent[i] >= 0:
+            children.setdefault(int(parent[i]), []).append(i)
+
+    def leaves_below(i: int) -> list[int]:
+        out, stack = [], [i]
+        while stack:
+            k = stack.pop()
+            ch = children.get(k)
+            if not ch:
+                out.append(k)
+            else:
+                stack.extend(reversed(ch))
+        return out
+
+    is_leaf = df["is_leaf"].to_numpy()
+    moved = 0
+    for i in np.nonzero(~is_leaf)[0]:
+        leaves = leaves_below(int(i))
+        if not leaves:
+            continue
+        cn = df.at[i, "common_name"]
+        target = leaves[0]
+        if isinstance(cn, str):
+            m = re.search(r"\(([A-H][a-c]?)\)\s*$", cn)
+            if m:
+                for lf in leaves:
+                    if _leaf_component(df.at[lf, "census_name"]) == m.group(1):
+                        target = lf
+                        break
+        for col in ("common_name", "bayer_flamsteed", "var_name", "hd_name", "hr_name"):
+            v = df.at[i, col]
+            if isinstance(v, str) and not isinstance(df.at[target, col], str):
+                df.at[target, col] = v
+                moved += 1
+        if pd.notna(df.at[i, "hip"]) and pd.isna(df.at[target, "hip"]) and pd.isna(df.at[target, "gaia"]):
+            df.at[target, "hip"] = df.at[i, "hip"]
+    log.debug("census: %d system-level names moved to components", moved)
 
 
 def strip_component_note(name: str | None) -> str | None:

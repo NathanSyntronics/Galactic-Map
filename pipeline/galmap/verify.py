@@ -39,7 +39,7 @@ REFERENCE = {
 # stars that must exist (by any name in the search index), optionally with flags
 MUST_EXIST = {
     "Luhman 16": Flag.BROWN_DWARF,
-    "WISE 0855−0714": Flag.BROWN_DWARF,
+    "WISE 0855": Flag.BROWN_DWARF,
     "Sirius B": Flag.WHITE_DWARF,
     "Teegarden's Star": 0,
 }

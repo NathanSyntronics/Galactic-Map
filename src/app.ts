@@ -622,6 +622,8 @@ export class App {
     const h = this.renderer.domElement.clientHeight || window.innerHeight;
     u.uScale.value = (h * this.renderer.getPixelRatio()) / (2 * Math.tan(MathUtils.degToRad(this.camera.fov) / 2));
     u.uPixelRatio.value = this.renderer.getPixelRatio();
+    // the more stars are in view, the fainter the faintest ones, so dense regions do not saturate
+    u.uMinAlpha.value = MathUtils.clamp(0.55 * Math.sqrt(2500 / Math.max(this.inView, 1)), 0.035, 0.55);
     u.uMinPx.value = 2.6 * this.renderer.getPixelRatio();
     u.uMaxPx.value = 64 * this.renderer.getPixelRatio();
 
