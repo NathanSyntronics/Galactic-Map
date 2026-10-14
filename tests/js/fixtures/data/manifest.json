@@ -1,0 +1,39 @@
+{
+ "format": "galmap-octree",
+ "version": 1,
+ "generated": "2026-10-14T14:48:16Z",
+ "units": "ly",
+ "frame": "galactic-heliocentric",
+ "root": {
+  "center": [
+   -0.5912,
+   0.4136,
+   -0.2488
+  ],
+  "halfSize": 8.0
+ },
+ "capacity": 4096,
+ "starCount": 4,
+ "nodeCount": 1,
+ "packs": [
+  "n/p000.bin"
+ ],
+ "nodes": [
+  [
+   "r",
+   4,
+   328,
+   0,
+   0,
+   0
+  ]
+ ],
+ "sources": [
+  {
+   "key": "fixture",
+   "title": "test fixture"
+  }
+ ],
+ "params": {},
+ "stats": {}
+}
