@@ -296,6 +296,7 @@ export class App {
             rank: f & Flag.SUN ? 0 : name!.rank,
             logL: starLogL(d, i),
             sun: (f & Flag.SUN) !== 0,
+            sys: d.systems.get(i),
           });
         } else if (K > 0) {
           const ex = x - cx;

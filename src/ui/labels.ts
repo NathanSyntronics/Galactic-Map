@@ -11,6 +11,8 @@ export interface LabelCandidate {
   rank: number;
   logL: number;
   sun?: boolean;
+  /** System id for members of multiple systems. */
+  sys?: number;
 }
 
 interface Placed {
@@ -22,6 +24,25 @@ interface Placed {
 
 // label priority bonus by name rank (see docs/DATA_FORMAT.md)
 const RANK_BONUS = [4, 3.5, 3, 2.6, 2.3, 2.0, 1.6, 1.0];
+// components of a system closer than this on screen share one label ("Sirius" for Sirius A + B)
+const MERGE_PX = 18;
+const SUB_COMPONENT = /(\s[A-H])[a-c]$/;
+const COMPONENT = /\s[A-H][a-c]?$/;
+
+/**
+ * Common name of system components shown as one label: "Sirius A" + "Sirius B" -> "Sirius",
+ * "Eps Indi Ba" + "Bb" -> "Eps Indi B". With `whole` false (other parts of the system have labels
+ * of their own) only sub-component letters are dropped.
+ */
+export function sharedName(names: string[], whole = true): string | null {
+  const strips = [(n: string) => n.replace(SUB_COMPONENT, '$1')];
+  if (whole) strips.unshift((n: string) => n.replace(COMPONENT, ''));
+  for (const strip of strips) {
+    const base = strip(names[0]);
+    if (names.every((n) => strip(n) === base)) return base;
+  }
+  return null;
+}
 
 /** 2-D canvas overlay that places non-overlapping star names. */
 export class LabelLayer {
@@ -118,7 +139,7 @@ export class LabelLayer {
     if (!opts.enabled && this.selectedKey === null) return;
 
     this.camPos.copy(camera.position);
-    const scored: { c: LabelCandidate; score: number; x: number; y: number; fade: number }[] = [];
+    const scored: { c: LabelCandidate; score: number; x: number; y: number; fade: number; text: string; merged?: string[] }[] = [];
     for (const c of this.candidates) {
       const selected = c.key === this.selectedKey;
       if (!opts.enabled && !selected) continue;
@@ -132,15 +153,42 @@ export class LabelLayer {
       score += c.rank < RANK_BONUS.length ? RANK_BONUS[c.rank] : 0;
       if (c.sun) score += 100;
       if (selected) score += 1000;
-      scored.push({ c, score, x: s[0], y: s[1], fade });
+      scored.push({ c, score, x: s[0], y: s[1], fade, text: c.text });
     }
     scored.sort((a, b) => b.score - a.score);
+
+    // Merge the labels of system components that coincide on screen.
+    const leaders = new Map<number, (typeof scored)[number][]>();
+    const visible: typeof scored = [];
+    for (const it of scored) {
+      const sys = it.c.sys;
+      if (sys === undefined || it.c.rank >= 99 || it.c.key === this.selectedKey) {
+        visible.push(it);
+        continue;
+      }
+      const group = leaders.get(sys) ?? [];
+      const leader = group.find((l) => Math.abs(l.x - it.x) < MERGE_PX && Math.abs(l.y - it.y) < MERGE_PX);
+      if (leader) {
+        (leader.merged ??= [leader.c.text]).push(it.c.text);
+        continue;
+      }
+      group.push(it);
+      leaders.set(sys, group);
+      visible.push(it);
+    }
+    // A label that stands for its whole system drops the component letter ("Alpha Centauri").
+    for (const it of visible) {
+      const sys = it.c.sys;
+      if (sys === undefined || it.c.rank >= 99 || it.c.key === this.selectedKey) continue;
+      const whole = leaders.get(sys)!.length === 1;
+      it.text = sharedName(it.merged ?? [it.c.text], whole) ?? it.c.text;
+    }
 
     let count = 0;
     let designationCount = 0;
     // catalogue designations get at most a third of the label budget
     const maxDesignations = Math.max(3, Math.floor(opts.maxLabels / 3));
-    for (const it of scored) {
+    for (const it of visible) {
       const named = it.c.rank < 99;
       if (it.c.key !== this.selectedKey) {
         if (count >= opts.maxLabels) continue;
@@ -152,7 +200,7 @@ export class LabelLayer {
         : named
           ? '12px system-ui, sans-serif'
           : '10.5px system-ui, sans-serif';
-      const tw = this.measure(font, it.c.text);
+      const tw = this.measure(font, it.text);
       const r = { x: it.x + 6, y: it.y - 8, w: tw + 4, h: 15 };
       if (!selected && overlaps(r)) continue;
       placed.push(r);
@@ -163,9 +211,9 @@ export class LabelLayer {
       ctx.globalAlpha = it.fade;
       ctx.lineWidth = 3;
       ctx.strokeStyle = 'rgba(2, 4, 12, 0.85)';
-      ctx.strokeText(it.c.text, it.x + 7, it.y);
+      ctx.strokeText(it.text, it.x + 7, it.y);
       ctx.fillStyle = selected ? '#ffd27a' : it.c.sun ? '#fff1b8' : named ? 'rgba(232, 238, 250, 0.95)' : 'rgba(160, 178, 205, 0.85)';
-      ctx.fillText(it.c.text, it.x + 7, it.y);
+      ctx.fillText(it.text, it.x + 7, it.y);
       ctx.globalAlpha = 1;
       if (!it.c.sun && named) this.labelledPositions.push(it.c.pos);
     }

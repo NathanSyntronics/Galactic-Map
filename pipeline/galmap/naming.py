@@ -390,7 +390,11 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
                 continue
             # also unify spellings: "Kruger 60 B" next to "Krüger 60 A"
             respelled = name_en[i] is not None and name_en[i] != f"{base_en} {c}" and _fold(_COMP_RE.sub("", name_en[i])) == _fold(base_en)
-            if name_rank[i] > base_rank or name_en[i] is None or respelled:
+            # companions with a name of their own keep it ("Proxima Centauri", "Capella H")
+            own_name = name_en[i] is not None and (
+                name_rank[i] <= Rank.COMMON or _fold(name_en[i]).startswith(_fold(base_en) + " ")
+            )
+            if (name_rank[i] > base_rank and not own_name) or name_en[i] is None or respelled:
                 old = name_en[i]
                 name_en[i] = f"{base_en} {c}"
                 name_de[i] = f"{base_de} {c}" if base_de else None
@@ -409,6 +413,9 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
                 if name_de[i] and not _COMP_RE.search(name_de[i]):
                     name_de[i] = f"{name_de[i]} {c}"
         log.info("naming: %d system components named after their primary", renamed)
+        for i in comp_of:
+            if alt[i] and name_en[i] in alt[i]:
+                alt[i] = [a for a in alt[i] if a != name_en[i]] or None
 
     s["name_rank"] = name_rank
     s["name_en"] = name_en
@@ -422,12 +429,12 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
     if "system_id" in s:
         sid = s["system_id"].to_numpy()
         prim = np.nonzero((flags & Flag.SYSTEM_PRIMARY) != 0)[0]
-        named_members = pd.Series(name_rank <= Rank.COMMON).groupby(sid).sum()
         for i in prim:
             k = int(sid[i])
             en, de = name_en[i], name_de[i]
-            if en and name_rank[i] <= Rank.COMMON and named_members.get(k, 0) <= 1 and not _COMP_RE.search(en):
-                sys_en[i], sys_de[i] = en, de
+            if en and name_rank[i] <= Rank.COMMON:  # "Sirius A" -> system "Sirius"
+                sys_en[i] = _COMP_RE.sub("", en)
+                sys_de[i] = _COMP_RE.sub("", de) if de else None
             elif k in bayer_sys:
                 sys_en[i], sys_de[i] = bayer_sys[k]
             elif en:
