@@ -11,7 +11,7 @@ import logging
 import numpy as np
 import pandas as pd
 
-from ..download import CACHE_DIR, fetch
+from ..download import CACHE_DIR, exact_int64, fetch
 
 log = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ def load(refresh: bool = False) -> pd.DataFrame:
     names = [c[0] for c in COLSPECS]
     specs = [(a - 1, b) for _, a, b in COLSPECS]
     df = pd.read_fwf(path, colspecs=specs, names=names, dtype=str, compression="gzip", keep_default_na=False)
-    df["source_id"] = pd.to_numeric(df["source_id"]).astype("Int64")
+    df["source_id"] = exact_int64(df["source_id"])
     for c in names:
         if c not in ("source_id", "name_2mass"):
             df[c] = pd.to_numeric(df[c].replace("", np.nan), errors="coerce")

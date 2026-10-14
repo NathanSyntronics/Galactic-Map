@@ -151,11 +151,16 @@ def prettify_simbad(ident: str, lang: str = "en") -> str | None:
 
 # --- ranking of arbitrary name strings ---------------------------------------------------------
 
+# historical discovery / catalogue names that are used as the common name of nearby stars
 _TRADITIONAL = re.compile(
     r"^(Wolf|Ross|Lalande|Lacaille|Groombridge|Kruger|Krüger|Struve|Luyten|Kapteyn|van Maanen|Van Maanen|Stein|"
-    r"Luhman|Scholz|Teegarden|Gould|Innes|Stephenson|Giclas|Kuiper|Wolf-Rayet|Lacaille|Lal|Gliese-Jahreiß|"
-    r"LHS|LP|LTT|NLTT|L|G|SCR|DEN|DENIS|UGPS|WISE|WISEA|WISEP|CWISE|SIPS|APMPM|LSPM|PM|BD|CD|CPD|Ton|Feige|EG|GD|WD|"
-    r"TVLM|LSR|ULAS|SDSS|VHS|PSO|2MASS)\b",
+    r"Luhman|Scholz|Teegarden|Gould|Innes|Stephenson|Kuiper|Przybylski|Plaskett|Babcock|Campbell|Barnard)\s+\d",
+)
+# proper-motion and survey catalogues (LHS 292, LP 816-60, G 99-49, BD+05 1668, WISE 0855-0714, ...)
+_SURVEY = re.compile(
+    r"^(LHS|LP|LTT|NLTT|LFT|LSPM|PM|L|G|GD|EG|LAWD|EGGR|WD|BD|CD|CPD|SCR|DEN|DENIS|UGPS|WISE|WISEA|WISEP|WISEU|"
+    r"CWISE|CWISER|2MASS|2MASSW|2MASSI|SDSS|SDSSp|ULAS|VHS|PSO|SIPS|APMPM|LEHPM|WT|UPM|Karmn|Ton|Feige|TVLM|LSR|"
+    r"TRAPPIST|K2|Kepler|KOI|TOI|TIC|HAT-P|WASP|XO|TrES|KELT|CoRoT|LHS|GJ)\b[\s\-+]?"
 )
 _GJ = re.compile(r"^(GJ|Gliese|Gl|Wo)\s*\d", re.IGNORECASE)
 _CATALOG = [
@@ -165,6 +170,31 @@ _CATALOG = [
     (re.compile(r"^TYC\s*\d+"), Rank.TYC),
     (re.compile(r"^Gaia\s+(DR\d|EDR3)\s+\d+"), Rank.GAIA),
 ]
+
+_GREEK_WORDS = {en.lower(): k for keys, en, _ in _GREEK for k in keys[:1]}
+_ABBR_BAYER = re.compile(r"^([A-Za-z]{2,7})\.?(\d{0,2})\s+([A-Za-z]{3})(?:\s+([A-H][a-c]?))?$")
+_ABBR_FLAM = re.compile(r"^(\d{1,3})\s+([A-Za-z]{3})(?:\s+([A-H][a-c]?))?$")
+_ABBR_VAR = re.compile(r"^(V\d{3,4}|[A-Z]{1,2})\s+([A-Za-z]{3})(?:\s+([A-H][a-c]?))?$")
+
+
+def expand_abbreviated(name: str, lang: str = "en") -> str | None:
+    """'tau Cet' -> 'Tau Ceti', 'epsilon Eri' -> 'Epsilon Eridani', '61 Cyg A' -> '61 Cygni A',
+    'rho01 Cnc A' -> 'Rho¹ Cancri A'. None if the name is not an abbreviated designation."""
+    s = name.strip()
+    m = _ABBR_BAYER.match(s)
+    if m and constellation(m.group(3)):
+        word = m.group(1).lower()
+        key = _GREEK_WORDS.get(word, word)
+        if key in GREEK:
+            return bayer_name(key, m.group(3), m.group(2) or None, m.group(4), lang)
+    m = _ABBR_FLAM.match(s)
+    if m and constellation(m.group(2)):
+        return flamsteed_name(m.group(1), m.group(2), m.group(3))
+    m = _ABBR_VAR.match(s)
+    if m and constellation(m.group(2)) and m.group(1) not in ("NAME",):
+        out = f"{m.group(1)} {CONSTELLATIONS[constellation(m.group(2))]}"
+        return out + (f" {m.group(3)}" if m.group(3) else "")
+    return None
 
 
 def classify_name(name: str) -> int:
@@ -183,18 +213,21 @@ def classify_name(name: str) -> int:
                 return Rank.FLAMSTEED
             if re.fullmatch(r"V\d+|[A-Z]{1,2}", first):
                 return Rank.VARIABLE
+            if re.fullmatch(r"[a-zA-Z]", first):  # Latin Bayer letters: "p Eridani"
+                return Rank.BAYER
     if _GJ.match(s):
         return Rank.GJ
     for rx, r in _CATALOG:
         if rx.match(s):
             return r
     if _TRADITIONAL.match(s):
-        # survey-style names (2MASS J..., WISEA J...) are not "traditional"
-        if re.match(r"^(2MASS|WISEA?|WISEP|CWISE|ULAS|SDSS|VHS|PSO)\s*J?\d{4}", s) and len(s) > 16:
-            return Rank.OTHER
         return Rank.TRADITIONAL
-    # anything else that does not look like a catalogue code counts as a common name
-    if re.search(r"\d{4,}", s) or re.match(r"^[A-Z0-9]{2,}[\s+\-]?[A-Z]?\d", s):
+    if _SURVEY.match(s):
+        # full-precision survey designations (2MASS J00044144-2058298) are not names
+        if re.search(r"J\d{4,}", s) and len(s) > 18:
+            return Rank.OTHER
+        return Rank.SURVEY
+    if re.search(r"\d{5,}", s) or re.match(r"^[A-Z0-9]{2,}[\s+\-]?[A-Z]?\d", s):
         return Rank.OTHER
     return Rank.COMMON
 

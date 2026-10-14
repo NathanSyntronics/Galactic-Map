@@ -7,7 +7,7 @@ export interface LabelCandidate {
   /** World position. */
   pos: Vector3;
   text: string;
-  /** Name rank (0 = IAU name … 6 = GJ); 99 = catalogue designation only. */
+  /** Name rank (0 = IAU name … 7 = survey catalogue); 99 = catalogue designation only. */
   rank: number;
   logL: number;
   sun?: boolean;
@@ -20,7 +20,8 @@ interface Placed {
   h: number;
 }
 
-const RANK_BONUS = [4, 3.5, 3, 2.6, 2.3, 2.0, 1.6];
+// label priority bonus by name rank (see docs/DATA_FORMAT.md)
+const RANK_BONUS = [4, 3.5, 3, 2.6, 2.3, 2.0, 1.6, 1.0];
 
 /** 2-D canvas overlay that places non-overlapping star names. */
 export class LabelLayer {

@@ -13,12 +13,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from ..download import CACHE_DIR, tap_sync
+from ..download import CACHE_DIR, exact_int64, tap_sync
 
 log = logging.getLogger(__name__)
 
 GAIA_TAP = "https://gea.esac.esa.int/tap-server/tap"
 MAXREC = 1_000_000
+CHUNK_ROWS = 25_000
 MAX_SOURCE_ID = 6_917_528_997_577_384_320  # 2^35 * 12 * 4^12 (largest HEALPix level-12 index + 1)
 COLUMNS = (
     "g.source_id, g.ra, g.dec, g.parallax, g.parallax_error, g.pmra, g.pmdec, g.ruwe, "
@@ -40,6 +41,31 @@ QUERIES = {
 }
 
 
+def _count(name: str, lo: int, hi: int) -> int:
+    table = {"tycho2": "gaiadr3.tycho2tdsc_merge_best_neighbour", "hipparcos2": "gaiadr3.hipparcos2_best_neighbour"}[name]
+    q = f"SELECT COUNT(*) AS n FROM {table} AS x WHERE x.source_id >= {lo} AND x.source_id < {hi}"
+    return int(tap_sync(GAIA_TAP, q, timeout=300)["n"].iloc[0])
+
+
+def _fetch_range(name: str, lo: int, hi: int) -> pd.DataFrame:
+    """Fetch one source_id range, splitting it until each piece is small enough to arrive complete.
+
+    The anonymous Gaia TAP service silently truncates large synchronous results, so every
+    piece is checked against a COUNT(*) of the same range.
+    """
+    n = _count(name, lo, hi)
+    if n == 0:
+        return pd.DataFrame()
+    if n > CHUNK_ROWS and hi - lo > 1:
+        mid = lo + (hi - lo) // 2
+        return pd.concat([_fetch_range(name, lo, mid), _fetch_range(name, mid, hi)], ignore_index=True)
+    q = QUERIES[name].format(cols=COLUMNS, lo=lo, hi=hi)
+    df = tap_sync(GAIA_TAP, q, timeout=900, maxrec=MAXREC)
+    if len(df) != n:
+        raise RuntimeError(f"Gaia {name} range [{lo}, {hi}): got {len(df)} rows, expected {n}")
+    return df
+
+
 def fetch_xmatch(name: str, chunks: int, cache: Path | None = None, refresh: bool = False) -> pd.DataFrame:
     cache = cache or CACHE_DIR / "gaia"
     out = cache / f"gaia_dr3_{name}.parquet"
@@ -47,23 +73,20 @@ def fetch_xmatch(name: str, chunks: int, cache: Path | None = None, refresh: boo
         return pd.read_parquet(out)
     part_dir = cache / f"{name}_parts"
     part_dir.mkdir(parents=True, exist_ok=True)
-    edges = np.linspace(0, MAX_SOURCE_ID, chunks + 1).astype(np.uint64)
+    edges = [int(v) for v in np.linspace(0, MAX_SOURCE_ID, chunks + 1)]
     frames = []
     for i in range(chunks):
         part = part_dir / f"part{i:03d}.csv"
         if part.exists() and not refresh:
             df = pd.read_csv(part, dtype=str, keep_default_na=False)
         else:
-            q = QUERIES[name].format(cols=COLUMNS, lo=int(edges[i]), hi=int(edges[i + 1]))
-            # MAXREC must be raised explicitly: the service silently truncates at 50,000 rows otherwise
-            df = tap_sync(GAIA_TAP, q, timeout=900, maxrec=MAXREC)
-            if len(df) >= MAXREC:
-                raise RuntimeError(f"Gaia chunk {i} hit the row limit; use more chunks")
+            df = _fetch_range(name, edges[i], edges[i + 1])
             df.to_csv(part, index=False)
         log.info("gaia %s chunk %d/%d: %d rows", name, i + 1, chunks, len(df))
-        frames.append(df)
+        if len(df):
+            frames.append(df)
     df = pd.concat(frames, ignore_index=True)
-    df["source_id"] = pd.to_numeric(df["source_id"]).astype("Int64")
+    df["source_id"] = exact_int64(df["source_id"])
     for c in (
         "ra", "dec", "parallax", "parallax_error", "pmra", "pmdec", "ruwe", "phot_g_mean_mag", "bp_rp",
         "nu_eff_used_in_astrometry", "pseudocolour", "ecl_lat", "astrometric_params_solved",
@@ -77,7 +100,7 @@ def fetch_xmatch(name: str, chunks: int, cache: Path | None = None, refresh: boo
 
 def load(refresh: bool = False) -> pd.DataFrame:
     """Gaia DR3 rows (deduplicated by source_id) for all Tycho-2 and Hipparcos cross-matches."""
-    tyc = fetch_xmatch("tycho2", chunks=24, refresh=refresh)
+    tyc = fetch_xmatch("tycho2", chunks=48, refresh=refresh)
     hip = fetch_xmatch("hipparcos2", chunks=4, refresh=refresh)
     cols = [
         "source_id", "ra", "dec", "parallax", "parallax_error", "pmra", "pmdec", "ruwe", "phot_g_mean_mag", "bp_rp",

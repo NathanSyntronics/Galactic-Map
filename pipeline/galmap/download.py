@@ -104,3 +104,19 @@ def cached_tap(endpoint: str, query: str, dest: Path, *, refresh: bool = False, 
     dest.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(dest, index=False)
     return df
+
+
+def exact_int64(s: pd.Series) -> pd.Series:
+    """Parse integer strings (e.g. 19-digit Gaia source_ids) exactly into nullable Int64.
+
+    pd.to_numeric silently goes through float64 when values are missing, which corrupts
+    integers above 2**53.
+    """
+
+    def conv(v):
+        if v is None or v is pd.NA or (isinstance(v, float) and v != v):
+            return pd.NA
+        t = str(v).strip()
+        return int(t) if t.lstrip("-").isdigit() else pd.NA
+
+    return pd.Series([conv(v) for v in s], index=s.index, dtype="Int64")

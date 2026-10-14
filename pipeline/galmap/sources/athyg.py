@@ -13,7 +13,7 @@ import re
 import numpy as np
 import pandas as pd
 
-from ..download import CACHE_DIR, fetch
+from ..download import CACHE_DIR, exact_int64, fetch
 
 log = logging.getLogger(__name__)
 
@@ -62,7 +62,7 @@ def load(refresh: bool = False) -> pd.DataFrame:
     )
     for c in ("hyg", "hip", "hd", "hr", "flam", "id"):
         df[c] = pd.to_numeric(df[c], errors="coerce").astype("Int64")
-    df["gaia"] = pd.to_numeric(df["gaia"].replace("", pd.NA), errors="coerce").astype("Int64")
+    df["gaia"] = exact_int64(df["gaia"])
     for c in str_cols:
         df[c] = df[c].replace("", pd.NA)
 

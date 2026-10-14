@@ -43,7 +43,7 @@ MAGIC = 0x4D4C4147
 VERSION = 1
 HEADER_BYTES = 64
 MAX_DEPTH = 24
-NAMED_MAX_RANK = 6
+NAMED_MAX_RANK = 7
 
 # Offset of the root cube centre relative to the Sun, as a fraction of the root half size.
 # Keeps the Sun (and the dense, well-surveyed region around it) away from the split planes
@@ -132,7 +132,7 @@ def _i16(values: np.ndarray, scale: float) -> np.ndarray:
     return v.astype("<i2")
 
 
-def encode_node(node: Node, cols: dict[str, np.ndarray]) -> bytes:
+def encode_node(node: Node, cols: dict[str, np.ndarray], sys_info: dict[int, list] | None = None) -> bytes:
     idx = node.idx
     n = len(idx)
     pos = cols["xyz"][idx].astype("<f4")
@@ -188,6 +188,10 @@ def encode_node(node: Node, cols: dict[str, np.ndarray]) -> bytes:
         extra["n"] = names
     if systems:
         extra["s"] = systems
+        if sys_info:
+            table = {str(k): sys_info[k] for k in sorted(set(systems.values())) if k in sys_info}
+            if table:
+                extra["S"] = table
     if spect:
         extra["t"] = spect
     extra_bytes = json.dumps(extra, ensure_ascii=False, separators=(",", ":")).encode("utf-8") if extra else b""
@@ -287,8 +291,14 @@ def write_dataset(
         packs.append(name)
         current = bytearray()
 
+    sys_info: dict[int, list] = {}
+    if systems is not None and len(systems):
+        for row in systems.itertuples(index=False):
+            de = row.name_de if isinstance(row.name_de, str) and row.name_de != row.name_en else None
+            en = row.name_en if isinstance(row.name_en, str) else None
+            sys_info[int(row.system_id)] = [en, de, int(row.members)]
     for node in iter_nodes(root):
-        blob = encode_node(node, cols)
+        blob = encode_node(node, cols, sys_info)
         if current and len(current) + len(blob) > pack_bytes:
             flush()
         offset = len(current)

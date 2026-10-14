@@ -12,8 +12,6 @@ import { LabelLayer, type LabelCandidate } from './ui/labels';
 import { SettingsPanel } from './ui/panel';
 import { SearchBox, SearchIndex, type SearchHit, type SearchTuple } from './ui/search';
 
-type SystemTuple = [string, string | null, number, number, number, number];
-
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
@@ -44,7 +42,7 @@ export class App {
   private manifest: Manifest | null = null;
   private octree: Octree | null = null;
   private loader: NodeLoader | null = null;
-  private systems: Record<string, SystemTuple> = {};
+  private searchLoaded: Promise<void> | null = null;
   private selected: StarInfo | null = null;
   private pendingSelect: SearchHit | null = null;
 
@@ -107,6 +105,7 @@ export class App {
     container.appendChild(this.dialog);
 
     this.search.onPick = (hit) => this.pickSearch(hit);
+    this.search.onFocus = () => void this.loadSearch();
 
     this.nav.onChange = () => {
       this.lodDirty = true;
@@ -142,29 +141,24 @@ export class App {
     this.loader.onEvicted = (path) => this.starfield.remove(path);
     this.lodDirty = true;
     this.loop();
-    void this.loadSearch();
-    void this.loadSystems();
+
   }
 
-  private async loadSearch(): Promise<void> {
-    try {
-      const res = await fetch(`${this.baseUrl}search.json`);
-      if (!res.ok) return;
-      this.searchIndex.load((await res.json()) as SearchTuple[]);
-      if (this.search.input.value) this.search.update();
-    } catch (err) {
-      console.warn('search index unavailable', err);
+  /** The search index is loaded on first use of the search box. */
+  private loadSearch(): Promise<void> {
+    if (!this.searchLoaded) {
+      this.searchLoaded = (async () => {
+        try {
+          const res = await fetch(`${this.baseUrl}search.json`);
+          if (!res.ok) return;
+          this.searchIndex.load((await res.json()) as SearchTuple[]);
+          if (this.search.input.value) this.search.update();
+        } catch (err) {
+          console.warn('search index unavailable', err);
+        }
+      })();
     }
-  }
-
-  private async loadSystems(): Promise<void> {
-    try {
-      const res = await fetch(`${this.baseUrl}systems.json`);
-      if (!res.ok) return;
-      this.systems = (await res.json()) as Record<string, SystemTuple>;
-    } catch (err) {
-      console.warn('systems unavailable', err);
-    }
+    return this.searchLoaded;
   }
 
   // ------------------------------------------------------------------ settings
@@ -421,7 +415,7 @@ export class App {
   private starInfo(d: NodeData, i: number): StarInfo {
     const name = d.names.get(i);
     const sysId = d.systems.get(i);
-    const sys = sysId !== undefined ? this.systems[String(sysId)] : undefined;
+    const sys = sysId !== undefined ? d.systemInfo.get(sysId) : undefined;
     return {
       key: `${d.path}:${i}`,
       nameEn: name?.en ?? null,
@@ -438,7 +432,7 @@ export class App {
       specType: d.spectralTypes.get(i) ?? null,
       system:
         sysId !== undefined && sys
-          ? { id: sysId, nameEn: sys[0], nameDe: sys[1], members: sys[2] }
+          ? { id: sysId, nameEn: sys.nameEn ?? designationOf(d, i), nameDe: sys.nameDe, members: sys.members }
           : null,
     };
   }

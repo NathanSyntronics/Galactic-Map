@@ -43,13 +43,17 @@ class Rank:
     TRADITIONAL = 4
     VARIABLE = 5
     GJ = 6
-    HR = 7
-    HIP = 8
-    HD = 9
-    TYC = 10
-    GAIA = 11
-    OTHER = 12
+    SURVEY = 7
+    HR = 8
+    HIP = 9
+    HD = 10
+    TYC = 11
+    GAIA = 12
+    OTHER = 13
     NONE = 99
+
+    # stars with a name of this rank or better get an entry in the name table / search index
+    NAMED_MAX = 7
 
 
 SPEC_CLASSES = "OBAFGKMLTY"
@@ -86,5 +90,9 @@ def is_giant_spect(spect: str | None) -> bool:
         return False
     s = spect.strip()
     # luminosity class follows the subclass: e.g. "K0III", "M2Iab", "B8Ia", "G8III-IV"
-    m = re.match(r"^[OBAFGKM]\s*\d*(?:\.\d+)?\s*(0|Ia\+|Iab|Ia|Ib|III|II|I)(?![V])", s)
+    m = re.match(
+        r"^[OBAFGKM]\s*(?:\d+(?:\.\d+)?)?(?:\s*[-/]\s*[OBAFGKM]?\d+(?:\.\d+)?)?\s*:?\s*"
+        r"(?:0-?Ia|Ia\+|Iab|Ia|Ib|III|II(?![IV])|I(?![IV]))",
+        s,
+    )
     return bool(m)

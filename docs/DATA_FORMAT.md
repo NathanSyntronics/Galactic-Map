@@ -196,6 +196,8 @@ object keys they are strings).
   "n": [ [3, 0, "Sirius", null, ["alf CMa A", "HIP 32349", "HD 48915", "GJ 244 A"]] ],
   // system membership: localIndex -> systemId (key into systems.json)
   "s": { "3": 1201 },
+  // the systems referenced in "s": systemId -> [nameEn, nameDe | null, memberCount]
+  "S": { "1201": ["Sirius", null, 2] },
   // spectral type strings for stars that have one: localIndex -> string
   "t": { "3": "A0mA1Va" }
 }
@@ -211,22 +213,26 @@ object keys they are strings).
 | 1    | other common name (Wikipedia title, SIMBAD `NAME`)           | Barnard's Star          |
 | 2    | Bayer designation                                            | Epsilon Eridani         |
 | 3    | Flamsteed designation                                        | 61 Cygni A              |
-| 4    | traditional / discovery catalogue name                       | Wolf 359, Lalande 21185, Luhman 16 |
+| 4    | historical catalogue / discovery name                        | Wolf 359, Lalande 21185, Luhman 16 |
 | 5    | variable-star designation                                    | EZ Aquarii              |
-| 6    | Gliese / GJ                                                  | GJ 1061                 |
-| 7    | HR                                                           | HR 8832                 |
-| 8    | HIP                                                          | HIP 12345               |
-| 9    | HD                                                           | HD 12345                |
-| 10   | TYC                                                          | TYC 1234-567-1          |
-| 11   | Gaia DR3                                                     | Gaia DR3 …              |
-| 12   | other survey designation (2MASS, WISE, …)                    |                         |
+| 6    | Gliese / GJ                                                  | Gliese 1061             |
+| 7    | proper-motion / survey catalogue                             | LHS 292, LP 816-60, WISE 0855−0714 |
+| 8    | HR                                                           | HR 8832                 |
+| 9    | HIP                                                          | HIP 12345               |
+| 10   | HD                                                           | HD 12345                |
+| 11   | TYC                                                          | TYC 1234-567-1          |
+| 12   | Gaia DR3                                                     | Gaia DR3 …              |
+| 13   | other survey designation (full 2MASS / WISE coordinates, …)  |                         |
 
-Only stars with rank ≤ 6 get an `extra.n` entry; for all others the label is the
-primary designation.
+The display name is the English Wikipedia article title when there is one (it is
+the best available measure of which name is most commonly used), otherwise the
+IAU name, otherwise the best-ranked candidate. Stars whose best name has rank
+≤ 7 get an `extra.n` entry; all others are labelled with their primary
+designation.
 
 ## search.json
 
-Array of named stars (rank ≤ 6):
+Array of named stars (rank ≤ 7):
 
 ```jsonc
 [

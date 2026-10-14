@@ -164,7 +164,7 @@ export class SearchBox {
     }
     this.list.classList.remove('hidden');
     if (this.hits.length === 0) {
-      this.list.appendChild(el('li', 'empty', t('noResults')));
+      this.list.appendChild(el('li', 'empty', this.index.size === 0 ? t('loading') : t('noResults')));
       return;
     }
     this.hits.forEach((h, i) => {
