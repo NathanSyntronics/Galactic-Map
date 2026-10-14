@@ -562,7 +562,11 @@ export class App {
       const [ox, oy, oz] = worldToGalactic(off);
       const f = (x: number) => Number(x.toFixed(3));
       const hash = `#c=${f(tx)},${f(ty)},${f(tz)}&o=${f(ox)},${f(oy)},${f(oz)}&r=${f(this.store.get().radius)}`;
-      if (location.hash !== hash) history.replaceState(null, '', hash);
+      try {
+        if (location.hash !== hash) history.replaceState(null, '', hash);
+      } catch {
+        // some embedding contexts do not allow history changes
+      }
     }, 400);
   }
 

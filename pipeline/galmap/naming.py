@@ -151,7 +151,11 @@ def candidates(row, ext: dict) -> list[Cand]:
         p = prettify_simbad(ident)
         if p:
             de = prettify_simbad(ident, "de")
-            add(p, classify_name(p) if not ident.startswith("NAME ") else min(classify_name(p), Rank.COMMON), P_SIMBAD, de)
+            r = classify_name(p)
+            if r <= Rank.SURVEY:
+                add(p, r, P_SIMBAD, de)
+        else:
+            add_text(ident, P_SIMBAD)
     bf = row.get("bayer_flamsteed")
     if isinstance(bf, str):
         for ident in bf.split("|"):
@@ -419,6 +423,16 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
     for i in np.nonzero(~simple)[0]:
         c, lo, hi, st = primary_designation(row_of(i))
         dc[i], dlo[i], dhi[i], dstr[i] = c, lo, hi, st
+    # Stars known only by a Gaia number get their SIMBAD main identifier (e.g. "LP 816-60") instead.
+    if "simbad_main_id" in s:
+        mid = s["simbad_main_id"].to_numpy(dtype=object)
+        swapped = 0
+        for i in np.nonzero((dc == Desig.GAIA_DR3) & pd.notna(mid))[0]:
+            m = str(mid[i]).strip()
+            if m and not m.startswith("Gaia") and classify_name(m) <= Rank.SURVEY:
+                dc[i], dlo[i], dhi[i], dstr[i] = Desig.STRING, 0, 0, m
+                swapped += 1
+        log.info("naming: %d Gaia-only stars designated by their SIMBAD identifier", swapped)
     s["desig_cat"] = dc
     s["desig_lo"] = dlo
     s["desig_hi"] = dhi

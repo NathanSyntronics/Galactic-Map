@@ -190,6 +190,10 @@ def expand_abbreviated(name: str, lang: str = "en") -> str | None:
     m = _ABBR_FLAM.match(s)
     if m and constellation(m.group(2)):
         return flamsteed_name(m.group(1), m.group(2), m.group(3))
+    m = re.match(r"^([a-zA-Z])\s+([A-Za-z]{3})(?:\s+([A-H][a-c]?))?$", s)
+    if m and constellation(m.group(2)):  # Latin-letter Bayer designation: "e Eri" -> "e Eridani"
+        out = f"{m.group(1)} {CONSTELLATIONS[constellation(m.group(2))]}"
+        return out + (f" {m.group(3)}" if m.group(3) else "")
     m = _ABBR_VAR.match(s)
     if m and constellation(m.group(2)) and m.group(1) not in ("NAME",):
         out = f"{m.group(1)} {CONSTELLATIONS[constellation(m.group(2))]}"

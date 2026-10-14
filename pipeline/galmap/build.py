@@ -20,7 +20,7 @@ from .download import CACHE_DIR, fetch
 from .flags import Desig, Flag, Rank
 from .octree import write_dataset
 from .photometry import MAMAJEK_URL, Photometry, load_mamajek
-from .sources import athyg, census20, gaia, gcns, hyg, iau
+from .sources import athyg, census20, gaia, gcns, hyg, iau, simbad
 
 log = logging.getLogger("galmap.build")
 
@@ -99,7 +99,7 @@ def external_names(s: pd.DataFrame, iau_names: pd.DataFrame) -> dict[int, dict]:
     return ext
 
 
-def build(out: Path, refresh: bool = False, capacity: int = 4096, limit: int | None = None) -> dict:
+def build(out: Path, refresh: bool = False, capacity: int = 4096, limit: int | None = None, use_simbad: bool = True) -> dict:
     t0 = time.time()
     phot = Photometry(load_mamajek(fetch(MAMAJEK_URL, MAMAJEK_FILE, refresh=refresh)))
 
@@ -118,9 +118,31 @@ def build(out: Path, refresh: bool = False, capacity: int = 4096, limit: int | N
     for c in ("brown_dwarf", "white_dwarf"):
         s[c] = s[c].fillna(False).astype(bool)
     s = derive.positions(s)
+
+    # SIMBAD: identifiers, object types and spectral types for everything within ~100 pc
+    sb_idents: dict[int, list[str]] = {}
+    try:
+        if not use_simbad:
+            raise RuntimeError("disabled with --no-simbad")
+        basic, ident = simbad.load(refresh)
+        sb_idents, sb_info = simbad.attach(s, basic, ident)
+        s = pd.concat([s, sb_info], axis=1)
+        no_spt = s["spect"].isna() & s["simbad_sp_type"].notna()
+        s.loc[no_spt, "spect"] = s.loc[no_spt, "simbad_sp_type"]
+        otype = s["simbad_otype"].astype(object)
+        s["brown_dwarf"] = s["brown_dwarf"] | otype.isin(["BD*"]).to_numpy()
+        s["white_dwarf"] = s["white_dwarf"] | otype.isin(["WD*"]).to_numpy()
+        log.info("SIMBAD: spectral types added to %d stars", int(no_spt.sum()))
+    except Exception as err:  # names are a bonus; the map works without SIMBAD
+        log.warning("SIMBAD unavailable, continuing without it: %s", err)
+        s["simbad_main_id"] = None
+
     s = derive.physics(s, phot)
     s = systems.assign_systems(s)
-    s = naming.assign_names(s, external_names(s, iau.load(refresh)))
+    ext = external_names(s, iau.load(refresh))
+    for i, lst in sb_idents.items():
+        ext.setdefault(i, {})["simbad"] = lst
+    s = naming.assign_names(s, ext)
     sun = s["is_sun"].to_numpy()
     s.loc[sun, ["name_rank", "name_en", "name_de", "desig_cat", "desig_str"]] = [Rank.IAU, "Sun", "Sonne", Desig.STRING, "Sun"]
     s.loc[sun, ["x", "y", "z", "dist_err"]] = 0.0
@@ -143,6 +165,7 @@ def build(out: Path, refresh: bool = False, capacity: int = 4096, limit: int | N
         (hyg.SOURCE_INFO, None),
         (GAIA_INFO, None),
         (iau.SOURCE_INFO, None),
+        (simbad.SOURCE_INFO, None),
         (MAMAJEK_INFO, None),
     ):
         entry = dict(info)
@@ -166,9 +189,10 @@ def main() -> None:
     ap.add_argument("--refresh", action="store_true", help="download all catalogues again")
     ap.add_argument("--capacity", type=int, default=4096, help="stars per octree node")
     ap.add_argument("--limit", type=int, default=None, help="use only a random sample of AT-HYG (for testing)")
+    ap.add_argument("--no-simbad", action="store_true", help="skip the SIMBAD name lookup")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
-    build(args.out, refresh=args.refresh, capacity=args.capacity, limit=args.limit)
+    build(args.out, refresh=args.refresh, capacity=args.capacity, limit=args.limit, use_simbad=not args.no_simbad)
 
 
 if __name__ == "__main__":
