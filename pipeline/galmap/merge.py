@@ -183,6 +183,8 @@ def merge_census(stars: pd.DataFrame, census: pd.DataFrame) -> pd.DataFrame:
     """Match census rows to catalogue rows (Gaia id, HIP, then position) and merge them in."""
     s = stars.reset_index(drop=True).copy()
     c = census.reset_index(drop=True)
+    if "plx_estimated" not in c:
+        c = c.assign(plx_estimated=False)
     n = len(c)
     match = np.full(n, -1)
 
@@ -288,7 +290,8 @@ def merge_census(stars: pd.DataFrame, census: pd.DataFrame) -> pd.DataFrame:
     def apply(j: int, r) -> None:
         s.at[j, "src"] = int(s.at[j, "src"]) | Flag.SRC_CENSUS20
         s.at[j, "ra"], s.at[j, "dec"], s.at[j, "epoch"] = r.ra, r.dec, r.epoch
-        s.at[j, "plx"], s.at[j, "plx_err"], s.at[j, "plx_src"] = r.plx, r.plx_err, "census"
+        s.at[j, "plx"], s.at[j, "plx_err"] = r.plx, r.plx_err
+        s.at[j, "plx_src"] = "census_est" if r.plx_estimated else "census"
         if np.isfinite(r.pmra):
             s.at[j, "pmra"], s.at[j, "pmdec"] = r.pmra, r.pmdec
         if isinstance(r.spect, str):
@@ -337,7 +340,7 @@ def merge_census(stars: pd.DataFrame, census: pd.DataFrame) -> pd.DataFrame:
                 "epoch": nr["epoch"].fillna(COMMON_EPOCH),
                 "plx": nr["plx"],
                 "plx_err": nr["plx_err"],
-                "plx_src": "census",
+                "plx_src": np.where(nr["plx_estimated"].astype(bool), "census_est", "census"),
                 "pmra": nr["pmra"],
                 "pmdec": nr["pmdec"],
                 "ruwe": np.nan,

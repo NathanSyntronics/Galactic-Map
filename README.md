@@ -55,7 +55,8 @@ stellar diameters would be invisibly small.
 | [Gaia DR3](https://www.cosmos.esa.int/web/gaia/dr3) (Gaia Collaboration 2023), parallax zero point after Lindegren et al. 2021 | astrometry and colours of the Tycho-2 / Hipparcos stars |
 | [AT-HYG v4.0](https://codeberg.org/astronexus/athyg) and [HYG v4.4](https://codeberg.org/astronexus/hyg) (D. Nash, CC BY-SA 4.0) | 2.5 million Tycho-2 / Hipparcos stars, classical designations, Gliese systems |
 | [IAU Catalog of Star Names](https://exopla.net/star-names/modern-iau-star-names/) (WGSN) | official proper names |
-| [SIMBAD](https://simbad.cds.unistra.fr/) and [Wikidata](https://www.wikidata.org/) | common names (English / German), identifiers |
+| [SIMBAD](https://simbad.cds.unistra.fr/) (Wenger et al. 2000, CDS Strasbourg) | identifiers, common names, object types and spectral types within 100 pc |
+| [Wikidata](https://www.wikidata.org/) (CC0), queried via [QLever](https://qlever.dev/) | English and German Wikipedia article titles, the reference for the most common name |
 | [Mamajek's dwarf sequence](https://www.pas.rochester.edu/~emamajek/EEM_dwarf_UBVIJHK_colors_Teff.txt) (Pecaut & Mamajek 2013) | colour → temperature, bolometric corrections |
 
 The generated star data contains data derived from HYG / AT-HYG and is therefore published

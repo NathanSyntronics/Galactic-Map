@@ -28,7 +28,6 @@ DIR = CACHE_DIR / "simbad"
 BASIC_FILE = DIR / "simbad_basic_plx10.csv"
 IDENT_FILE = DIR / "simbad_ident_plx10.csv"
 MIN_PLX = 10.0
-OID_STEP = 200_000_000  # oid ranges per query; queries are split further when they hit MAXREC
 MAXREC = 2_000_000
 
 SOURCE_INFO = {
@@ -40,54 +39,64 @@ SOURCE_INFO = {
     "license": "ODbL 1.0 (CDS data)",
 }
 
+# Objects with a parallax >= 10 mas, plus their components/children without a parallax of their own
+# (Procyon B, Luhman 16 A/B, many system objects have plx NULL in SIMBAD).
+W10 = (
+    "(b.plx_value >= 10 OR (b.plx_value IS NULL AND b.oid IN "
+    "(SELECT h.child FROM h_link AS h JOIN basic AS p ON p.oid = h.parent WHERE p.plx_value >= 10)))"
+)
 BASIC_QUERY = (
-    "SELECT oid, main_id, otype, ra, dec, pmra, pmdec, plx_value, plx_err, sp_type "
-    "FROM basic WHERE plx_value >= {plx} AND oid >= {lo} AND oid < {hi}"
+    "SELECT b.oid, b.main_id, b.otype, b.ra, b.dec, b.pmra, b.pmdec, b.plx_value, b.plx_err, b.sp_type "
+    f"FROM basic AS b WHERE {W10}"
 )
-IDENT_QUERY = (
-    "SELECT i.oidref, i.id FROM ident AS i JOIN basic AS b ON b.oid = i.oidref "
-    "WHERE b.plx_value >= {plx} AND b.oid >= {lo} AND b.oid < {hi}"
-)
+IDENT_QUERY = f"SELECT i.oidref, i.id FROM ident AS i JOIN basic AS b ON b.oid = i.oidref WHERE {W10}"
+BASIC_COUNT = f"SELECT COUNT(*) AS n FROM basic AS b WHERE {W10}"
+IDENT_COUNT = f"SELECT COUNT(*) AS n FROM ident AS i JOIN basic AS b ON b.oid = i.oidref WHERE {W10}"
 
-# Identifier prefixes that never yield a useful name (cross-match catalogues etc.)
+# Identifier prefixes that never yield a useful name (cross-match catalogues etc.). Double-star
+# designations ("** STF 2398") stay: some carry traditional names (Struve 2398, Kruger 60).
 NOISE = re.compile(
     r"^(TIC|Gaia DR[12]|Gaia EDR3|UCAC\d|UCAC|AG[+-]|PPM|SAO|GSC|USNO|URAT|TYC|HIC|IRAS|AKARI|ASCC|KIC|EPIC|"
     r"ALLWISE|AllWISE|WISEA|GALEX|SDSS|PS1|SKY#|N30|FK5|GCRV|uvby98|YZ|CSI|PLX|IDS|CCDM|WDS|Renson|JP11|"
     r"UBV|ROT|SPOCS|TD1|Ci|BPS|GEN#|LEP|NSV|RAVE|LAMOST|Pan-STARRS|PSO J\d|2MASX|XMMU|1RXS|RX J|1ES|EUVE|"
-    r"\[|\*\*|CNS|GCRV|BIBCODE|Zkh|MCC|StKM|TOI|KOI|K2-|Kepler-)"
+    r"\[|CNS|BIBCODE|Zkh|MCC|StKM|TOI|KOI|K2-|Kepler-)"
 )
 
+# object types that are not stars (planets, clusters, associations, quasars, errors)
+NON_STELLAR = {"Pl", "Pl?", "MGr", "As*", "OpC", "St*", "Cl*", "SFR", "GlC", "QSO", "err", "G", "MoC", "HII"}
 
-def _fetch_ranges(query: str, dest: Path, refresh: bool) -> pd.DataFrame:
+
+def _fetch(query: str, count_query: str, dest: Path, refresh: bool) -> pd.DataFrame:
+    """One synchronous query (MAXREC raised; SIMBAD silently truncates at 50,000 rows otherwise),
+    checked against a COUNT(*) of the same selection."""
     if dest.exists() and not refresh:
         return pd.read_csv(dest, dtype=str, keep_default_na=False)
-    frames = []
-    hi_oid = int(tap_sync(TAP, "SELECT MAX(oid) AS m FROM basic")["m"].iloc[0]) + 1
-
-    def run(lo: int, hi: int) -> None:
-        df = tap_sync(TAP, query.format(plx=MIN_PLX, lo=lo, hi=hi), maxrec=MAXREC, timeout=900)
-        if len(df) >= MAXREC and hi - lo > 1:
-            mid = (lo + hi) // 2
-            run(lo, mid)
-            run(mid, hi)
-            return
-        frames.append(df)
-        log.info("SIMBAD oid [%d, %d): %d rows", lo, hi, len(df))
-
-    for lo in range(0, hi_oid, OID_STEP):
-        run(lo, min(lo + OID_STEP, hi_oid))
-    df = pd.concat(frames, ignore_index=True)
+    expected = int(tap_sync(TAP, count_query)["n"].iloc[0])
+    if expected >= MAXREC:
+        raise RuntimeError(f"SIMBAD query would return {expected} rows (> MAXREC); page it")
+    for attempt in range(3):
+        df = tap_sync(TAP, query, maxrec=MAXREC, timeout=1800)
+        # counts can drift by a few rows while SIMBAD is being updated
+        if abs(len(df) - expected) <= max(50, expected // 1000):
+            break
+        log.warning("SIMBAD returned %d rows, expected %d; retrying", len(df), expected)
+    else:
+        raise RuntimeError(f"SIMBAD query incomplete: {len(df)} of {expected} rows")
     dest.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(dest, index=False)
+    log.info("SIMBAD: fetched %d rows into %s", len(df), dest.name)
     return df
 
 
 def load(refresh: bool = False) -> tuple[pd.DataFrame, pd.DataFrame]:
-    basic = _fetch_ranges(BASIC_QUERY, BASIC_FILE, refresh)
-    ident = _fetch_ranges(IDENT_QUERY, IDENT_FILE, refresh)
+    basic = _fetch(BASIC_QUERY, BASIC_COUNT, BASIC_FILE, refresh)
+    ident = _fetch(IDENT_QUERY, IDENT_COUNT, IDENT_FILE, refresh)
     basic["oid"] = pd.to_numeric(basic["oid"]).astype("int64")
+    basic["main_id"] = basic["main_id"].str.replace(r"\s+", " ", regex=True).str.strip()
+    basic = basic[~basic["otype"].isin(NON_STELLAR)].reset_index(drop=True)
     ident["oidref"] = pd.to_numeric(ident["oidref"]).astype("int64")
     ident["id"] = ident["id"].str.replace(r"\s+", " ", regex=True).str.strip()
+    ident = ident[ident["oidref"].isin(basic["oid"])].reset_index(drop=True)
     log.info("SIMBAD: %d objects, %d identifiers", len(basic), len(ident))
     return basic, ident
 
@@ -128,21 +137,31 @@ def attach(stars: pd.DataFrame, basic: pd.DataFrame, ident: pd.DataFrame) -> tup
             stars["pmra"].to_numpy(float)[todo], stars["pmdec"].to_numpy(float)[todo],
             2000.0 - stars["epoch"].to_numpy(float)[todo],
         )
-        dist, k = tree.query(unit_vectors(ra, dec), distance_upper_bound=3.0 / 206264.806)
+        # SIMBAD positions of fast-moving objects are often at their observation epoch rather than
+        # propagated to J2000 (WISE 0855-0714 moves 8"/yr), so the radius grows with the proper motion;
+        # matches beyond 3" additionally need a consistent SIMBAD parallax.
+        pm_tot = np.nan_to_num(np.hypot(stars["pmra"].to_numpy(float)[todo], stars["pmdec"].to_numpy(float)[todo]))
+        radius = (3.0 + np.clip(pm_tot / 1000.0 * 15.0, 0.0, 120.0)) / 206264.806
+        dist, k = tree.query(unit_vectors(ra, dec), k=4, distance_upper_bound=float(radius.max()))
         cplx = pd.to_numeric(cand["plx_value"], errors="coerce").to_numpy()
         coid = cand["oid"].to_numpy()
         for j, i in enumerate(todo):
-            if not np.isfinite(dist[j]):
-                continue
-            p_s = cplx[k[j]]
-            if np.isfinite(p_s) and abs(p_s - plx[i]) > 0.2 * plx[i]:
-                continue
-            o = int(coid[k[j]])
-            if o in taken:
-                continue
-            row_oid[i] = o
-            taken.add(o)
-            pos_matched += 1
+            for d_, k_ in zip(dist[j], k[j]):
+                if not np.isfinite(d_) or d_ > radius[j]:
+                    continue
+                p_s = cplx[k_]
+                if np.isfinite(p_s):
+                    if abs(p_s - plx[i]) > 0.2 * plx[i]:
+                        continue
+                elif d_ > 3.0 / 206264.806:
+                    continue
+                o = int(coid[k_])
+                if o in taken:
+                    continue
+                row_oid[i] = o
+                taken.add(o)
+                pos_matched += 1
+                break
     log.info("SIMBAD: %d further stars matched by position", pos_matched)
 
     # one SIMBAD object per star row (if two rows claim the same object, the first wins)
@@ -167,6 +186,11 @@ def attach(stars: pd.DataFrame, basic: pd.DataFrame, ident: pd.DataFrame) -> tup
     info["simbad_main_id"] = None
     info["simbad_otype"] = None
     info["simbad_sp_type"] = None
+    info["wds"] = None
+    wds = ident[ident["id"].str.match(r"^WDS J\d{5}[+-]\d{4}")]
+    wds_of = pd.Series(wds["id"].str.extract(r"^WDS (J\d{5}[+-]\d{4})")[0].to_numpy(), index=wds["oidref"].to_numpy())
+    wds_of = wds_of[~wds_of.index.duplicated()]
+    info.loc[ok, "wds"] = wds_of.reindex(row_oid[ok]).to_numpy()
     sub = b.loc[row_oid[ok]]
     info.loc[ok, "simbad_main_id"] = sub["main_id"].str.replace(r"\s+", " ", regex=True).to_numpy()
     info.loc[ok, "simbad_otype"] = sub["otype"].to_numpy()

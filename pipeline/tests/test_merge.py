@@ -111,3 +111,14 @@ def test_merge_census_replaces_unresolved_pair_and_drops_phantoms():
     single = out[out["census_name"] == "Single"].iloc[0]
     assert single["plx"] == 101.0 and single["src"] & Flag.SRC_CENSUS20 and single["src"] & Flag.SRC_ATHYG
     assert out[out["census_name"] == "Pair B"].iloc[0]["brown_dwarf"]
+
+
+def test_census_numbers_keep_large_negative_values():
+    import pandas as pd
+
+    from galmap.sources.census20 import _num
+
+    v = _num(pd.Series(["-8123.70", "-999.000", "", "12.5"]))
+    assert v.iloc[0] == -8123.7
+    assert v.iloc[1:3].isna().all()
+    assert v.iloc[3] == 12.5

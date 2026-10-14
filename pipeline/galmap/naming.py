@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+import unicodedata
 from dataclasses import dataclass
 
 import numpy as np
@@ -67,6 +68,11 @@ def german_of(en: str) -> str | None:
     return None
 
 
+def _fold(name: str) -> str:
+    """Accent- and case-insensitive form of a name ("Krüger" == "Kruger")."""
+    return "".join(ch for ch in unicodedata.normalize("NFKD", name) if not unicodedata.combining(ch)).lower()
+
+
 def gliese_display(gj: str | None) -> str | None:
     """SIMBAD-form 'GJ 551 A' -> 'Gliese 551 A'; numbers >= 1000 stay 'GJ 1061'."""
     if not isinstance(gj, str):
@@ -75,6 +81,8 @@ def gliese_display(gj: str | None) -> str | None:
     if not m:
         return gj.strip() or None
     num, frac, comp = m.group(1), m.group(2) or "", m.group(3)
+    if frac == ".0":  # "GJ 721.0" is the same object as "GJ 721"
+        frac = ""
     prefix = "Gliese" if int(num) < 1000 else "GJ"
     return f"{prefix} {num}{frac}" + (f" {comp}" if comp else "")
 
@@ -127,7 +135,13 @@ def candidates(row, ext: dict) -> list[Cand]:
         """Add a free-text name (expanding abbreviated Bayer/Flamsteed forms like 'tau Cet')."""
         if not isinstance(text, str) or not text.strip():
             return
-        t = re.sub(r"^NAME\s+", "", text.strip())
+        t = re.sub(r"\s+", " ", text.strip())
+        if t.startswith(("*", "V*", "NAME", "LAL ", "Gmb ", "L ")):
+            p = prettify_simbad(t)
+            if p:
+                add(p, classify_name(p), prio, prettify_simbad(t, "de"))
+            return
+        t = re.sub(r"^NAME\s+", "", t)
         t = re.sub(r"\s*\(([A-Za-z]{1,3})\)\s*$", "", t).strip()
         full = expand_abbreviated(t)
         if full:
@@ -139,9 +153,9 @@ def candidates(row, ext: dict) -> list[Cand]:
 
     if ext.get("iau"):
         add(ext["iau"], Rank.IAU, P_IAU)
-    if ext.get("wiki_en"):
+    if isinstance(ext.get("wiki_en"), str):
         en = strip_disambiguation(ext["wiki_en"])
-        de = strip_disambiguation(ext["wiki_de"]) if ext.get("wiki_de") else None
+        de = strip_disambiguation(ext["wiki_de"]) if isinstance(ext.get("wiki_de"), str) else None
         r = classify_name(en)
         add(en, r, P_WIKI, de)
     cn = row.get("common_name")
@@ -151,7 +165,12 @@ def candidates(row, ext: dict) -> list[Cand]:
     proper = row.get("proper")
     if isinstance(proper, str) and proper != "Sol":
         add_text(proper, P_ATHYG)
-    for ident in ext.get("simbad", []) or []:
+    def simbad_order(ident: str) -> tuple:
+        # among several SIMBAD NAMEs prefer "X's Star", then the longest ("Proxima Centauri" over "Proxima Cen")
+        is_name = ident.startswith("NAME")
+        return (0 if is_name else 1, 0 if "'s star" in ident.lower() else 1, -len(ident) if is_name else 0)
+
+    for ident in sorted(ext.get("simbad", []) or [], key=simbad_order):
         p = prettify_simbad(ident)
         if p:
             de = prettify_simbad(ident, "de")
@@ -219,8 +238,9 @@ def choose(cands: list[Cand]) -> tuple[Cand | None, list[str]]:
     iau = [c for c in cands if c.prio == P_IAU]
     if wiki:
         best = wiki[0]
-        # keep the IAU name if Wikipedia only offers a catalogue-style title
-        if iau and best.rank >= Rank.GJ:
+        # keep the IAU name if Wikipedia only offers a catalogue-style title, or the IAU name
+        # with a component letter ("Sirius A" -> "Sirius")
+        if iau and (best.rank >= Rank.GJ or _COMP_RE.sub("", best.en) == iau[0].en):
             best = iau[0]
     else:
         best = min(cands, key=lambda c: (c.rank, c.prio, c.seq))
@@ -351,6 +371,11 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
                 c = component_letter(row_of(i))
                 if c:
                     comp_of[i] = c
+        # "Ross 614B" -> "Ross 614 B": the usual spacing, and needed to recognise the letter
+        for i, c in comp_of.items():
+            for arr in (name_en, name_de):
+                if arr[i] and re.search(rf"\d{c}$", arr[i]):
+                    arr[i] = f"{arr[i][:-len(c)]} {c}"
         prim_name: dict[int, tuple[str, str | None, int]] = {}
         for i in np.nonzero((flags0 & Flag.SYSTEM_PRIMARY) != 0)[0]:
             if name_en[i] and name_rank[i] <= Rank.TRADITIONAL:
@@ -363,7 +388,9 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
             base_en, base_de, base_rank = prim_name[k]
             if (flags0[i] & Flag.SYSTEM_PRIMARY) and name_en[i] and _COMP_RE.sub("", name_en[i]) == base_en:
                 continue
-            if name_rank[i] > base_rank or name_en[i] is None:
+            # also unify spellings: "Kruger 60 B" next to "Krüger 60 A"
+            respelled = name_en[i] is not None and name_en[i] != f"{base_en} {c}" and _fold(_COMP_RE.sub("", name_en[i])) == _fold(base_en)
+            if name_rank[i] > base_rank or name_en[i] is None or respelled:
                 old = name_en[i]
                 name_en[i] = f"{base_en} {c}"
                 name_de[i] = f"{base_de} {c}" if base_de else None
@@ -371,13 +398,15 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
                 if old and old != name_en[i]:
                     alt[i] = [old] + [a for a in (alt[i] or []) if a != old and a != name_en[i]][:9]
                 renamed += 1
-        # give the primary its letter too once a companion is called "<base> B"
-        lettered = {int(sid_arr[i]) for i in comp_of if name_en[i] and _COMP_RE.search(name_en[i])}
+        # give a component its letter too once another one is called "<its name> B"
+        bases: dict[int, set[str]] = {}
+        for i in comp_of:
+            if name_en[i] and _COMP_RE.search(name_en[i]):
+                bases.setdefault(int(sid_arr[i]), set()).add(_COMP_RE.sub("", name_en[i]))
         for i, c in comp_of.items():
-            k = int(sid_arr[i])
-            if k in prim_name and k in lettered and name_en[i] == prim_name[k][0] and (flags0[i] & Flag.SYSTEM_PRIMARY):
+            if name_en[i] and name_en[i] in bases.get(int(sid_arr[i]), ()):
                 name_en[i] = f"{name_en[i]} {c}"
-                if name_de[i]:
+                if name_de[i] and not _COMP_RE.search(name_de[i]):
                     name_de[i] = f"{name_de[i]} {c}"
         log.info("naming: %d system components named after their primary", renamed)
 
@@ -445,6 +474,7 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
         swapped = 0
         for i in np.nonzero((dc == Desig.GAIA_DR3) & pd.notna(mid))[0]:
             m = str(mid[i]).strip()
+            m = prettify_simbad(m) or re.sub(r"\s+", " ", m)
             if m and not m.startswith("Gaia") and classify_name(m) <= Rank.SURVEY:
                 dc[i], dlo[i], dhi[i], dstr[i] = Desig.STRING, 0, 0, m
                 swapped += 1

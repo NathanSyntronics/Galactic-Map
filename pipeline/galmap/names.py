@@ -132,9 +132,28 @@ def prettify_simbad(ident: str, lang: str = "en") -> str | None:
     '* alf Cen A' -> 'Alpha Centauri A', '* 61 Cyg A' -> '61 Cygni A', 'V* EZ Aqr' -> 'EZ Aquarii',
     'NAME Barnard's Star' -> "Barnard's Star".
     """
-    s = ident.strip()
-    if s.startswith("NAME "):
-        return s[5:].strip()
+    s = re.sub(r"\s+", " ", ident.strip())
+    m = re.match(r"^NAME(?:-IAU)?\s+(.+)$", s)
+    if m:
+        name = m.group(1).strip()
+        # planets ("NAME Barnard's Star b") and catalogue-like names are not star names
+        if re.search(r"\s[b-i]$", name) or re.search(r"\d{3,}|[+-]\d{2}", name) or re.match(r"^[A-Z0-9]{2,}[ -]?J?\d", name):
+            return None
+        return re.sub(r"'s star\b", "'s Star", name)
+    # double-star discoverer codes that carry the traditional names of nearby systems
+    m = re.match(r"^\*\* (KR|STF|GRB|LUH) (\d+)\s*([A-H][a-c]?)?$", s)
+    if m:
+        who = {"KR": "Kruger", "STF": "Struve", "GRB": "Groombridge", "LUH": "Luhman"}[m.group(1)]
+        return f"{who} {m.group(2)}" + (f" {m.group(3)}" if m.group(3) else "")
+    if s.startswith("** "):
+        return None
+    m = re.match(r"^(LAL|Gmb) (\d+)\s*([A-H])?$", s)
+    if m:
+        who = {"LAL": "Lalande", "Gmb": "Groombridge"}[m.group(1)]
+        return f"{who} {m.group(2)}" + (f" {m.group(3)}" if m.group(3) else "")
+    m = re.match(r"^L (\d+-\d+)\s*([A-H])?$", s)
+    if m:
+        return f"Luyten {m.group(1)}" + (f" {m.group(2)}" if m.group(2) else "")
     m = _SIMBAD_STAR.match(s)
     if m:
         return bayer_name(m.group(1), m.group(3), m.group(2) or None, m.group(4), lang)
@@ -146,6 +165,10 @@ def prettify_simbad(ident: str, lang: str = "en") -> str | None:
         c = constellation(m.group(2))
         if c:
             return f"{m.group(1)} {CONSTELLATIONS[c]}" + (f" {m.group(3)}" if m.group(3) else "")
+    # "* w Her" (Latin-letter Bayer), "V* kap Cet" (Bayer star listed as variable), "* 61 Cyg A" ...
+    m = re.match(r"^V?\*\s+(.+)$", s)
+    if m:
+        return expand_abbreviated(m.group(1), lang)
     return None
 
 
@@ -204,6 +227,8 @@ def expand_abbreviated(name: str, lang: str = "en") -> str | None:
 def classify_name(name: str) -> int:
     """Rank of a name string (see flags.Rank); assumes it is not an IAU proper name."""
     s = name.strip()
+    if s.startswith(("*", "V*", "NAME", "**", "[")) or re.match(r"^\d+[a-z]", s):
+        return Rank.OTHER  # raw SIMBAD identifiers and odd catalogue codes ("8pc 128.93")
     words = s.split()
     if len(words) >= 2:
         first = words[0]

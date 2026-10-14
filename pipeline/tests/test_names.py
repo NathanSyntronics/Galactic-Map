@@ -87,3 +87,44 @@ def test_galactic_frame():
     l, b = galactic_lb(xyz)
     assert abs(l - 227.23) < 0.01 and abs(b + 8.89) < 0.01
     assert abs(np.linalg.norm(xyz) - 8.601) < 0.01
+
+
+def test_choose_prefers_wikipedia_title():
+    from galmap.naming import P_IAU, P_SIMBAD, P_WIKI, Cand, choose
+
+    ran = Cand("Ran", None, Rank.IAU, P_IAU)
+    eps = Cand("Epsilon Eridani", None, Rank.BAYER, P_WIKI)
+    assert choose([ran, eps, Cand("eps Eri", None, Rank.BAYER, P_SIMBAD)])[0].en == "Epsilon Eridani"
+    # the IAU name wins over a catalogue-style title and over "<IAU name> A"
+    assert choose([Cand("Fomalhaut", None, Rank.IAU, P_IAU), Cand("HD 216956", None, Rank.HD, P_WIKI)])[0].en == "Fomalhaut"
+    assert choose([Cand("Sirius", None, Rank.IAU, P_IAU), Cand("Sirius A", None, Rank.COMMON, P_WIKI)])[0].en == "Sirius"
+
+
+def test_wikidata_attach():
+    import pandas as pd
+
+    from galmap.sources.wikidata import attach
+
+    wd = pd.DataFrame(
+        {
+            "qid": ["Q1", "Q2", "Q3"],
+            "simbad": [["* eps Eri"], ["NAME Barnard's star"], ["* alf Lyr"]],
+            "en": ["Epsilon Eridani", "Barnard's Star", "Vega"],
+            "en_is_title": [True, True, True],
+            "de": ["Epsilon Eridani", "Barnards Pfeilstern", None],
+            "hip": [[16537], [87937], [91262]],
+            "gaia": [[], [4472832130942575872], []],
+        }
+    )
+    stars = pd.DataFrame(
+        {
+            "simbad_main_id": ["* eps Eri", None, None, None],
+            "gaia": pd.array([None, 4472832130942575872, None, None], dtype="Int64"),
+            "hip": pd.array([16537, None, 91262, 91262], dtype="Int64"),
+        }
+    )
+    out = attach(stars, wd)
+    assert out[0]["wiki_en"] == "Epsilon Eridani"
+    assert out[1]["wiki_de"] == "Barnards Pfeilstern"
+    assert out[2]["wiki_en"] == "Vega" and out[2]["wiki_de"] is None
+    assert 3 not in out  # one Wikidata item names one star only

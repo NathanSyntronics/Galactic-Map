@@ -119,6 +119,20 @@ def assign_systems(s: pd.DataFrame) -> pd.DataFrame:
             uf.union(a, b)
         else:
             rejected += 1
+    # Washington Double Star catalogue systems (via SIMBAD), checked for consistent distances:
+    # WDS also lists optical (chance) pairs, which are rejected here.
+    wds_links = []
+    wds_rejected = 0
+    if "wds" in s:
+        err = (s["plx_err"].to_numpy(float) / s["plx"].to_numpy(float)) * s["dist_pc"].to_numpy(float) * 3.2616
+        for a, b in _group_links(s["wds"].where(s["wds"].astype(str) != "None")):
+            tol = max(MAX_CATALOG_SEP_LY, 3 * np.hypot(np.nan_to_num(err[a]), np.nan_to_num(err[b])))
+            if np.linalg.norm(xyz[a] - xyz[b]) <= tol:
+                wds_links.append((a, b))
+                uf.union(a, b)
+            else:
+                wds_rejected += 1
+        log.info("systems: %d WDS links (%d optical pairs rejected)", len(wds_links), wds_rejected)
     wb = wide_binary_links(s)
     # wide-binary links are only accepted if they do not grow systems beyond a sane size
     for a, b in wb:
@@ -138,6 +152,8 @@ def assign_systems(s: pd.DataFrame) -> pd.DataFrame:
         for a, b in hyg_links:
             if np.linalg.norm(xyz[a] - xyz[b]) <= MAX_CATALOG_SEP_LY:
                 uf.union(a, b)
+        for a, b in wds_links:
+            uf.union(a, b)
         bad_roots = set(roots[big].tolist())
         for a, b in wb:
             if roots[a] not in bad_roots:

@@ -20,7 +20,7 @@ from .download import CACHE_DIR, fetch
 from .flags import Desig, Flag, Rank
 from .octree import write_dataset
 from .photometry import MAMAJEK_URL, Photometry, load_mamajek
-from .sources import athyg, census20, gaia, gcns, hyg, iau, simbad
+from .sources import athyg, census20, gaia, gcns, hyg, iau, simbad, wikidata
 
 log = logging.getLogger("galmap.build")
 
@@ -158,6 +158,12 @@ def build(out: Path, refresh: bool = False, capacity: int = 4096, limit: int | N
     ext = external_names(s, iau.load(refresh))
     for i, lst in sb_idents.items():
         ext.setdefault(i, {})["simbad"] = lst
+    # Wikipedia article titles (via Wikidata) decide which of several names is the common one
+    try:
+        for i, v in wikidata.attach(s, wikidata.load(refresh)).items():
+            ext.setdefault(i, {}).update({k: x for k, x in v.items() if x})
+    except Exception as err:
+        log.warning("Wikidata unavailable, continuing without it: %s", err)
     s = naming.assign_names(s, ext)
     sun = s["is_sun"].to_numpy()
     s.loc[sun, ["name_rank", "name_en", "name_de", "desig_cat", "desig_str"]] = [Rank.IAU, "Sun", "Sonne", Desig.STRING, "Sun"]
@@ -183,6 +189,7 @@ def build(out: Path, refresh: bool = False, capacity: int = 4096, limit: int | N
         (GAIA_INFO, None),
         (iau.SOURCE_INFO, None),
         (simbad.SOURCE_INFO, None),
+        (wikidata.SOURCE_INFO, None),
         (MAMAJEK_INFO, None),
     ):
         entry = dict(info)

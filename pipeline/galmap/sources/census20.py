@@ -20,7 +20,7 @@ from ..download import CACHE_DIR, exact_int64, fetch
 
 log = logging.getLogger(__name__)
 
-URL = "https://exoplanetarchive.ipac.caltech.edu/data/ExoData/20pcCensus/Kirkpatrick2024_20pcCensus_Table4_Parameters.csv"
+URL = "https://exoplanetarchive.ipac.caltech.edu/data/Contributed/20pcCensus/Kirkpatrick2024_20pcCensus_Table4_Parameters.csv"
 FILE = CACHE_DIR / "census20" / "Kirkpatrick2024_20pcCensus_Table4_Parameters.csv"
 
 SOURCE_INFO = {
@@ -41,7 +41,8 @@ NAME_COLUMNS = [
 
 def _num(s: pd.Series) -> pd.Series:
     v = pd.to_numeric(s.str.strip().replace("", np.nan), errors="coerce")
-    return v.where(v > -998)
+    # -999 marks a missing value (only exactly that: proper motions can be below -998 mas/yr)
+    return v.where(v != -999.0)
 
 
 def _prefixed_int(s: pd.Series, prefix: str) -> pd.Series:
@@ -68,6 +69,42 @@ def _sexagesimal(ra: pd.Series, dec: pd.Series) -> tuple[np.ndarray, np.ndarray]
         np.array([parse(v, True) for v in ra], dtype=float),
         np.array([parse(v, False) for v in dec], dtype=float),
     )
+
+
+# For objects without a measured parallax the census notes often give an estimate:
+# "Expected parallax is 64.2 mas", "Estimates are distance 17.6 pc", "d~19.9 pc", "at ~20 pc".
+_EST_PLX = re.compile(r"[Ee]xpected parallax is ([\d.]+) mas")
+_EST_DIST = re.compile(r"(?:\bd\s*~\s*|[Dd]istance(?: estimate)?(?: for [^.;()]*?)?(?: is)?\s+~?|\bat\s*~\s*)(\d+(?:\.\d+)?)\s*pc")
+EST_REL_ERR = 0.15  # typical uncertainty of the spectrophotometric distances
+
+
+def estimated_parallax(note: str) -> float:
+    """Parallax (mas) implied by an estimate in the census notes, or NaN."""
+    if not isinstance(note, str):
+        return np.nan
+    m = _EST_PLX.search(note)
+    if m:
+        return float(m.group(1))
+    m = _EST_DIST.search(note)
+    if m and 1.0 < float(m.group(1)) < 40.0:
+        return 1000.0 / float(m.group(1))
+    return np.nan
+
+
+def _inherit(df: pd.DataFrame, parent: np.ndarray, cols: list[str]) -> None:
+    """Rows lacking cols[0] take all of cols from their nearest ancestor that has it."""
+    key = cols[0]
+    vals = {c: df[c].to_numpy(dtype=float).copy() for c in cols}
+    for i in range(len(df)):
+        if np.isnan(vals[key][i]):
+            p = parent[i]
+            while p >= 0 and np.isnan(vals[key][p]):
+                p = parent[p]
+            if p >= 0:
+                for c in cols:
+                    vals[c][i] = vals[c][p]
+    for c in cols:
+        df[c] = vals[c]
 
 
 def load(refresh: bool = False) -> pd.DataFrame:
@@ -150,19 +187,18 @@ def load(refresh: bool = False) -> pd.DataFrame:
     df["catalog_names"] = names
 
     # inherit astrometry from the nearest ancestor that has it
-    for col_group in (["ra", "dec", "epoch", "pmra", "pmdec"], ["plx", "plx_err"]):
-        key = col_group[0]
-        vals = {c: df[c].to_numpy(dtype=float).copy() for c in col_group}
-        for i in range(n):
-            if np.isnan(vals[key][i]):
-                p = parent[i]
-                while p >= 0 and np.isnan(vals[key][p]):
-                    p = parent[p]
-                if p >= 0:
-                    for c in col_group:
-                        vals[c][i] = vals[c][p]
-        for c in col_group:
-            df[c] = vals[c]
+    df["plx_estimated"] = 0.0
+    _inherit(df, parent, ["ra", "dec", "epoch", "pmra", "pmdec"])
+    _inherit(df, parent, ["plx", "plx_err"])
+    # still no parallax: use the estimate from the notes (and pass it on to the components)
+    est = raw["GeneralNotes"].map(estimated_parallax).to_numpy(float) if "GeneralNotes" in raw else np.full(n, np.nan)
+    use = np.isnan(df["plx"].to_numpy(float)) & np.isfinite(est)
+    df.loc[use, "plx"] = est[use]
+    df.loc[use, "plx_err"] = EST_REL_ERR * est[use]
+    df.loc[use, "plx_estimated"] = 1.0
+    _inherit(df, parent, ["plx", "plx_err", "plx_estimated"])
+    df["plx_estimated"] = df["plx_estimated"] > 0
+    log.info("20 pc census: %d objects placed by an estimated distance", int((df["plx_estimated"] & df["is_leaf"]).sum()))
 
     _propagate_to_primary_leaf(df, parent)
 

@@ -22,8 +22,8 @@ from .flags import Flag
 # name -> (distance in ly, tolerance as fraction, expected flags or 0)
 REFERENCE = {
     "Proxima Centauri": (4.2465, 0.01, 0),
-    "Rigil Kentaurus": (4.344, 0.015, 0),
-    "Toliman": (4.344, 0.015, 0),
+    "Alpha Centauri A": (4.344, 0.015, 0),
+    "Alpha Centauri B": (4.344, 0.015, 0),
     "Barnard's Star": (5.963, 0.01, 0),
     "Wolf 359": (7.856, 0.01, 0),
     "Lalande 21185": (8.304, 0.01, 0),
@@ -72,12 +72,13 @@ def verify(out: Path) -> list[str]:
                 by_name.setdefault(_norm(n), []).append(e)
     problems = []
     for name, (ref, tol, _flags) in REFERENCE.items():
-        hits = by_name.get(_norm(name))
+        hits = by_name.get(_norm(name)) or by_name.get(_norm(f"{name} A"))
         if not hits:
             problems.append(f"{name}: not found")
             continue
         e = hits[0]
-        if e[0] != name:
+        # the primary of a system whose companion is shown as "<name> B" is labelled "<name> A"
+        if e[0] not in (name, f"{name} A"):
             problems.append(f"{name}: displayed as '{e[0]}'")
         node = _read_node(out, manifest, e[2])
         p = node["pos"][e[3]]
@@ -86,7 +87,11 @@ def verify(out: Path) -> list[str]:
             problems.append(f"{name}: distance {d:.3f} ly, expected {ref} ly")
         if not np.allclose(p, e[4:7], atol=2e-3):
             problems.append(f"{name}: search index position {e[4:7]} differs from node position {p}")
-    sirius = by_name.get(_norm("Sirius"))
+    # official IAU names stay searchable when another name is displayed
+    for name in ("Rigil Kentaurus", "Toliman", "Ran", "Alsafi"):
+        if not by_name.get(_norm(name)):
+            problems.append(f"{name}: not searchable")
+    sirius = by_name.get(_norm("Sirius")) or by_name.get(_norm("Sirius A"))
     if sirius:
         l, b = galactic_lb(np.array(sirius[0][4:7]))
         if abs(l - 227.23) > 0.05 or abs(b + 8.89) > 0.05:

@@ -1,7 +1,7 @@
 {
  "format": "galmap-octree",
  "version": 1,
- "generated": "2026-10-14T14:48:16Z",
+ "generated": "2026-10-14T16:58:02Z",
  "units": "ly",
  "frame": "galactic-heliocentric",
  "root": {
@@ -22,7 +22,7 @@
   [
    "r",
    4,
-   328,
+   360,
    0,
    0,
    0

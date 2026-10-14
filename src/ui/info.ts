@@ -95,7 +95,8 @@ export class InfoPanel {
     if (dCentre > 0.01) row(t('distanceFromCentre'), formatLy(dCentre));
     const err = distErrPercent(info.distErr);
     if (err !== null && !(info.flags & Flag.SUN)) {
-      row(t('distUncertainty'), err < 0.5 ? '< 0.5 %' : `± ${formatNumber(err, err < 10 ? 1 : 0)} %`);
+      const est = info.flags & Flag.DIST_NO_PARALLAX ? ` (${t('distEstimated')})` : '';
+      row(t('distUncertainty'), (err < 0.5 ? '< 0.5 %' : `± ${formatNumber(err, err < 10 ? 1 : 0)} %`) + est);
     }
     if (!(info.flags & Flag.SUN)) {
       const { l, b } = galacticLB(info.pos);
