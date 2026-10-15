@@ -135,6 +135,22 @@ def split_component(name: str) -> tuple[str, str | None]:
     return name[: m.start()], m.group(1)
 
 
+# a component letter written directly after a catalogue number ("HD 73752A", "BD-22 2345A",
+# "G 237-64A"); not the E/W/N/S suffixes of coordinate designations ("LSPM J0016+1951E")
+_COMP_ATTACHED = re.compile(r"^(.*\d)([A-H][a-c]?)$")
+
+
+def split_component_loose(name: str) -> tuple[str, str | None]:
+    """Like split_component, but also 'HD 73752A' -> ('HD 73752', 'A')."""
+    base, letter = split_component(name)
+    if letter:
+        return base, letter
+    m = _COMP_ATTACHED.match(name)
+    if m and not re.search(r"J\d{4}", name) and re.search(r"\s", name):
+        return m.group(1), m.group(2)
+    return name, None
+
+
 def letters_conflict(a: str | None, b: str | None) -> bool:
     """True if two component designations name different components: 'A' / 'B', but not
     'A' / 'Aa' or 'B' / 'BC'."""
@@ -198,9 +214,11 @@ def normalize_bayer(name: str, latin: set[tuple[str, str]] | frozenset = frozens
 
 # --- SIMBAD identifier prettification ---------------------------------------------------------
 
-_SIMBAD_STAR = re.compile(r"^\*\s+([a-z]{2,3}\.?)(\d{0,2})\s+([A-Za-z]{3})(?:\s+([A-Z][a-z]?))?$")
-_SIMBAD_FLAM = re.compile(r"^\*\s+(\d+)\s+([A-Za-z]{3})(?:\s+([A-Z][a-z]?))?$")
-_SIMBAD_VAR = re.compile(r"^V\*\s+(V\d+|[A-Z]{1,2})\s+([A-Za-z]{3})(?:\s+([A-Z][a-z]?))?$")
+# component suffixes are A-H with sub-components ("Aa", "Bb"); SIMBAD's other suffixes ("* gam Vir S",
+# "* alf Cen P") are not component letters and give no name
+_SIMBAD_STAR = re.compile(rf"^\*\s+([a-z]{{2,3}}\.?)(\d{{0,2}})\s+([A-Za-z]{{3}})(?:\s+({COMPONENT}))?$")
+_SIMBAD_FLAM = re.compile(rf"^\*\s+(\d+)\s+([A-Za-z]{{3}})(?:\s+({COMPONENT}))?$")
+_SIMBAD_VAR = re.compile(rf"^V\*\s+(V\d+|[A-Z]{{1,2}})\s+([A-Za-z]{{3}})(?:\s+({COMPONENT}))?$")
 _NAME_PREFIX = re.compile(r"^(?:NAME(?:-IAU)?|HIDDEN NAME)\s+(.+)$")
 
 
@@ -264,7 +282,8 @@ _TRADITIONAL = re.compile(
 _SURVEY = re.compile(
     r"^(LHS|LP|LTT|NLTT|LFT|LSPM|PM|L|Luyten|G|GD|EG|LAWD|EGGR|WD|BD|CD|CPD|SCR|DEN|DENIS|UGPS|WISE|WISEA|WISEP|WISEU|"
     r"CWISE|CWISER|2MASS|2MASSW|2MASSI|SDSS|SDSSp|ULAS|VHS|PSO|SIPS|APMPM|LEHPM|WT|UPM|Karmn|Ton|Feige|TVLM|LSR|"
-    r"VB|vB|HZ|TRAPPIST|K2|Kepler|KOI|TOI|TIC|HAT-P|HATS|WASP|XO|TrES|KELT|CoRoT|GJ)\b[\s\-+]?"
+    r"VB|vB|HZ|TRAPPIST|K2|Kepler|KOI|TOI|TIC|HAT-P|HATS|WASP|XO|TrES|KELT|CoRoT|GJ)"
+    r"(?:-P)?[\s\-+]?J?[\d+\-]"
 )
 _GJ = re.compile(r"^(GJ|Gliese|Gl|Wo)\s*\d", re.IGNORECASE)
 _CATALOG = [
@@ -327,6 +346,13 @@ def classify_name(name: str) -> int:
         rest = " ".join(words[1:])
         base = first.rstrip(_SUP_DIGITS + "0123456789")
         gen = _strip_component(rest)
+        # abbreviated designations ("BO Mus", "iot Cas AB", "zet01 Ant A") are not display forms
+        if constellation(gen) and gen not in GENITIVES and not gen.isdigit():
+            return Rank.OTHER
+        # a constellation followed by something that is not a component letter: planets
+        # ("Mu Arae b") and SIMBAD position suffixes ("Gamma Virginis S")
+        if gen not in GENITIVES and any(rest.startswith(g + " ") for g in GENITIVES):
+            return Rank.OTHER
         if gen in GENITIVES:
             if base in GREEK_EN or base in GREEK_DE:
                 return Rank.BAYER
