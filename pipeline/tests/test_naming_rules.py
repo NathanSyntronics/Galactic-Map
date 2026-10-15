@@ -135,3 +135,124 @@ def test_wikidata_codes_pass():
     )
     out = attach(stars, wd, {1: ["* 40 Eri", "* omi02 Eri"]})
     assert out == {1: {"wiki_en": "40 Eridani", "wiki_de": None, "label_en": None, "label_de": None}}
+
+
+P_FLAGS = 12  # IN_SYSTEM | SYSTEM_PRIMARY
+C_FLAGS = 4  # IN_SYSTEM
+
+
+def test_companions_keep_their_own_names():
+    from galmap.naming import assign_names
+
+    s = _frame([
+        # Capella: the red dwarf "Capella H" (census nickname) is not renamed "Capella A"
+        {"census_name": "alpha Aur Aa", "system_size": 3, "system_row": 1, "flags": P_FLAGS, "system_id": 1, "hip": 24608},
+        {"census_name": 'G 96-29 A "Capella H"', "census_gj": "GJ 195 A", "system_size": 2, "system_row": 2, "flags": C_FLAGS, "system_id": 1},
+        # Gliese 229 B keeps its Wikipedia title next to the primary
+        {"census_name": "Gl 229 A", "census_gj": "GJ 229 A", "system_size": 2, "system_row": 3, "flags": P_FLAGS, "system_id": 2, "hip": 29295},
+        {"census_name": "Gl 229 B", "system_size": 2, "system_row": 3, "flags": C_FLAGS, "system_id": 2},
+        # a wide system of two pairs: Struve 2576 A/B must not become a second 17 Cygni A/B
+        {"gj": "GJ 767.1 A", "simbad_main_id": "* 17 Cyg", "flags": P_FLAGS, "system_id": 3, "hip": 97295},
+        {"gj": "GJ 767.1 B", "simbad_main_id": "* 17 Cyg B", "flags": C_FLAGS, "system_id": 3},
+        {"gj": "GJ 765.4 A", "simbad_main_id": "HD 186858A", "flags": C_FLAGS, "system_id": 3, "hip": 97222},
+        {"gj": "GJ 765.4 B", "simbad_main_id": "HD 186858B", "flags": C_FLAGS, "system_id": 3},
+    ])
+    ext = {
+        0: {"iau": "Capella", "wiki_en": "Capella"},
+        2: {"wiki_en": "Gliese 229"},
+        3: {"wiki_en": "Gliese 229 B"},
+        4: {"simbad": ["* 17 Cyg", "GJ 767.1 A"]},
+        5: {"simbad": ["* 17 Cyg B", "GJ 767.1 B"]},
+        6: {"simbad": ["** STF 2576A", "GJ 765.4 A"]},
+        7: {"simbad": ["** STF 2576B", "GJ 765.4 B"]},
+    }
+    names = list(assign_names(s, ext)["name_en"])
+    assert names[1] == "Capella H"
+    assert names[2] == "Gliese 229 A" and names[3] == "Gliese 229 B"
+    assert names[4:] == ["17 Cygni A", "17 Cygni B", "Struve 2576 A", "Struve 2576 B"]
+
+
+def test_iau_name_plus_letter_follows_the_primary():
+    from galmap.naming import assign_names
+
+    s = _frame([
+        # Zeta Herculis = Tianji: AT-HYG calls the companion "Tianji B"
+        {"census_name": "zeta Her A", "system_size": 2, "system_row": 1, "flags": P_FLAGS, "system_id": 1, "hip": 81693},
+        {"census_name": "zeta Her B", "proper": "Tianji B", "system_size": 2, "system_row": 1, "flags": C_FLAGS, "system_id": 1},
+        # Algieba B is not linked into a system with Gamma Leonis (4.6" away)
+        {"proper": "Algieba", "hip": 50583, "ra": 154.993, "dec": 19.8415},
+        {"proper": "Algieba B", "hd": 89485, "ra": 154.9935, "dec": 19.8405},
+    ])
+    ext = {
+        0: {"iau": "Tianji", "wiki_en": "Zeta Herculis"},
+        2: {"iau": "Algieba", "wiki_en": "Gamma Leonis", "wiki_de": "Algieba"},
+    }
+    out = assign_names(s, ext)
+    names = list(out["name_en"])
+    assert names[0] == "Zeta Herculis A" and names[1] == "Zeta Herculis B"
+    assert names[2] == "Gamma Leonis" and names[3] == "Gamma Leonis B"
+    assert out["name_de"].iloc[3] == "Algieba B"
+    assert out["alt"].iloc[0][0] == "Tianji"  # the IAU name stays the first alternative
+    assert out["system_name_en"].iloc[0] == "Zeta Herculis"
+
+
+def test_census_sibling_and_system_names():
+    from galmap.naming import assign_names
+
+    s = _frame([
+        # GJ 1245: the Wikipedia title is on the pair G 208-44 A; its unnamed sibling Ab follows
+        {"census_name": "G 208-45", "census_gj": "GJ 1245 B", "system_size": 3, "system_row": 1, "flags": P_FLAGS, "system_id": 1},
+        {"census_name": "G 208-44 Aa", "system_size": 3, "system_row": 1, "flags": C_FLAGS, "system_id": 1},
+        {"census_name": "G 208-44 Ab", "system_size": 3, "system_row": 1, "flags": C_FLAGS, "system_id": 1},
+        # 59 Virginis: the system is named after the primary's name, not the Latin Bayer letter "e Virginis"
+        {"census_name": "e Vir Aa", "simbad_main_id": "* e Vir", "system_size": 2, "system_row": 2, "flags": P_FLAGS, "system_id": 2, "hip": 64792},
+        {"census_name": "e Vir Ab", "system_size": 2, "system_row": 2, "flags": C_FLAGS, "system_id": 2},
+    ])
+    ext = {1: {"wiki_en": "GJ 1245"}, 3: {"wiki_en": "59 Virginis", "simbad": ["* e Vir", "* 59 Vir"]}}
+    out = assign_names(s, ext)
+    assert list(out["name_en"].iloc[:3]) == ["GJ 1245 B", "GJ 1245 Aa", "GJ 1245 Ab"]
+    assert out["name_en"].iloc[3] == "59 Virginis Aa" and out["name_en"].iloc[4] == "59 Virginis Ab"
+    assert out["system_name_en"].iloc[3] == "59 Virginis"
+
+
+def test_wikipedia_spelling_and_german_names():
+    from galmap.naming import assign_names
+
+    s = _frame([
+        {"simbad_main_id": "* f Eri", "hip": 17797},
+        {"simbad_main_id": "* b01 Hya", "hip": 52737},
+        {"simbad_main_id": "* nu.01 Col", "hip": 26412},
+        {"census_name": "HD 217987", "hip": 114046},
+        {"census_name": "HD 88230", "hip": 49908},
+        {"simbad_main_id": "V* AB Dor", "hip": 25647},
+    ])
+    ext = {
+        0: {"wiki_en": "F Eridani", "simbad": ["* f Eri"]},
+        1: {"wiki_en": "B1 Hydrae", "simbad": ["* b01 Hya"]},
+        2: {"wiki_en": "Nu1 Columbae"},
+        3: {"wiki_en": "Gliese 887", "wiki_de": "Lacaille 9352"},
+        4: {"wiki_en": "Groombridge 1618", "wiki_de": "GJ 380"},
+        5: {"wiki_en": "AB Doradus", "wiki_de": "AB Doradus"},
+    }
+    out = assign_names(s, ext)
+    assert list(out["name_en"]) == ["f Eridani", "b¹ Hydrae", "Nu¹ Columbae", "Gliese 887", "Groombridge 1618", "AB Doradus"]
+    de = list(out["name_de"])
+    assert de[2] == "Ny¹ Columbae"
+    assert de[3] == "Lacaille 9352"  # the German title is kept for an English Gliese number
+    assert not isinstance(de[4], str)  # a German title of a worse kind (a Gliese number) is not used
+    assert not isinstance(de[5], str)  # the same as the English name
+
+
+def test_census_strings_and_simbad_alias_order():
+    from galmap.naming import Cand, P_CENSUS, candidates, census_display, choose
+
+    assert census_display("YY Gem A (alpha Gem C)") == "YY Geminorum A"
+    assert census_display("2MASS J07003664+3157266 [C]") == "2MASS J07003664+3157266 C"
+    assert census_display("** WJG 5C") == "WJG 5C"
+    cands = candidates({"census_name": "YY Gem A (alpha Gem C)", "flags": 0}, {"simbad": ["NAME Castor C"]})
+    assert choose(cands)[0].en == "Castor C"
+    assert all(c.rank != Rank.COMMON for c in cands if c.src == "census")
+    # the main id's unlettered alias wins the tie over "* del Tuc B"
+    best = choose(candidates({"simbad_main_id": "* del Tuc", "flags": 0}, {"simbad": ["* del Tuc B", "* del Tuc A", "* del Tuc"]}))[0]
+    assert best.en == "Delta Tucanae"
+    assert isinstance(Cand("x", None, 1, P_CENSUS), Cand)
