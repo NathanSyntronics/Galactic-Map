@@ -752,6 +752,9 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
                     continue
                 pde = split_component(name_de[j])[0] if name_de[j] else None
                 old = cur
+                if sid_arr[i] >= 0:
+                    taken[int(sid_arr[i])][old] -= 1
+                    taken[int(sid_arr[i])][f"{pb} {lt}"] += 1
                 name_en[i], name_de[i] = f"{pb} {lt}", (f"{pde} {lt}" if pde else None)
                 name_rank[i] = min(int(name_rank[j]), int(Rank.COMMON)) if name_rank[j] <= Rank.COMMON else int(name_rank[j])
                 name_src[i] = "system"
