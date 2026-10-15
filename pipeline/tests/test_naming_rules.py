@@ -256,3 +256,29 @@ def test_census_strings_and_simbad_alias_order():
     best = choose(candidates({"simbad_main_id": "* del Tuc", "flags": 0}, {"simbad": ["* del Tuc B", "* del Tuc A", "* del Tuc"]}))[0]
     assert best.en == "Delta Tucanae"
     assert isinstance(Cand("x", None, 1, P_CENSUS), Cand)
+
+
+def test_iau_names_by_designation():
+    import pandas as pd
+
+    from galmap.build import external_names
+
+    s = _frame([
+        {"census_name": "L 119-213", "simbad_main_id": "L 119-213"},  # LHS 3844 in SIMBAD's identifiers
+        {"simbad_main_id": "WASP-17"},
+        {"census_name": "L 97-3 A", "census_gj": "GJ 3483 A", "flags": P_FLAGS, "system_id": 1},
+        {"census_name": "L 97-3 B", "flags": C_FLAGS, "system_id": 1},
+        {"hip": 71683, "census_name": "alpha Cen A"},
+    ])
+    iau = pd.DataFrame(
+        {
+            "name": ["Batsũ̀", "Dìwö", "Maru", "Rigil Kentaurus"],
+            "hip": pd.array([None, None, None, 71683], dtype="Int64"),
+            "designation": ["LHS 3844", "WASP-17", "WD 0806−661", "HR 5459"],
+        }
+    )
+    ext = {0: {"simbad": ["LHS 3844", "L 119-213"]}, 2: {"simbad": ["WD 0806-661", "L 97-3"]}, 3: {"simbad": ["WD 0806-661 B"]}}
+    out = external_names(s, iau, ext)
+    assert out[0]["iau"] == "Batsũ̀" and out[1]["iau"] == "Dìwö"
+    assert out[2]["iau"] == "Maru" and "iau" not in out[3]
+    assert out[4]["iau"] == "Rigil Kentaurus"
