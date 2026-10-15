@@ -36,6 +36,8 @@ export function displayName(info: StarInfo): string {
 export class InfoPanel {
   readonly root: HTMLElement;
   private info: StarInfo | null = null;
+  /** The "distance from view centre" row, the only part that changes while the view moves. */
+  private centreRow: { dt: HTMLElement; dd: HTMLElement } | null = null;
   onClose: () => void = () => {};
   onFlyTo: (info: StarInfo) => void = () => {};
 
@@ -45,18 +47,40 @@ export class InfoPanel {
     parent.appendChild(this.root);
   }
 
+  get current(): StarInfo | null {
+    return this.info;
+  }
+
+  /** Shows the card for a star (null hides it). Rebuilds the card. */
   show(info: StarInfo | null, target: Vector3): void {
     this.info = info;
     this.render(target);
   }
 
-  refresh(target: Vector3): void {
+  /** Rebuilds the card for the current star, e.g. after a language change. */
+  rerender(target: Vector3): void {
     this.render(target);
+  }
+
+  /**
+   * Updates the view-dependent values (distance from the view centre) in place. The card is not
+   * rebuilt, so clicks and keyboard focus on its buttons survive while the view moves.
+   */
+  updateView(target: Vector3): void {
+    const row = this.centreRow;
+    if (!this.info || !row) return;
+    const d = this.info.pos.distanceTo(target);
+    const show = d > 0.01;
+    const text = show ? formatLy(d) : '';
+    if (row.dd.textContent !== text) row.dd.textContent = text;
+    row.dt.hidden = !show;
+    row.dd.hidden = !show;
   }
 
   private render(target: Vector3): void {
     const info = this.info;
     this.root.replaceChildren();
+    this.centreRow = null;
     this.root.classList.toggle('hidden', !info);
     if (!info) return;
 
@@ -84,15 +108,20 @@ export class InfoPanel {
 
     const dl = el('dl');
     const row = (k: string, v: string) => {
-      dl.append(el('dt', '', k), el('dd', '', v));
+      const dt = el('dt', '', k);
+      const dd = el('dd', '', v);
+      dl.append(dt, dd);
+      return { dt, dd };
     };
     const [gx, gy, gz] = worldToGalactic(info.pos);
     const dSun = Math.hypot(gx, gy, gz);
     if (!(info.flags & Flag.SUN)) {
       row(t('distanceFromSun'), `${formatLy(dSun)} (${formatNumber(dSun / LY_PER_PC, dSun < 33 ? 2 : 1)} ${t('pc')})`);
     }
-    const dCentre = info.pos.distanceTo(target);
-    if (dCentre > 0.01) row(t('distanceFromCentre'), formatLy(dCentre));
+    this.centreRow = row(t('distanceFromCentre'), '');
+    // changes continuously while the view moves: not announced by screen readers
+    this.centreRow.dd.setAttribute('aria-live', 'off');
+    this.updateView(target);
     const err = distErrPercent(info.distErr);
     if (err !== null && !(info.flags & Flag.SUN)) {
       const est = info.flags & Flag.DIST_NO_PARALLAX ? ` (${t('distEstimated')})` : '';
@@ -139,7 +168,7 @@ export class InfoPanel {
 
 function sourceText(flags: number): string {
   const s: string[] = [];
-  if (flags & Flag.SRC_CENSUS20) s.push('20 pc census');
+  if (flags & Flag.SRC_CENSUS20) s.push(t('srcCensus20'));
   if (flags & Flag.SRC_GCNS) s.push('Gaia GCNS');
   if (flags & Flag.SRC_ATHYG) s.push('AT-HYG');
   if (flags & Flag.SRC_HYG) s.push('HYG');

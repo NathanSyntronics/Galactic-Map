@@ -34,10 +34,15 @@ export class SettingsPanel {
     this.root.appendChild(this.body);
     parent.appendChild(this.root);
     this.render();
-    store.subscribe((_s, changed) => {
-      if (changed.includes('lang')) this.render();
-      else this.sync();
-    });
+  }
+
+  /**
+   * Called by the app after a settings change, once the new language is active (the panel does
+   * not subscribe to the store itself, so it never renders before the language has switched).
+   */
+  settingsChanged(changed: (keyof Settings)[]): void {
+    if (changed.includes('lang')) this.render();
+    else this.sync();
   }
 
   toggle(open?: boolean): void {

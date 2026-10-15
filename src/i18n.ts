@@ -52,6 +52,7 @@ const en = {
   system: 'Multiple system',
   systemMembers: 'members',
   source: 'Data source',
+  srcCensus20: '20 pc census',
   brownDwarf: 'Brown dwarf',
   whiteDwarf: 'White dwarf',
   giant: 'Giant / supergiant',
@@ -148,6 +149,7 @@ const de: Record<MessageKey, string> = {
   system: 'Mehrfachsystem',
   systemMembers: 'Mitglieder',
   source: 'Datenquelle',
+  srcCensus20: '20-pc-Zensus',
   brownDwarf: 'Brauner Zwerg',
   whiteDwarf: 'Weißer Zwerg',
   giant: 'Riese / Überriese',
@@ -209,8 +211,13 @@ export function t(key: MessageKey, vars?: Record<string, string | number>): stri
   return s;
 }
 
+/** BCP 47 locale of the current language (number formatting). */
+export function locale(): string {
+  return current === 'de' ? 'de-DE' : 'en-US';
+}
+
 export function formatNumber(x: number, digits = 0): string {
-  return x.toLocaleString(current === 'de' ? 'de-DE' : 'en-US', {
+  return x.toLocaleString(locale(), {
     maximumFractionDigits: digits,
     minimumFractionDigits: digits,
   });

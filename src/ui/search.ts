@@ -21,12 +21,18 @@ interface Entry {
   pos: Vector3;
 }
 
+/**
+ * Search key of a name: compatibility-decomposed (superscript ¹ -> 1, ligatures), without
+ * diacritics, case, spaces, apostrophes, dots and all dash / minus variants, so "Rho1 Cancri"
+ * finds "Rho¹ Cancri" and "2MASS 1507-1627" finds "2MASS 1507−1627".
+ */
 export function normalize(s: string): string {
   return s
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
+    .normalize('NFKD')
+    .replace(/\p{M}/gu, '')
     .toLowerCase()
-    .replace(/[\s'’\-_.·]/g, '');
+    .replace(/ß/g, 'ss')
+    .replace(/[\s'‘’ʼ`´\-‐‑‒–—―−⁃﹣－_.·\u00ad]/g, '');
 }
 
 export class SearchIndex {
@@ -130,6 +136,7 @@ export class SearchBox {
   updateTexts(): void {
     this.input.placeholder = t('search');
     this.input.setAttribute('aria-label', t('search'));
+    if (!this.list.classList.contains('hidden')) this.renderList();
   }
 
   focus(): void {

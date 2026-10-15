@@ -2,21 +2,34 @@ import {
   AdditiveBlending,
   BufferAttribute,
   BufferGeometry,
+  Camera,
   Group,
+  Matrix3,
   Points,
   ShaderMaterial,
   Sphere,
   Vector3,
 } from 'three';
 import { Flag, UNKNOWN_I16, type NodeData } from '../data/format';
+import { LY_PER_PC } from '../data/galactic';
 import type { OctreeNode } from '../data/octree';
 import type { Settings } from '../settings';
 import { temperatureColor } from './colors';
 
+// Positions are absolute heliocentric coordinates (float32, exactly as decoded, so CPU-side picking
+// and labels use the same values). Multiplying them by modelViewMatrix in float32 would cancel a
+// translation of up to tens of thousands of light years against the position and leave errors of
+// ~1e-3 ly: stars jitter and drift from their labels when the camera is close to a distant star.
+// Instead the shader first subtracts uOrigin, a float32-exact point at the camera: that difference
+// is exact for stars near the camera (Sterbenz lemma), and the small rest of the camera offset
+// (uOriginView) is computed in double precision on the CPU. The Points objects must keep an
+// identity model matrix.
 const vertexShader = /* glsl */ `
 attribute vec3 aColor;
 attribute float aSize;
-uniform vec3 uTarget;
+uniform vec3 uOrigin;
+uniform vec3 uOriginView;
+uniform vec3 uTargetRel;
 uniform float uRadius;
 uniform float uFade;
 uniform float uScale;
@@ -28,7 +41,8 @@ varying vec3 vColor;
 varying float vAlpha;
 varying float vPx;
 void main() {
-  float d = distance(position, uTarget);
+  vec3 rel = position - uOrigin;
+  float d = distance(rel, uTargetRel);
   float a = 1.0 - smoothstep(uRadius * uFade, uRadius, d);
   if (a <= 0.0 || aSize <= 0.0) {
     gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
@@ -38,7 +52,7 @@ void main() {
     vPx = 0.0;
     return;
   }
-  vec4 mv = modelViewMatrix * vec4(position, 1.0);
+  vec4 mv = vec4(mat3(modelViewMatrix) * rel + uOriginView, 1.0);
   float depth = max(-mv.z, 1e-5);
   float px = 2.0 * aSize * uSizeMul * uScale / depth;
   float intensity = 1.0;
@@ -86,7 +100,9 @@ export function createStarMaterial(): ShaderMaterial {
     vertexShader,
     fragmentShader,
     uniforms: {
-      uTarget: { value: new Vector3() },
+      uOrigin: { value: new Vector3() },
+      uOriginView: { value: new Vector3() },
+      uTargetRel: { value: new Vector3() },
       uRadius: { value: 50 },
       uFade: { value: 0.85 },
       uScale: { value: 1000 },
@@ -104,6 +120,21 @@ export function createStarMaterial(): ShaderMaterial {
   });
 }
 
+const viewRotation = new Matrix3();
+
+/**
+ * Sets the camera-relative uniforms of the star material (see the vertex shader). The camera's
+ * world matrix must be up to date.
+ */
+export function setStarView(material: ShaderMaterial, camera: Camera, target: Vector3): void {
+  const u = material.uniforms;
+  const cam = camera.position;
+  const origin = (u.uOrigin.value as Vector3).set(Math.fround(cam.x), Math.fround(cam.y), Math.fround(cam.z));
+  viewRotation.setFromMatrix4(camera.matrixWorldInverse);
+  (u.uOriginView.value as Vector3).copy(origin).sub(cam).applyMatrix3(viewRotation);
+  (u.uTargetRel.value as Vector3).copy(target).sub(origin);
+}
+
 /** Estimated log10(L/Lsun) for star i (falls back to absolute magnitude, then a dwarf default). */
 export function starLogL(node: NodeData, i: number): number {
   const l = node.logL[i];
@@ -111,6 +142,21 @@ export function starLogL(node: NodeData, i: number): number {
   const m = node.absMag[i];
   if (m !== UNKNOWN_I16) return (4.74 - m / 100) / 2.5;
   return node.flags[i] & Flag.BROWN_DWARF ? -4.5 : -1.5;
+}
+
+/**
+ * Apparent visual magnitude of star i as seen from the Sun (from the absolute magnitude, else from
+ * the bolometric luminosity); undefined for the Sun itself or without either value.
+ */
+export function apparentMag(node: NodeData, i: number): number | undefined {
+  const p = node.positions;
+  const dLy = Math.hypot(p[3 * i], p[3 * i + 1], p[3 * i + 2]);
+  if (dLy < 1e-6) return undefined;
+  let absMag: number;
+  if (node.absMag[i] !== UNKNOWN_I16) absMag = node.absMag[i] / 100;
+  else if (node.logL[i] !== UNKNOWN_I16) absMag = 4.74 - 2.5 * (node.logL[i] / 1000);
+  else return undefined;
+  return absMag + 5 * Math.log10(dLy / LY_PER_PC) - 5;
 }
 
 /** Symbolic star radius in light years for the size of its sprite. */
