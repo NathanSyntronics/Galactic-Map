@@ -181,8 +181,8 @@ def assign_systems(s: pd.DataFrame) -> pd.DataFrame:
 
 def common_distances(s: pd.DataFrame) -> np.ndarray:
     """Members of a multiple system whose own distance is less certain than the system's size get
-    the system's error-weighted mean parallax: a companion measured at 16.7 +/- 1.6 mas next to a
-    primary at 12.05 +/- 0.02 mas is placed with the primary, not 23 pc in front of it. Precise
+    the system's error-weighted mean parallax, if that lies within their own 2-sigma range: the
+    noisy parallax of a faint companion would otherwise scatter it along the line of sight. Precise
     members keep their own parallax; census members are handled by the census (tight systems
     share one distance there). Returns the indices of the rows that changed (plx, plx_err set)."""
     sid = s["system_id"].to_numpy()
@@ -208,7 +208,8 @@ def common_distances(s: pd.DataFrame) -> np.ndarray:
         extent = float(np.max(np.linalg.norm(u[:, None, :] - u[None, :, :], axis=2))) * d
         sig_d = 1000.0 * err[grp] / plx[grp] ** 2
         for k, i in enumerate(grp):
-            if sig_d[k] > max(extent, 0.01) and plx[i] != mean:
+            # only within the member's own 2-sigma range: the measurement is refined, never contradicted
+            if sig_d[k] > max(extent, 0.01) and plx[i] != mean and abs(plx[i] - mean) <= 2.0 * err[i]:
                 plx[i], err[i] = mean, mean_err
                 changed.append(i)
     s["plx"], s["plx_err"] = plx, err

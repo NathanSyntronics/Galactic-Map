@@ -1,7 +1,7 @@
 import numpy as np
 
 from galmap.coords import LY_PER_PC, galactic_lb, icrs_to_galactic_xyz
-from galmap.flags import Rank, is_giant_spect, spectral_code
+from galmap.flags import SPEC_OTHER, Rank, is_giant_spect, spectral_code
 from galmap.names import bayer_name, classify_name, flamsteed_name, german_variant, parse_hyg_bayer, prettify_simbad
 from galmap.naming import german_of, gliese_display
 
@@ -61,6 +61,15 @@ def test_gliese_display():
     assert gliese_display("GJ 65 A") == "Gliese 65 A"
     assert gliese_display("GJ 1061") == "GJ 1061"
     assert gliese_display("GJ 54.1") == "Gliese 54.1"
+
+
+def test_spectral_codes_edge_cases():
+    assert spectral_code("dC") == SPEC_OTHER * 10  # dwarf carbon star, not a white dwarf
+    assert spectral_code("D") == 100 and spectral_code("D?") == 100 and spectral_code("Dpec") == 100
+    assert spectral_code("DA2.4") == 102 and spectral_code("DQ9") == 109
+    assert spectral_code("kA5hF1mF5(III)EuSrBa") == 31  # Am star: hydrogen type F1
+    assert spectral_code("d/sdM4") == 64
+    assert spectral_code("sdM4") == 64 and spectral_code("M5.5Ve") == 65
 
 
 def test_spectral_codes():

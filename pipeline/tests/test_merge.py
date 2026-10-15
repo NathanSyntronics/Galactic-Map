@@ -228,10 +228,14 @@ def test_imprecise_system_member_moves_to_system_distance():
 
     s = pd.DataFrame({
         "system_id": [0, 0, -1],
-        "plx": [12.05, 16.69, 10.0],
+        "plx": [12.05, 14.69, 10.0],
         "plx_err": [0.02, 1.60, 0.1],
         "x": [83.0, 59.9, 1.0], "y": [0.0, 0.01, 99.0], "z": [0.0, 0.0, 0.0],
     })
     changed = common_distances(s)
     assert 1 in list(changed) and abs(s.loc[1, "plx"] - 12.05) < 0.01 and abs(s.loc[0, "plx"] - 12.05) < 0.01
     assert s.loc[2, "plx"] == 10.0
+    # a member whose own measurement contradicts the system distance (> 2 sigma) keeps it
+    s2 = s.assign(plx=[12.05, 16.69, 10.0], plx_err=[0.02, 1.60, 0.1])
+    common_distances(s2)
+    assert s2.loc[1, "plx"] == 16.69
