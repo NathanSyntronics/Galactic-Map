@@ -93,3 +93,45 @@ def test_no_two_stars_with_one_name():
     assert names[2] == "CT Ceti A" and names[3] == "CT Ceti B"
     assert names[4] == "GJ 1006 B" and names[5] == "EZ Piscium"
     assert len(set(names)) == len(names)
+
+
+def test_wikipedia_title_rules():
+    from galmap.naming import P_IAU, P_SIMBAD, P_WIKI, Cand, choose
+
+    # a Gliese / survey title beats the IAU name, which stays the first alternative
+    best, alts = choose([Cand("Noquisi", None, Rank.IAU, P_IAU), Cand("Gliese 436", None, Rank.GJ, P_WIKI)])
+    assert best.en == "Gliese 436" and alts[0] == "Noquisi"
+    # "<IAU name> A" as title -> the IAU name
+    assert choose([Cand("Sirius", None, Rank.IAU, P_IAU), Cand("Sirius A", None, Rank.COMMON, P_WIKI)])[0].en == "Sirius"
+    # an HD title is not preferred over names, but over other catalogue numbers
+    assert choose([Cand("C Carinae", None, Rank.BAYER, P_SIMBAD), Cand("HD 69863", None, Rank.HD, P_WIKI)])[0].en == "C Carinae"
+    best = choose([Cand("LSPM J0633+0527", None, Rank.SURVEY, P_SIMBAD), Cand("HD 46375", None, Rank.HD, P_WIKI)])[0]
+    assert best.en == "HD 46375" and best.rank == Rank.SURVEY
+    # Gould numbers are used like Flamsteed numbers
+    assert classify_name("82 G. Eridani") == Rank.FLAMSTEED
+
+
+def test_wikidata_codes_pass():
+    import pandas as pd
+
+    from galmap.sources.wikidata import attach, code_key
+
+    assert code_key("ο² Eri") == "omicron2eridani" and code_key("GJ 166") == "gj166"
+    assert code_key("ADS 3093 ABC") is None and code_key("Gl 105.5") != code_key("GJ 1055")
+    wd = pd.DataFrame(
+        {
+            "qid": ["Q1"], "simbad": [[]], "en": ["40 Eridani"], "de": [None], "en_label": [None], "de_label": [None],
+            "hip": [[]], "gaia": [[]], "stellar": [True], "codes": [["GJ 166", "40 Eri", "ADS 3093 ABC"]],
+        }
+    )
+    stars = pd.DataFrame(
+        {
+            "simbad_main_id": ["* omi02 Eri B", "* omi02 Eri"],
+            "gj": ["GJ 166 B", "GJ 166 A"],
+            "gaia": pd.array([None, None], dtype="Int64"),
+            "hip": pd.array([None, 19849], dtype="Int64"),
+            "flags": [4, 12],
+        }
+    )
+    out = attach(stars, wd, {1: ["* 40 Eri", "* omi02 Eri"]})
+    assert out == {1: {"wiki_en": "40 Eridani", "wiki_de": None, "label_en": None, "label_de": None}}

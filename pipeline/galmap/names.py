@@ -358,6 +358,10 @@ def classify_name(name: str) -> int:
                 return Rank.BAYER
             if first.isdigit():
                 return Rank.FLAMSTEED
+        # Gould numbers of the southern stars are used like Flamsteed numbers ("82 G. Eridani")
+        if first.isdigit() and len(words) >= 3 and words[1] == "G." and _strip_component(" ".join(words[2:])) in GENITIVES:
+            return Rank.FLAMSTEED
+        if gen in GENITIVES:
             # Latin Bayer letters: "p Eridani", "b¹ Hydrae", capital A-Q: "P Cygni", "G Scorpii"
             if re.fullmatch(r"[a-z]|[A-Q]", base):
                 return Rank.BAYER
@@ -467,4 +471,5 @@ def designation_key(s: str) -> str | None:
     k = re.sub(r"^(?:gliese|gl)(?=\s*\d)", "gj", k)
     k = re.sub(r"\s+", "", k)
     k = re.sub(r"(?<=[a-z])-|-(?=[a-z])", "", k)
-    return k.replace(".", "") or None
+    # "GJ 105.5" is not "GJ 1055"
+    return re.sub(r"(?<!\d)\.|\.(?!\d)", "", k) or None

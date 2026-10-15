@@ -5,14 +5,17 @@ commonly used ("Epsilon Eridani" rather than the newer IAU name "Ran"), and the 
 Wikipedia provides the German names ("Wega", "Barnards Pfeilstern").
 
 We query all items that have a SIMBAD identifier (P3083) and an English or German Wikipedia
-article, with their labels, HIP / Gaia DR3 numbers and classes (P31). The public Wikidata query
-service often times out on such queries, so we use the QLever SPARQL engine (University of
-Freiburg), which answers this one in a few seconds.
+article, with their labels, HIP / Gaia DR3 numbers and classes (P31). Many articles about
+multiple stars are on items without a SIMBAD identifier ("40 Eridani", "Gliese 229"), so a second
+query adds the items of a stellar class without one, with their catalogue codes (P528). The
+public Wikidata query service often times out on such queries, so we use the QLever SPARQL
+engine (University of Freiburg), which answers them in a few seconds.
 
 Only article titles count as Wikipedia names; labels of items without an article in that
 language are ordinary name candidates. Nebulae, clusters, galaxies and planets are dropped
 (their HIP codes would otherwise put "Eskimo Nebula" on the central star). Items are matched to
-our stars in passes: SIMBAD main identifier first, then Gaia DR3 id, then HIP number.
+our stars in passes: SIMBAD main identifier first, then Gaia DR3 id, then HIP number, then the
+HD / HR / Gliese / Bayer / Flamsteed catalogue codes.
 """
 
 from __future__ import annotations
@@ -25,6 +28,7 @@ import numpy as np
 import pandas as pd
 
 from ..download import CACHE_DIR, session
+from ..names import GREEK, designation_key
 
 log = logging.getLogger(__name__)
 
@@ -32,6 +36,9 @@ ENDPOINT = "https://qlever.dev/api/wikidata"
 # v2: with the P31 classes (the v1 file without them is left alone)
 FILE = CACHE_DIR / "wikidata" / "wikidata_stars_v2.csv"
 MIN_ROWS = 15_000
+# items of a stellar class without a SIMBAD identifier, with their catalogue codes
+SYSTEMS_FILE = CACHE_DIR / "wikidata" / "wikidata_star_systems_v1.csv"
+SYSTEMS_MIN_ROWS = 300
 
 SOURCE_INFO = {
     "key": "wikidata",
@@ -112,16 +119,56 @@ NON_STELLAR_TITLE = re.compile(
 )
 
 
-def _fetch(refresh: bool) -> pd.DataFrame:
-    if FILE.exists() and not refresh:
-        return pd.read_csv(FILE, dtype=str, keep_default_na=False)
-    r = session().post(ENDPOINT, data={"query": QUERY}, headers={"Accept": "text/csv"}, timeout=600)
+SYSTEMS_QUERY = """
+PREFIX wd: <http://www.wikidata.org/entity/>
+PREFIX wdt: <http://www.wikidata.org/prop/direct/>
+PREFIX schema: <http://schema.org/>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+SELECT ?item (SAMPLE(?en) AS ?entitle) (SAMPLE(?de) AS ?detitle)
+       (SAMPLE(?el) AS ?enlabel) (SAMPLE(?dl) AS ?delabel) (SAMPLE(?ml) AS ?mullabel)
+       (GROUP_CONCAT(DISTINCT ?code; SEPARATOR="|") AS ?codes)
+       (GROUP_CONCAT(DISTINCT STR(?cls); SEPARATOR="|") AS ?classes)
+WHERE {
+  { SELECT DISTINCT ?item WHERE {
+      VALUES ?c0 { %s }
+      ?item wdt:P31 ?c0 .
+      { ?a0 schema:about ?item ; schema:isPartOf <https://en.wikipedia.org/> . } UNION
+      { ?b0 schema:about ?item ; schema:isPartOf <https://de.wikipedia.org/> . }
+      MINUS { ?item wdt:P3083 ?s . }
+  } }
+  OPTIONAL { ?a schema:about ?item ; schema:isPartOf <https://en.wikipedia.org/> ; schema:name ?en . }
+  OPTIONAL { ?b schema:about ?item ; schema:isPartOf <https://de.wikipedia.org/> ; schema:name ?de . }
+  OPTIONAL { ?item rdfs:label ?el . FILTER(LANG(?el) = "en") }
+  OPTIONAL { ?item rdfs:label ?dl . FILTER(LANG(?dl) = "de") }
+  OPTIONAL { ?item rdfs:label ?ml . FILTER(LANG(?ml) = "mul") }
+  OPTIONAL { ?item wdt:P528 ?code . }
+  OPTIONAL { ?item wdt:P31 ?cls . }
+}
+GROUP BY ?item
+"""
+
+
+def _fetch(refresh: bool, query: str = QUERY, file=FILE, min_rows: int = MIN_ROWS) -> pd.DataFrame:
+    if file.exists() and not refresh:
+        return pd.read_csv(file, dtype=str, keep_default_na=False)
+    r = session().post(ENDPOINT, data={"query": query}, headers={"Accept": "text/csv"}, timeout=600)
     r.raise_for_status()
     df = pd.read_csv(io.StringIO(r.content.decode("utf-8")), dtype=str, keep_default_na=False)
-    if len(df) < MIN_ROWS:
+    if len(df) < min_rows:
         raise RuntimeError(f"Wikidata query returned only {len(df)} rows")
-    FILE.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(FILE, index=False)
+    file.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(file, index=False)
+    return df
+
+
+def _fetch_systems(refresh: bool) -> pd.DataFrame:
+    """Items of a stellar class without a SIMBAD identifier, in the frame of the main query
+    (simbad empty, hips / gaias from the catalogue codes) plus their codes."""
+    query = SYSTEMS_QUERY % " ".join(f"wd:{c}" for c in sorted(STELLAR_CLASSES))
+    df = _fetch(refresh, query, SYSTEMS_FILE, SYSTEMS_MIN_ROWS)
+    df["simbad"] = ""
+    df["hips"] = df["codes"].map(lambda v: "|".join(x for x in v.split("|") if re.fullmatch(r"HIP \d+", x)))
+    df["gaias"] = df["codes"].map(lambda v: "|".join(x for x in v.split("|") if re.fullmatch(r"Gaia DR3 \d+", x)))
     return df
 
 
@@ -149,6 +196,11 @@ def load(refresh: bool = False) -> pd.DataFrame:
     galaxies, planets). Titles and labels that name a nebula, cluster or galaxy are removed, and
     items left without any are dropped."""
     df = _fetch(refresh)
+    df["codes"] = ""
+    try:
+        df = pd.concat([df, _fetch_systems(refresh)], ignore_index=True)
+    except Exception as err:  # the second query only adds a few hundred multiple stars
+        log.warning("Wikidata: star systems without SIMBAD id unavailable: %s", err)
     classes = df["classes"].map(lambda v: [c.rsplit("/", 1)[-1] for c in v.split("|") if c]) if "classes" in df else pd.Series([[]] * len(df))
     en = df["entitle"].map(_clean)
     de = df["detitle"].map(_clean)
@@ -169,6 +221,7 @@ def load(refresh: bool = False) -> pd.DataFrame:
             "hip": df["hips"].map(lambda v: [int(m) for m in re.findall(r"HIP\s*(\d+)", v)]),
             "gaia": df["gaias"].map(lambda v: [int(m) for m in re.findall(r"Gaia DR3\s*(\d+)", v)]),
             "stellar": [is_stellar(c) for c in classes],
+            "codes": df["codes"].map(lambda v: [x.strip() for x in v.split("|") if x.strip()]),
         }
     )
     named = out[["en", "de", "en_label", "de_label"]].notna().any(axis=1)
@@ -185,13 +238,55 @@ def load(refresh: bool = False) -> pd.DataFrame:
     return out[keep].reset_index(drop=True)
 
 
-def attach(stars: pd.DataFrame, wd: pd.DataFrame) -> dict[int, dict]:
+_GREEK_CHARS = dict(zip("αβγδεζηθικλμνξοπρστυφχψω", (
+    "alf", "bet", "gam", "del", "eps", "zet", "eta", "tet", "iot", "kap", "lam", "mu", "nu", "ksi", "omi", "pi",
+    "rho", "sig", "sig", "tau", "ups", "phi", "chi", "psi", "ome",
+)))
+_CODE = re.compile(r"^(?:GJ|Gl|Gliese|Wo)\s*\d|^\d{1,3}\s+[A-Z][A-Za-z]{2}$|^[a-zA-Z]{1,3}\d{0,2}\s+[A-Z][A-Za-z]{2}$")
+
+
+def code_key(code: str) -> str | None:
+    """designation_key of a Wikidata catalogue code that names a star or system: 'GJ 166',
+    '40 Eri', 'ο² Eri' (Greek letters as in Wikidata); None for other catalogues."""
+    c = code.strip()
+    if c and c[0] in _GREEK_CHARS:
+        c = _GREEK_CHARS[c[0]] + c[1:].translate(str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹", "0123456789"))
+    if not _CODE.match(c):
+        return None
+    word = re.match(r"^[a-zA-Z]*", c).group(0)
+    if word and not re.match(r"^(?:GJ|Gl|Gliese|Wo)\s*\d", c) and len(word) > 1 and word.lower() not in GREEK:
+        return None  # not a Bayer letter ("ADS 123")
+    return designation_key(c)
+
+
+def _row_strings(stars: pd.DataFrame, idents: dict[int, list[str]] | None):
+    """(row, designation) of the stars' SIMBAD identifiers, census names and Gliese numbers."""
+    for col in ("simbad_main_id", "census_name", "census_gj", "gj"):
+        if col in stars:
+            arr = stars[col].to_numpy(dtype=object)
+            for i in np.nonzero(pd.notna(arr))[0]:
+                if isinstance(arr[i], str):
+                    yield int(i), arr[i]
+    if "catalog_names" in stars:
+        for i, v in enumerate(stars["catalog_names"].to_numpy(dtype=object)):
+            if isinstance(v, (list, tuple, np.ndarray)):
+                for x in v:
+                    if isinstance(x, str):
+                        yield i, x
+    for i, lst in (idents or {}).items():
+        for x in lst:
+            yield int(i), x
+
+
+def attach(stars: pd.DataFrame, wd: pd.DataFrame, idents: dict[int, list[str]] | None = None) -> dict[int, dict]:
     """Row index -> {"wiki_en", "wiki_de", "label_en", "label_de"} (None where missing).
 
     Each item names one star and each star gets one item. Matches are made in passes, so that an
     exact SIMBAD main-identifier match is never taken away by a looser one: first by SIMBAD main
-    identifier, then by Gaia DR3 id, then by HIP number. Items of a non-stellar class (a nebula
-    or a planet that carries the HIP number of its star) are matched only by SIMBAD identifier."""
+    identifier, then by Gaia DR3 id, then by HIP number, then (items without SIMBAD id) by HD /
+    HR number and Gliese / Bayer / Flamsteed codes against the stars' designations (idents: the
+    SIMBAD identifiers of the rows). Items of a non-stellar class (a nebula or a planet that
+    carries the HIP number of its star) are matched only by SIMBAD identifier."""
     by_simbad: dict[str, int] = {}
     by_gaia: dict[int, int] = {}
     by_hip: dict[int, int] = {}
@@ -232,11 +327,71 @@ def attach(stars: pd.DataFrame, wd: pd.DataFrame) -> dict[int, dict]:
     run(lambda i: main_id[i] if isinstance(main_id[i], str) else None, by_simbad)
     run(lambda i: int(gaia[i]) if pd.notna(gaia[i]) else None, by_gaia)
     run(lambda i: int(hip[i]) if pd.notna(hip[i]) else None, by_hip)
+    counts.append(_attach_by_codes(stars, wd, idents, item_of, used, stellar))
     out: dict[int, dict] = {}
     cols = ("en", "de", "en_label", "de_label")
     keys = ("wiki_en", "wiki_de", "label_en", "label_de")
     for i, k in item_of.items():
         r = wd.iloc[k]
         out[i] = {key: (r[c] if isinstance(r[c], str) and r[c] else None) for key, c in zip(keys, cols)}
-    log.info("Wikidata: %d stars matched (%d by SIMBAD id, %d by Gaia DR3, %d by HIP)", len(out), *counts)
+    log.info("Wikidata: %d stars matched (%d by SIMBAD id, %d by Gaia DR3, %d by HIP, %d by catalogue code)", len(out), *counts)
     return out
+
+
+def _attach_by_codes(stars, wd, idents, item_of: dict[int, int], used: set[int], stellar) -> int:
+    """Pass 4 of attach(): the remaining stellar items with catalogue codes."""
+    if "codes" not in wd:
+        return 0
+    todo = [k for k, cs in enumerate(wd["codes"]) if k not in used and stellar[k] and len(cs)]
+    if not todo:
+        return 0
+    flags = stars["flags"].to_numpy(np.int64) if "flags" in stars else np.zeros(len(stars), np.int64)
+
+    def column_index(col: str) -> dict[int, list[int]]:
+        out: dict[int, list[int]] = {}
+        if col in stars:
+            for i, v in enumerate(stars[col].to_numpy(dtype=object)):
+                if pd.notna(v):
+                    out.setdefault(int(v), []).append(i)
+        return out
+
+    by_hd, by_hr = column_index("hd"), column_index("hr")
+    item_keys: dict[int, list[str]] = {}
+    for k in todo:
+        keys = [code_key(c) for c in wd["codes"].iloc[k]]
+        item_keys[k] = [x for x in dict.fromkeys(keys) if x]
+    wanted = {x + sfx for ks in item_keys.values() for x in ks for sfx in ("", "a", "aa")}
+    first = {re.match(r"[a-z]+|\d+", x).group(0) for x in wanted if re.match(r"[a-z]+|\d+", x)}
+    rows_of: dict[str, list[int]] = {}
+    for i, x in _row_strings(stars, idents):
+        s = re.sub(r"^V?\*+\s*", "", x.strip())
+        w = re.match(r"[A-Za-z]+|\d+", s)
+        if not w:
+            continue
+        w = w.group(0).lower()
+        if w not in first and GREEK.get(w, ("",))[0].lower() not in first:
+            continue
+        key = designation_key(x)
+        if key in wanted:
+            lst = rows_of.setdefault(key, [])
+            if i not in lst:
+                lst.append(i)
+    n = 0
+    for k in todo:
+        cand: list[int] = []
+        for c in wd["codes"].iloc[k]:
+            m = re.fullmatch(r"(HD|HR)\s*(\d+)", c.strip())
+            if m:
+                cand += (by_hd if m.group(1) == "HD" else by_hr).get(int(m.group(2)), [])
+        for sfx in ("", "a", "aa"):
+            for x in item_keys[k]:
+                cand += rows_of.get(x + sfx, [])
+        cand = [i for i in dict.fromkeys(cand) if i not in item_of]
+        if not cand:
+            continue
+        # a system's article goes to its primary
+        i = min(cand, key=lambda j: (0 if flags[j] & 8 else 1, cand.index(j)))
+        item_of[i] = k
+        used.add(k)
+        n += 1
+    return n

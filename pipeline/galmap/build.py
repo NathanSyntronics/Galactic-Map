@@ -260,7 +260,7 @@ def build(out: Path, refresh: bool = False, capacity: int = 4096, limit: int | N
         ext.setdefault(i, {})["simbad"] = lst
     # Wikipedia article titles (via Wikidata) decide which of several names is the common one
     try:
-        for i, v in wikidata.attach(s, wikidata.load(refresh)).items():
+        for i, v in wikidata.attach(s, wikidata.load(refresh), sb_idents).items():
             ext.setdefault(i, {}).update({k: x for k, x in v.items() if x})
     except Exception as err:
         log.warning("Wikidata unavailable, continuing without it: %s", err)

@@ -20,7 +20,7 @@ import logging
 import re
 import unicodedata
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 import pandas as pd
@@ -478,6 +478,11 @@ def choose(cands: list[Cand]) -> tuple[Cand | None, list[str]]:
             best = iau[0]
     else:
         best = min(cands, key=lambda c: (c.rank, c.prio, c.seq))
+        # a Wikipedia title that is an HR / HIP / HD number is the most used of several catalogue
+        # numbers: "HD 46375" rather than "LSPM J0633+0527"
+        wiki_cat = [c for c in cands if c.prio == P_WIKI and c.rank in (Rank.HR, Rank.HIP, Rank.HD)]
+        if wiki_cat and best.rank >= Rank.SURVEY:
+            best = replace(wiki_cat[0], rank=Rank.SURVEY)
     seen = {best.en.lower()}
     alts = []
     for c in sorted(cands, key=lambda c: (c.rank, c.prio, c.seq)):
