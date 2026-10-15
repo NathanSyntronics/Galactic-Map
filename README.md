@@ -52,7 +52,8 @@ stellar diameters would be invisibly small.
 |---|---|
 | [20 pc census](https://exoplanetarchive.ipac.caltech.edu/docs/20pcCensus.html) (Kirkpatrick et al. 2024, ApJS 271, 55) | everything within 20 pc: positions, parallaxes, spectral types, brown dwarfs, system hierarchy, names |
 | [Gaia Catalogue of Nearby Stars](https://doi.org/10.1051/0004-6361/202039498) (Gaia Collaboration, Smart et al. 2021) | stars within 100 pc |
-| [Gaia DR3](https://www.cosmos.esa.int/web/gaia/dr3) (Gaia Collaboration 2023), parallax zero point after Lindegren et al. 2021 | astrometry and colours of the Tycho-2 / Hipparcos stars |
+| [Gaia DR3](https://www.cosmos.esa.int/web/gaia/dr3) (Gaia Collaboration 2023), parallax zero point after Lindegren et al. 2021 | astrometry and colours of the Tycho-2 / Hipparcos and GCNS stars |
+| [Hipparcos new reduction](https://doi.org/10.1051/0004-6361:20078357) (van Leeuwen 2007) | parallaxes of bright stars whose Gaia solution is poor |
 | [AT-HYG v4.0](https://codeberg.org/astronexus/athyg) and [HYG v4.4](https://codeberg.org/astronexus/hyg) (D. Nash, CC BY-SA 4.0) | 2.5 million Tycho-2 / Hipparcos stars, classical designations, Gliese systems |
 | [IAU Catalog of Star Names](https://exopla.net/star-names/modern-iau-star-names/) (WGSN) | official proper names |
 | [SIMBAD](https://simbad.cds.unistra.fr/) (Wenger et al. 2000, CDS Strasbourg) | identifiers, common names, object types and spectral types within 100 pc |
@@ -75,22 +76,30 @@ docs/       DATA_FORMAT.md – the binary format shared by both sides
 
 The pipeline (`pipeline/galmap/merge.py`) gives the sources this precedence:
 1. the 20 pc census;
-2. Gaia DR3;
-3. Hipparcos / Gliese.
+2. Gaia DR3 (parallaxes corrected for the zero point of Lindegren et al. 2021);
+3. the Hipparcos new reduction, where it is more precise than a poor Gaia solution (bright,
+   saturated stars; Gaia errors are inflated by the RUWE before comparing);
+4. Gliese distances for the few stars without either.
 
 It handles the following cases:
 * **Matching.** Stars are matched by Gaia source_id, then by HIP number, then by position with
-  proper-motion propagation.
+  proper-motion propagation (one-to-one, closest pairs first).
 * **Bad cross-identifications.** A Gaia link is rejected when the Gaia G magnitude is
-  inconsistent with V.
-* **Phantom neighbours.** Stars that old catalogues place within 19 pc but that the census
-  does not confirm are removed. These are the result of bad Hipparcos or Gliese distances.
+  inconsistent with V; the rejected source then never supplies the distance.
+* **Duplicates.** A catalogue entry without Gaia astrometry that coincides with a Gaia star in
+  position, parallax and brightness is merged into it, with its names and identifiers.
+* **Phantom neighbours.** Stars that old catalogues place certainly inside 20 pc but that the
+  census does not confirm are removed. These are the result of bad Hipparcos or Gliese distances.
+* **Multiple systems.** Components of a tight census system share one distance (individual
+  parallaxes of close pairs are perturbed by the orbit); a faint companion with a noisy parallax
+  is placed at its system's distance if that lies within its own error bars.
 * **Quality cut.** Stars with a parallax error above 100 % or beyond 15 kpc are dropped. The
   app can additionally hide stars by distance uncertainty (20 % by default).
 
-Multiple systems (`systems.py`) are grouped from three sources:
+Multiple systems (`systems.py`) are grouped from four sources:
 * the census hierarchy;
 * the Gliese system grouping;
+* the Washington Double Star catalogue (via SIMBAD), checked for consistent distances;
 * a wide-binary search on Gaia data, using projected separation, parallax agreement and the
   escape velocity.
 
