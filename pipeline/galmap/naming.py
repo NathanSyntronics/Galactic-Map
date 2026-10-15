@@ -983,8 +983,11 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
             for i in mem:
                 fi = census_fam[i]
                 cname = row_of(i).get("census_name")
-                if fi is None or not (name_en[i] is None or (isinstance(cname, str) and name_en[i] == census_display(cname))):
-                    continue
+                if fi is None or not (
+                    name_en[i] is None
+                    or (isinstance(cname, str) and name_en[i] == census_display(cname) and name_rank[i] >= Rank.SURVEY)
+                ):
+                    continue  # "QY Aurigae B" is a name of its own
                 for j in mem:
                     fj = census_fam[j]
                     if j == i or fj is None or fj[1] != fi[1] or not name_en[j] or name_rank[j] > Rank.GJ:
