@@ -207,9 +207,13 @@ def test_census_sibling_and_system_names():
         # 59 Virginis: the system is named after the primary's name, not the Latin Bayer letter "e Virginis"
         {"census_name": "e Vir Aa", "simbad_main_id": "* e Vir", "system_size": 2, "system_row": 2, "flags": P_FLAGS, "system_id": 2, "hip": 64792},
         {"census_name": "e Vir Ab", "system_size": 2, "system_row": 2, "flags": C_FLAGS, "system_id": 2},
+        # a census name that is a real name is kept: "QY Aurigae B" next to "Gliese 268"
+        {"census_name": "QY Aur A", "system_size": 2, "system_row": 3, "flags": P_FLAGS, "system_id": 3, "hip": 34603},
+        {"census_name": "QY Aur B", "system_size": 2, "system_row": 3, "flags": C_FLAGS, "system_id": 3},
     ])
-    ext = {1: {"wiki_en": "GJ 1245"}, 3: {"wiki_en": "59 Virginis", "simbad": ["* e Vir", "* 59 Vir"]}}
+    ext = {1: {"wiki_en": "GJ 1245"}, 3: {"wiki_en": "59 Virginis", "simbad": ["* e Vir", "* 59 Vir"]}, 5: {"wiki_en": "Gliese 268"}}
     out = assign_names(s, ext)
+    assert out["name_en"].iloc[5] == "Gliese 268" and out["name_en"].iloc[6] == "QY Aurigae B"
     assert list(out["name_en"].iloc[:3]) == ["GJ 1245 B", "GJ 1245 Aa", "GJ 1245 Ab"]
     assert out["name_en"].iloc[3] == "59 Virginis Aa" and out["name_en"].iloc[4] == "59 Virginis Ab"
     assert out["system_name_en"].iloc[3] == "59 Virginis"
