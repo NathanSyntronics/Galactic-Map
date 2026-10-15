@@ -179,3 +179,42 @@ def test_wikidata_non_stellar_items():
     assert not is_stellar([], ["Red Rectangle", "Roter Rechtecknebel"])
     assert is_stellar(["Q523"], ["Vega", "Wega"])
     assert is_stellar(["Q50053"], ["Alpha Centauri", "Alpha Centauri"])
+
+
+def test_wikidata_stellar_classes():
+    from galmap.sources.wikidata import is_nonstellar_title, is_stellar
+
+    # Wikidata calls the white dwarf G 117-B15A a galaxy, but also a white dwarf and a variable star
+    assert is_stellar(["Q318", "Q5871", "Q6243"])
+    assert not is_stellar(["Q44559"])  # an exoplanet
+    assert is_nonstellar_title("NGC 2392") and not is_nonstellar_title("NGC 2423-3")
+    assert is_nonstellar_title("Roter Rechtecknebel")
+
+
+def test_wikidata_planet_items_only_by_simbad_id():
+    import pandas as pd
+
+    from galmap.sources.wikidata import attach
+
+    wd = pd.DataFrame(
+        {
+            "qid": ["Q1", "Q2"],
+            "simbad": [["NAME Proxima Cen b"], ["L 97-3 B"]],
+            "en": ["Proxima Centauri b", "WD 0806-661 B"],
+            "de": [None, None],
+            "en_label": [None, None],
+            "de_label": [None, None],
+            "hip": [[70890], []],
+            "gaia": [[], []],
+            "stellar": [False, False],
+        }
+    )
+    stars = pd.DataFrame(
+        {
+            "simbad_main_id": ["NAME Proxima Centauri", "L 97-3 B"],
+            "gaia": pd.array([None, None], dtype="Int64"),
+            "hip": pd.array([70890, None], dtype="Int64"),
+        }
+    )
+    out = attach(stars, wd)
+    assert 0 not in out and out[1]["wiki_en"] == "WD 0806-661 B"

@@ -21,6 +21,7 @@ import io
 import logging
 import re
 
+import numpy as np
 import pandas as pd
 
 from ..download import CACHE_DIR, session
@@ -90,10 +91,23 @@ NON_STELLAR_CLASSES = {
     # not an object
     "Q4167410", "Q15623926", "Q7936582", "Q1369227", "Q82794", "Q185243", "Q912471",
 }
-# titles that name a nebula, a cluster or a galaxy rather than a star
+# Classes of stars and star systems. An item with one of them is a star even if it also has a
+# non-stellar class (Wikidata calls the white dwarf G 117-B15A a galaxy, FG Sagittae a planetary nebula).
+STELLAR_CLASSES = {
+    "Q523", "Q5871", "Q101600", "Q6243", "Q13890", "Q50053", "Q878367", "Q1993624", "Q1457376", "Q2247863",
+    "Q2088753", "Q595871", "Q5893", "Q497654", "Q6232", "Q1044693", "Q120621195", "Q6251", "Q72803622",
+    "Q353834", "Q1153690", "Q744691", "Q565309", "Q5864", "Q1353952", "Q471805", "Q767432", "Q863936",
+    "Q50081", "Q5898", "Q1048372", "Q193599", "Q12795622", "Q3132741", "Q1062509", "Q285400", "Q797219",
+    "Q1392913", "Q1362543", "Q2168098", "Q24452", "Q1141942", "Q836976", "Q10451997", "Q616386", "Q130019",
+    "Q451152", "Q812800", "Q1142192", "Q66521853", "Q11853210", "Q43001876", "Q1059564", "Q5875", "Q6227",
+    "Q5881", "Q244393", "Q11878917", "Q24039974", "Q1073768", "Q6220", "Q54231557", "Q67511102", "Q136562",
+    "Q3037794", "Q978297", "Q14745284", "Q995268", "Q1007122", "Q14745279", "Q1103085", "Q112881",
+}
+# titles that name a nebula, a cluster or a galaxy rather than a star ("NGC 2392", but not the
+# cluster star "NGC 2423-3")
 NON_STELLAR_TITLE = re.compile(
     r"(nebula|nebel\b|cluster|haufen\b|galax|\bassociation\b|assoziation\b|\bmoving group\b|"
-    r"^(?:NGC|IC|M|Messier|Sh ?2-|LDN|Barnard)\s?\d)",
+    r"^(?:NGC|IC|M|Messier|Sh ?2-|LDN|Barnard)\s?\d+$)",
     re.IGNORECASE,
 )
 
@@ -116,37 +130,58 @@ def _clean(v) -> str | None:
     return v or None
 
 
-def is_stellar(classes: list[str], titles: list[str | None]) -> bool:
-    """False for items that are nebulae, clusters, galaxies, planets etc."""
-    if NON_STELLAR_CLASSES.intersection(classes):
+def is_stellar(classes: list[str], titles: list[str | None] = ()) -> bool:
+    """False for items that are nebulae, clusters, galaxies, planets etc.: a non-stellar class and
+    no stellar one, or a title that names a nebula, cluster or galaxy."""
+    if NON_STELLAR_CLASSES.intersection(classes) and not STELLAR_CLASSES.intersection(classes):
         return False
-    return not any(isinstance(t, str) and NON_STELLAR_TITLE.search(t) for t in titles)
+    return not any(is_nonstellar_title(t) for t in titles)
+
+
+def is_nonstellar_title(title: str | None) -> bool:
+    return isinstance(title, str) and bool(NON_STELLAR_TITLE.search(title))
 
 
 def load(refresh: bool = False) -> pd.DataFrame:
-    """One row per stellar Wikidata item: qid, simbad (list), en / de (article titles or None),
+    """One row per Wikidata item: qid, simbad (list), en / de (article titles or None),
     en_label / de_label (labels of items without an article in that language), hip (list of int),
-    gaia (list of int)."""
+    gaia (list of int), stellar (False for items of a non-stellar class: nebulae, clusters,
+    galaxies, planets). Titles and labels that name a nebula, cluster or galaxy are removed, and
+    items left without any are dropped."""
     df = _fetch(refresh)
-    classes = df["classes"].map(lambda v: [c.rsplit("/", 1)[-1] for c in v.split("|") if c]) if "classes" in df else [[]] * len(df)
+    classes = df["classes"].map(lambda v: [c.rsplit("/", 1)[-1] for c in v.split("|") if c]) if "classes" in df else pd.Series([[]] * len(df))
     en = df["entitle"].map(_clean)
     de = df["detitle"].map(_clean)
     en_label = [None if t else (_clean(a) or _clean(b)) for t, a, b in zip(en, df["enlabel"], df["mullabel"])]
     de_label = [None if t else _clean(a) for t, a in zip(de, df["delabel"])]
+
+    def guard(v):
+        return None if is_nonstellar_title(v) else v
+
     out = pd.DataFrame(
         {
             "qid": df["item"].str.rsplit("/", n=1).str[-1],
             "simbad": df["simbad"].map(lambda v: [re.sub(r"\s+", " ", x).strip() for x in v.split("|") if x.strip()]),
-            "en": en,
-            "de": de,
-            "en_label": en_label,
-            "de_label": de_label,
+            "en": en.map(guard),
+            "de": de.map(guard),
+            "en_label": [guard(v) for v in en_label],
+            "de_label": [guard(v) for v in de_label],
             "hip": df["hips"].map(lambda v: [int(m) for m in re.findall(r"HIP\s*(\d+)", v)]),
             "gaia": df["gaias"].map(lambda v: [int(m) for m in re.findall(r"Gaia DR3\s*(\d+)", v)]),
+            "stellar": [is_stellar(c) for c in classes],
         }
     )
-    keep = [is_stellar(c, [a, b, x, y]) for c, a, b, x, y in zip(classes, out["en"], out["de"], out["en_label"], out["de_label"])]
-    log.info("Wikidata: %d items with an English or German Wikipedia article (%d non-stellar dropped)", int(sum(keep)), len(out) - int(sum(keep)))
+    named = out[["en", "de", "en_label", "de_label"]].notna().any(axis=1)
+    # a nebula title on an item without a stellar class: the item is the nebula ("Eskimo Nebula")
+    nebula = [
+        any(is_nonstellar_title(v) for v in (a, b, c, d)) and not STELLAR_CLASSES.intersection(cl)
+        for a, b, c, d, cl in zip(en, de, en_label, de_label, classes)
+    ]
+    keep = named.to_numpy() & ~pd.Series(nebula).to_numpy()
+    log.info(
+        "Wikidata: %d items with an English or German Wikipedia article (%d of them not stellar; %d nebulae etc. dropped)",
+        int(keep.sum()), int((keep & ~out["stellar"].to_numpy()).sum()), len(out) - int(keep.sum()),
+    )
     return out[keep].reset_index(drop=True)
 
 
@@ -155,13 +190,17 @@ def attach(stars: pd.DataFrame, wd: pd.DataFrame) -> dict[int, dict]:
 
     Each item names one star and each star gets one item. Matches are made in passes, so that an
     exact SIMBAD main-identifier match is never taken away by a looser one: first by SIMBAD main
-    identifier, then by Gaia DR3 id, then by HIP number."""
+    identifier, then by Gaia DR3 id, then by HIP number. Items of a non-stellar class (a nebula
+    or a planet that carries the HIP number of its star) are matched only by SIMBAD identifier."""
     by_simbad: dict[str, int] = {}
     by_gaia: dict[int, int] = {}
     by_hip: dict[int, int] = {}
+    stellar = wd["stellar"].to_numpy(dtype=bool) if "stellar" in wd else np.ones(len(wd), bool)
     for k, row in enumerate(wd.itertuples(index=False)):
         for s in row.simbad:
             by_simbad.setdefault(s, k)
+        if not stellar[k]:
+            continue
         for g in row.gaia:
             by_gaia.setdefault(g, k)
         for h in row.hip:
