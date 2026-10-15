@@ -8,6 +8,7 @@ Steps: download catalogues -> merge -> positions -> physics -> systems -> names 
 from __future__ import annotations
 
 import argparse
+import gc
 import logging
 import time
 from pathlib import Path
@@ -40,6 +41,13 @@ GAIA_INFO = {
     "Processing and Analysis Consortium (DPAC). Parallax zero point: Lindegren et al. 2021, A&A 649, A4.",
     "url": "https://www.cosmos.esa.int/web/gaia/dr3",
     "license": "CC BY-SA 3.0 IGO",
+}
+
+HIPPARCOS_INFO = {
+    "key": "hipparcos",
+    "title": "Hipparcos, the New Reduction of the Raw Data",
+    "citation": "van Leeuwen F. 2007, A&A 474, 653 (parallaxes of bright stars whose Gaia DR3 solution is poor).",
+    "url": "https://doi.org/10.1051/0004-6361:20078357",
 }
 
 
@@ -122,11 +130,14 @@ def build(out: Path, refresh: bool = False, capacity: int = 4096, limit: int | N
     a = athyg.load(refresh)
     if limit:
         a = a.sample(n=min(limit, len(a)), random_state=1).sort_index()
-    g = gaia.load(refresh)
+    g = gaia.load(refresh, extra_ids=a["gaia"].dropna().astype("int64").to_numpy())
     a = merge.link_gaia(a, g)
-    s = merge.athyg_rows(a, hyg.load(refresh))
+    s = merge.athyg_rows(a, hyg.load(refresh), gaia.load_hipparcos(refresh))
     s = s[~s["is_sun"].astype(bool)]
-    s = merge.merge_gcns(s, gcns.load(refresh))
+    s = merge.merge_gcns(s, gcns.load(refresh), g)
+    del a, g  # the full AT-HYG and Gaia tables are no longer needed (memory)
+    gc.collect()
+    s = merge.dedupe_against_gaia(s)
     s = merge.merge_census(s, census20.load(refresh))
     s = pd.concat([s, sun_row()], ignore_index=True)
     s["is_sun"] = s["is_sun"].fillna(False).astype(bool)
@@ -155,6 +166,7 @@ def build(out: Path, refresh: bool = False, capacity: int = 4096, limit: int | N
 
     s = derive.physics(s, phot)
     s = systems.assign_systems(s)
+    derive.place(s, systems.common_distances(s))
     ext = external_names(s, iau.load(refresh))
     for i, lst in sb_idents.items():
         ext.setdefault(i, {})["simbad"] = lst
@@ -187,6 +199,7 @@ def build(out: Path, refresh: bool = False, capacity: int = 4096, limit: int | N
         (athyg.SOURCE_INFO, Flag.SRC_ATHYG),
         (hyg.SOURCE_INFO, None),
         (GAIA_INFO, None),
+        (HIPPARCOS_INFO, None),
         (iau.SOURCE_INFO, None),
         (simbad.SOURCE_INFO, None),
         (wikidata.SOURCE_INFO, None),

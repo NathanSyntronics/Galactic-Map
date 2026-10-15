@@ -179,6 +179,43 @@ def assign_systems(s: pd.DataFrame) -> pd.DataFrame:
     return s
 
 
+def common_distances(s: pd.DataFrame) -> np.ndarray:
+    """Members of a multiple system whose own distance is less certain than the system's size get
+    the system's error-weighted mean parallax: a companion measured at 16.7 +/- 1.6 mas next to a
+    primary at 12.05 +/- 0.02 mas is placed with the primary, not 23 pc in front of it. Precise
+    members keep their own parallax; census members are handled by the census (tight systems
+    share one distance there). Returns the indices of the rows that changed (plx, plx_err set)."""
+    sid = s["system_id"].to_numpy()
+    plx = s["plx"].to_numpy(float).copy()
+    err = s["plx_err"].to_numpy(float).copy()
+    census = s["census_row"].notna().to_numpy() if "census_row" in s else np.zeros(len(s), bool)
+    xyz = s[["x", "y", "z"]].to_numpy(float)
+    rows = np.nonzero((sid >= 0) & ~census & np.isfinite(err) & (err > 0) & (plx > 0))[0]
+    changed = []
+    if not len(rows):
+        return np.array([], dtype=np.int64)
+    order = rows[np.argsort(sid[rows], kind="stable")]
+    bounds = np.flatnonzero(np.diff(sid[order])) + 1
+    for grp in np.split(order, bounds):
+        if len(grp) < 2:
+            continue
+        w = 1.0 / err[grp] ** 2
+        mean = float((w * plx[grp]).sum() / w.sum())
+        mean_err = float(1.0 / np.sqrt(w.sum()))
+        d = 1000.0 / mean
+        # projected extent of the system (pc): sky separations scaled to the common distance
+        u = xyz[grp] / np.linalg.norm(xyz[grp], axis=1, keepdims=True)
+        extent = float(np.max(np.linalg.norm(u[:, None, :] - u[None, :, :], axis=2))) * d
+        sig_d = 1000.0 * err[grp] / plx[grp] ** 2
+        for k, i in enumerate(grp):
+            if sig_d[k] > max(extent, 0.01) and plx[i] != mean:
+                plx[i], err[i] = mean, mean_err
+                changed.append(i)
+    s["plx"], s["plx_err"] = plx, err
+    log.info("systems: %d imprecise members placed at their system's mean distance", len(changed))
+    return np.asarray(changed, dtype=np.int64)
+
+
 def system_table(s: pd.DataFrame) -> pd.DataFrame:
     """One row per system: id, name (from the primary), member count, luminosity-weighted centroid."""
     m = s[s["system_id"] >= 0]

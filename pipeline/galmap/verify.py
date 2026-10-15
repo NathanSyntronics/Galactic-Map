@@ -27,7 +27,9 @@ REFERENCE = {
     "Barnard's Star": (5.963, 0.01, 0),
     "Wolf 359": (7.856, 0.01, 0),
     "Lalande 21185": (8.304, 0.01, 0),
-    "Sirius": (8.601, 0.01, 0),
+    # Hipparcos 379.21 mas (8.60 ly), HST 376.68 (8.66 ly, Bond+2017), Gaia DR3 of Sirius B 374.49 (8.71 ly,
+    # adopted for the system by the 20 pc census)
+    "Sirius": (8.66, 0.01, 0),
     "Epsilon Eridani": (10.475, 0.01, 0),
     "Procyon": (11.46, 0.015, 0),
     "61 Cygni A": (11.40, 0.01, 0),
