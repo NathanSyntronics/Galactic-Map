@@ -398,9 +398,9 @@ def candidates(row, ext: dict) -> list[Cand]:
     def simbad_order(ident: str) -> tuple:
         is_name = ident.startswith(("NAME", "HIDDEN NAME"))
         lt = letter_of(ident)
-        if lt == expect:
-            pen = 0
-        elif lt is None or expect is None or not letters_conflict(lt, expect):
+        if lt == expect or lt is None:
+            pen = 0  # the star's own letter or none: "* del Tuc" before "* del Tuc B"
+        elif expect is None or not letters_conflict(lt, expect):
             pen = 1
         else:
             pen = 2
@@ -959,6 +959,28 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
             rank = min(base_rank, Rank.COMMON) if base_rank <= Rank.COMMON else base_rank
             rename(i, k, new_en, f"{base_de} {new_comp}" if base_de else None, rank)
             renamed += 1
+        # a census component without a name of its own follows its census sibling: "G 208-44 Ab"
+        # next to "GJ 1245 Aa" (the Wikipedia title of the pair) is "GJ 1245 Ab"
+        for k, mem in members.items():
+            census_fam = {}
+            for i in mem:
+                census_fam[i] = next((f for f in letter_families(row_of(i)) if f[0] == "census"), None)
+            for i in mem:
+                fi = census_fam[i]
+                cname = row_of(i).get("census_name")
+                if fi is None or not (name_en[i] is None or (isinstance(cname, str) and name_en[i] == census_display(cname))):
+                    continue
+                for j in mem:
+                    fj = census_fam[j]
+                    if j == i or fj is None or fj[1] != fi[1] or not name_en[j] or name_rank[j] > Rank.GJ:
+                        continue
+                    bj, lj = split_component(name_en[j])
+                    if (lj and lj != fj[2]) or taken[k][f"{bj} {fi[2]}"] > 0 or taken[k][f"{bj} {fj[2]}"] > 0:
+                        continue
+                    de_j = name_de[j]
+                    rename(i, k, f"{bj} {fi[2]}", f"{split_component(de_j)[0]} {fi[2]}" if de_j else None, int(name_rank[j]))
+                    renamed += 1
+                    break
         renamed += iau_letter_neighbours()
         distinguished = distinguish_shared_names()
         # give a component its letter too once another one is called "<its name> B"
