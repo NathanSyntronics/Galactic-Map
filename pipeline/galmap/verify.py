@@ -43,7 +43,7 @@ DISPLAYED = {
     "Gliese 229 B": None,
     "Gliese 887": "Lacaille 9352",
     "Barnard's Star": "Barnards Pfeilstern",
-    "40 Eridani A": None,
+    "40 Eridani A": "Keid A",  # the German article is titled "Keid"
     "Gliese 436": None,
     "f Eridani A": None,
     "Nu¹ Columbae": "Ny¹ Columbae",
