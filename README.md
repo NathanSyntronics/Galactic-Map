@@ -11,11 +11,24 @@ An interactive 3-D map of the Sun's stellar neighbourhood, built from real star 
   * every star with good Gaia astrometry within 100 pc (326 ly);
   * all Tycho-2 stars, which are the brighter stars, out to several thousand light years.
 * **The most common names first.** Each star is labelled with its most commonly used name:
-  * the Wikipedia title, if there is one;
+  * the title of its English Wikipedia article, if that is a name or a designation up to a
+    survey number ("Epsilon Eridani", "Gliese 436", "Luyten 726-8"); the IAU name, which then
+    stays the first alternative, wins only over a title that is the IAU name plus a component
+    letter ("Sirius A" -> "Sirius");
   * otherwise the IAU name;
   * otherwise a Bayer or Flamsteed designation, a historical catalogue name (Wolf 359,
-    Lalande 21185) or a Gliese number;
-  * catalogue numbers only when nothing else exists.
+    Lalande 21185), a variable-star name or a Gliese number;
+  * catalogue numbers only when nothing else exists (survey numbers such as LHS, LP or the
+    Luyten "L" numbers; a Wikipedia title that is an HR / HIP / HD number before them).
+
+  Wikidata labels are only ordinary name candidates, never the Wikipedia tier. German names are
+  the German article title when it is not a worse kind of name than the English one ("Lacaille
+  9352" for "Gliese 887") or the German form of the English name ("Ny¹ Columbae", "Barnards
+  Pfeilstern"). Components of a system are named after the primary ("Sirius B") unless they have
+  a name of their own (Wikipedia, IAU, SIMBAD common name); the IAU name of a primary plus a
+  letter becomes the primary's display name plus the letter ("Zeta Herculis B", not "Tianji B");
+  no two stars carry the same display name (a resolved pair gets "CT Ceti A" / "CT Ceti B").
+  The system label follows the primary's name.
 * **Explore by mouse, touch or keyboard.** Only stars within an adjustable radius around the
   view centre are shown (50 ly by default). Move the view centre and new stars stream in.
 * **English and German**, switchable in the settings.
