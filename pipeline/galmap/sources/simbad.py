@@ -128,6 +128,22 @@ def attach(stars: pd.DataFrame, basic: pd.DataFrame, ident: pd.DataFrame) -> tup
     sh = stars["hip"].astype("Int64")
     m2 = (row_oid < 0) & sh.isin(h_oid.index).to_numpy()
     row_oid[m2] = h_oid.loc[sh[m2]].to_numpy()
+    # Gaia id and HIP number name different SIMBAD objects (often a component and its system):
+    # keep the Gaia match unless it is another component than the 20 pc census says the star is
+    # (census "zeta Her A" with the Gaia source SIMBAD lists as "* zet Her B")
+    both = np.nonzero(m & sh.isin(h_oid.index).to_numpy())[0]
+    if len(both) and "census_name" in stars:
+        h_both = h_oid.loc[sh.iloc[both]].to_numpy()
+        differ = h_both != row_oid[both]
+        census_letters = _census_letter_check(stars, ident, basic)
+        switched = 0
+        for i, o_h in zip(both[differ], h_both[differ]):
+            if not census_letters(int(i), int(row_oid[i])) and census_letters(int(i), int(o_h)):
+                row_oid[i] = o_h
+                m[i] = False
+                m2[i] = True
+                switched += 1
+        log.info("SIMBAD: %d stars matched by HIP instead of a Gaia id that SIMBAD gives another component", switched)
     # Remaining nearby stars (brown dwarfs and others without Gaia DR3 / HIP ids) by position:
     # SIMBAD coordinates are ICRS at epoch J2000; our rows carry their own epoch and proper motion.
     pos_matched = rejected = 0
@@ -216,6 +232,27 @@ def attach(stars: pd.DataFrame, basic: pd.DataFrame, ident: pd.DataFrame) -> tup
     info.loc[ok, "simbad_otype"] = sub["otype"].to_numpy()
     info.loc[ok, "simbad_sp_type"] = sub["sp_type"].replace("", None).to_numpy()
     return idents, info
+
+
+def _census_letter_check(stars: pd.DataFrame, ident: pd.DataFrame, basic: pd.DataFrame):
+    """f(row, oid) -> False if the SIMBAD object is another component than the star's census
+    designation says ("* zet Her B" for the census star "zeta Her A")."""
+    from ..naming import contradicts, lettered_designations  # naming does not import the sources
+
+    main = dict(zip(basic["oid"].to_numpy(), basic["main_id"].to_numpy()))
+    lettered = ident[ident["id"].str.contains(r"(?:\s|\d)[A-H][a-c]?$", regex=True)]
+    obj_lettered = lettered.groupby("oidref")["id"].apply(list).to_dict()
+    cols = [c for c in ("census_name", "census_gj", "catalog_names") if c in stars]
+    values = {c: stars[c].to_numpy(dtype=object) for c in cols}
+
+    def check(i: int, o: int) -> bool:
+        own = lettered_designations({c: values[c][i] for c in cols}, census_only=True)
+        if not own:
+            return True
+        mid = main.get(o)
+        return not any(contradicts(x, own) for x in ([mid] if isinstance(mid, str) else []) + obj_lettered.get(o, []))
+
+    return check
 
 
 def _consistency_check(stars: pd.DataFrame, ident: pd.DataFrame, basic: pd.DataFrame):

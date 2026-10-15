@@ -160,8 +160,9 @@ def letter_family(row) -> tuple[str, object, str] | None:
     return None
 
 
-def _families(row) -> dict[str, object]:
-    """All designation families of a star (see letter_family)."""
+def _families(row, ext: dict | None = None) -> dict[str, object]:
+    """All designation families of a star (see letter_family); with ext, also the Gliese number
+    among its SIMBAD identifiers."""
     out: dict[str, object] = {}
     name = _census_core(row.get("census_name"))
     if name and pd.notna(row.get("system_row")):
@@ -173,6 +174,12 @@ def _families(row) -> dict[str, object]:
             break
     if pd.notna(row.get("hyg_base")):
         out["hyg"] = row.get("hyg_base")
+    if "gj" not in out and ext:
+        for x in ext.get("simbad") or []:
+            num = _gj_number(re.sub(r"(?<=\d)([A-D])$", r" \1", x)) if x.startswith(("GJ ", "Gl ")) else None
+            if num:
+                out["gj"] = num[0]
+                break
     return out
 
 
@@ -567,7 +574,9 @@ def _source_strength(src: str, row) -> int:
         return 4 if row.get("simbad_match") == "pos" else 2
     if src in ("athyg", "label"):
         return 3
-    return 4  # generated from HYG fields, or "<primary> <letter>"
+    if src == "system":
+        return 5  # "<primary> <letter>" given by us
+    return 4  # generated from HYG fields
 
 
 def _angle_deg(ra1, dec1, ra2, dec2) -> float:
@@ -681,7 +690,42 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
             name_rank[i] = rank
             name_src[i] = "system"
             if old and old != new_en:
-                alt[i] = [old] + [a for a in (alt[i] or []) if a != old and a != new_en][:9]
+                rest = [a for a in (alt[i] or []) if a != old and a != new_en]
+                ext_i = external.get(int(s.index[i]), {})
+                first = [a for a in rest[:1] if ext_i.get("iau") == a]  # the IAU name stays first
+                alt[i] = (first + [old] + rest[len(first):])[:10]
+
+        def iau_letter_neighbours() -> int:
+            """'<IAU name> B' on a star that is not linked into the IAU star's system ("Algieba B"
+            4.6" from Gamma Leonis): '<that star's display name> B'."""
+            if "ra" not in s or "dec" not in s:
+                return 0
+            ra, dec = s["ra"].to_numpy(float), s["dec"].to_numpy(float)
+            iau_row = {}
+            for i in rows:
+                e = external.get(int(s.index[i]), {})
+                if e.get("iau") and name_en[i]:
+                    iau_row[_fold(e["iau"])] = int(i)
+            done = 0
+            for i in rows:
+                cur = name_en[i]
+                if not cur or name_src[i] in ("wiki", "iau") or sid_arr[i] >= 0:
+                    continue
+                b, lt = split_component(cur)
+                j = iau_row.get(_fold(b)) if lt else None
+                if j is None or j == i or _angle_deg(ra[i], dec[i], ra[j], dec[j]) > 0.05:
+                    continue
+                pb = split_component(name_en[j])[0]
+                if _fold(pb) == _fold(b):
+                    continue
+                pde = split_component(name_de[j])[0] if name_de[j] else None
+                old = cur
+                name_en[i], name_de[i] = f"{pb} {lt}", (f"{pde} {lt}" if pde else None)
+                name_rank[i] = min(int(name_rank[j]), int(Rank.COMMON)) if name_rank[j] <= Rank.COMMON else int(name_rank[j])
+                name_src[i] = "system"
+                alt[i] = ([old] + [a for a in (alt[i] or []) if a not in (old, name_en[i])])[:10]
+                done += 1
+            return done
 
         def distinguish_shared_names() -> int:
             """No two stars with the same display name. Of several stars that got the same name
@@ -690,6 +734,7 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
             ("CT Ceti A" / "CT Ceti B", "57 Aquilae A" / "57 Aquilae B" by brightness) or their next
             name or designation."""
             used = Counter(name_en[j] for j in rows if name_en[j])
+            iau_names = {_fold(e["iau"]) for e in external.values() if e.get("iau")}
             ra = s["ra"].to_numpy(float) if "ra" in s else None
             dec = s["dec"].to_numpy(float) if "dec" in s else None
             vmag = s["vmag"].to_numpy(float) if "vmag" in s else np.full(n, np.nan)
@@ -710,7 +755,10 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
                 name_rank[i] = rank if new_en else Rank.NONE
                 rest = [a for a in (alt[i] or []) if a != new_en]
                 if old and old != new_en and new_en and _COMP_RE.search(new_en) and split_component(new_en)[0] == old:
-                    rest = [old] + rest  # "CT Ceti" stays an alternative of "CT Ceti B"
+                    # "CT Ceti" stays an alternative of "CT Ceti B" (after the IAU name)
+                    iau = external.get(int(s.index[i]), {}).get("iau")
+                    first = [a for a in rest[:1] if a == iau]
+                    rest = first + [old] + [a for a in rest[len(first):] if a != old]
                 alt[i] = rest[:10] or None
 
             def with_letter(i: int, name: str, letter: str) -> None:
@@ -782,6 +830,8 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
                     for c in sorted(cs, key=lambda c: (c.rank, c.prio, c.seq)):
                         if c.rank > Rank.NAMED_MAX or c.en == nm or used[c.en] > 0:
                             continue
+                        if c.src != "iau" and _fold(split_component(c.en)[0]) in iau_names:
+                            continue  # "Sabik B": the IAU name of another star plus a letter
                         cl = split_component(c.en)[1]
                         if cl and letter and letters_conflict(cl, letter):
                             continue
@@ -832,12 +882,14 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
                 continue
             cur_base, cur_comp = split_component(cur) if cur else (None, None)
             new_comp = None
+            iau_letter = False
             if cur is not None and cur_comp and _fold(cur_base) != _fold(base_en) and name_src[i] != "wiki" and (
                 _fold(cur_base) == iau_name or (name_src[i] == "athyg" and _fold(cur_base) in aliases)
             ):
                 # the IAU name belongs to the primary only: AT-HYG / SIMBAD "Tianji B" next to
                 # "Zeta Herculis" is "Zeta Herculis B"
                 new_comp = cur_comp
+                iau_letter = True
             elif cur is not None and name_src[i] in PROTECTED_SOURCES:
                 continue  # Wikipedia, IAU and SIMBAD common names are a star's own
             elif cur is not None and cur_base != base_en and _fold(cur_base) == _fold(base_en):
@@ -851,17 +903,18 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
                     # only letters of the primary's own system / Gliese number: in a wide system that
                     # joins two pairs, "Struve 2576 A/B" must not become a second "17 Cygni A/B"
                     fam = letter_family(row_of(i))
-                    pf = _families(row_of(p))
-                    if fam is None or fam[0] not in pf or pf[fam[0]] == fam[1]:
+                    pf = _families(row_of(p), external.get(int(s.index[p]), {}))
+                    if fam is not None and pf.get(fam[0]) == fam[1]:
                         new_comp = c
             if not new_comp:
                 continue
             new_en = f"{base_en} {new_comp}"
-            if new_en == cur or taken[k][new_en] > 0:
-                continue  # never two stars of one system with the same name
+            if new_en == cur or (taken[k][new_en] > 0 and not iau_letter):
+                continue  # never two stars of one system with the same name (see distinguish_shared_names)
             rank = min(base_rank, Rank.COMMON) if base_rank <= Rank.COMMON else base_rank
             rename(i, k, new_en, f"{base_de} {new_comp}" if base_de else None, rank)
             renamed += 1
+        renamed += iau_letter_neighbours()
         distinguished = distinguish_shared_names()
         # give a component its letter too once another one is called "<its name> B"
         bases: dict[int, set[str]] = {}
