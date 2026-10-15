@@ -140,24 +140,33 @@ def letter_family(row) -> tuple[str, object, str] | None:
     """(source, key, letter) of a star's component letter: the census designation it belongs to,
     its Gliese number or its HYG system. Letters of different families are unrelated: "GJ 765.4 A"
     and "GJ 767.1 A" are both "A", and the census "G 96-29 A" is Capella H, not Capella A."""
+    fams = letter_families(row)
+    return fams[0] if fams else None
+
+
+def letter_families(row) -> list[tuple[str, object, str]]:
+    """All (source, key, letter) of a star, in the order census, Gliese, HYG ("HD 131976 Aa" in the
+    census is "GJ 570 B")."""
+    out = []
     name = _census_core(row.get("census_name"))
     size = row.get("system_size")
     if name and pd.notna(size) and float(size) > 1:
         m = re.search(r"\s([A-H][a-c]?)$", name)
         if m:
-            return ("census", (_int_or_none(row.get("system_row")), designation_key(name[: m.start()])), m.group(1))
+            out.append(("census", (_int_or_none(row.get("system_row")), designation_key(name[: m.start()])), m.group(1)))
     for key in ("census_gj", "gj"):
         g = row.get(key)
         if isinstance(g, str):
             m = re.search(r"\d\s*([A-D])$", g.strip())
             if m:
                 num = _gj_number(g)
-                return ("gj", num[0] if num else g.strip()[: -1].strip(), m.group(1))
+                out.append(("gj", num[0] if num else g.strip()[: -1].strip(), m.group(1)))
+                break
     if pd.notna(row.get("hyg_base")) and pd.notna(row.get("hyg_comp")):
         c = {1: "A", 2: "B", 3: "C", 4: "D"}.get(int(row["hyg_comp"]))
         if c:
-            return ("hyg", row.get("hyg_base"), c)
-    return None
+            out.append(("hyg", row.get("hyg_base"), c))
+    return out
 
 
 def _families(row, ext: dict | None = None) -> dict[str, object]:
@@ -701,8 +710,9 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
                 alt[i] = (first + [old] + rest[len(first):])[:10]
 
         def iau_letter_neighbours() -> int:
-            """'<IAU name> B' on a star that is not linked into the IAU star's system ("Algieba B"
-            4.6" from Gamma Leonis): '<that star's display name> B'."""
+            """'<IAU name> B' on a star next to the IAU-named star whose display name is another one
+            ("Algieba B" 4.6" from Gamma Leonis, not linked into a system; "Alrakis A" in the system
+            of Mu Draconis = Alrakis): '<that star's display name> B'."""
             if "ra" not in s or "dec" not in s:
                 return 0
             ra, dec = s["ra"].to_numpy(float), s["dec"].to_numpy(float)
@@ -714,11 +724,13 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
             done = 0
             for i in rows:
                 cur = name_en[i]
-                if not cur or name_src[i] in ("wiki", "iau") or sid_arr[i] >= 0:
+                if not cur or name_src[i] in ("wiki", "iau"):
                     continue
                 b, lt = split_component(cur)
                 j = iau_row.get(_fold(b)) if lt else None
-                if j is None or j == i or _angle_deg(ra[i], dec[i], ra[j], dec[j]) > 0.05:
+                if j is None or j == i:
+                    continue
+                if not (sid_arr[i] >= 0 and sid_arr[i] == sid_arr[j]) and _angle_deg(ra[i], dec[i], ra[j], dec[j]) > 0.05:
                     continue
                 pb = split_component(name_en[j])[0]
                 if _fold(pb) == _fold(b):
@@ -769,6 +781,53 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
             def with_letter(i: int, name: str, letter: str) -> None:
                 de = name_de[i]
                 put(i, f"{name} {letter}", f"{de} {letter}" if de and not _COMP_RE.search(de) else de, int(name_rank[i]), name_src[i])
+
+            def next_name(i: int, nm: str, cs: list[Cand], letter: str | None, comp: str | None) -> Cand | None:
+                """The best name of star i other than nm that no other star shows: one of its own
+                candidates (not '<IAU name of another star> <letter>', no other component's
+                letter), else its census designation."""
+                for c in sorted(cs, key=lambda c: (c.rank, c.prio, c.seq)):
+                    if c.rank > Rank.NAMED_MAX or c.en == nm or used[c.en] > 0:
+                        continue
+                    if c.src != "iau" and _fold(split_component(c.en)[0]) in iau_names:
+                        continue  # "Sabik B": the IAU name of another star plus a letter
+                    cl = split_component(c.en)[1]
+                    if cl and letter and letters_conflict(cl, letter):
+                        continue
+                    if cl and not letter and comp and not letters_conflict(cl, comp):
+                        continue  # "Struve 1110 C" next to the shared "Castor C": the same component
+                    return c
+                cname = row_of(i).get("census_name")
+                disp = census_display(cname) if isinstance(cname, str) else None
+                if disp and used[disp] == 0 and classify_name(disp) != Rank.OTHER:
+                    return Cand(disp, None, Rank.SURVEY, P_CENSUS, src="census")
+                return None
+
+            def rename_to(i: int, nxt: Cand | None) -> None:
+                if nxt is not None:
+                    put(i, nxt.en, nxt.de if nxt.de and nxt.de != nxt.en else None, int(nxt.rank), nxt.src)
+                else:
+                    put(i, None, None, Rank.NONE, "")
+
+            # an IAU name belongs to the star it is attached to, also when that star shows another
+            # name (its Wikipedia title): AT-HYG puts "Alrakis" on Mu Draconis A, the IAU on HIP 83608
+            iau_of = {}
+            for j in rows:
+                e = external.get(int(s.index[j]), {})
+                if e.get("iau"):
+                    iau_of[_fold(e["iau"])] = int(j)
+            for i in rows:
+                nm = name_en[i]
+                j = iau_of.get(_fold(nm)) if nm else None
+                if j is None or j == i or name_src[i] == "iau":
+                    continue
+                if not (sid_arr[i] >= 0 and sid_arr[i] == sid_arr[j]) and (
+                    ra is None or _angle_deg(ra[i], dec[i], ra[j], dec[j]) > 0.05
+                ):
+                    continue
+                r, e = row_of(i), external.get(int(s.index[i]), {})
+                rename_to(int(i), next_name(int(i), nm, candidates(r, e), component_letter(r) or simbad_letter(r, e), None))
+                changed += 1
 
             holders: dict[str, list[int]] = {}
             for j in rows:
@@ -831,28 +890,7 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
                             changed += 1
                             continue
                     # the next name of its own, or its census designation, or none
-                    nxt = None
-                    for c in sorted(cs, key=lambda c: (c.rank, c.prio, c.seq)):
-                        if c.rank > Rank.NAMED_MAX or c.en == nm or used[c.en] > 0:
-                            continue
-                        if c.src != "iau" and _fold(split_component(c.en)[0]) in iau_names:
-                            continue  # "Sabik B": the IAU name of another star plus a letter
-                        cl = split_component(c.en)[1]
-                        if cl and letter and letters_conflict(cl, letter):
-                            continue
-                        if cl and not letter and comp and not letters_conflict(cl, comp):
-                            continue  # "Struve 1110 C" next to the shared "Castor C": the same component
-                        nxt = c
-                        break
-                    if nxt is None:
-                        cname = r.get("census_name")
-                        disp = census_display(cname) if isinstance(cname, str) else None
-                        if disp and used[disp] == 0 and classify_name(disp) != Rank.OTHER:
-                            nxt = Cand(disp, None, Rank.SURVEY, P_CENSUS, src="census")
-                    if nxt is not None:
-                        put(i, nxt.en, nxt.de if nxt.de and nxt.de != nxt.en else None, int(nxt.rank), nxt.src)
-                    else:
-                        put(i, None, None, Rank.NONE, "")
+                    rename_to(i, next_name(i, nm, cs, letter, comp))
                     if info[i][3] <= 2:  # a name the census or SIMBAD gives this star stays searchable
                         alt[i] = ((alt[i] or []) + [nm])[:10]
                     changed += 1
@@ -889,12 +927,13 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
             new_comp = None
             iau_letter = False
             if cur is not None and cur_comp and _fold(cur_base) != _fold(base_en) and name_src[i] != "wiki" and (
-                _fold(cur_base) == iau_name or (name_src[i] == "athyg" and _fold(cur_base) in aliases)
+                _fold(cur_base) == iau_name or (name_src[i] not in PROTECTED_SOURCES and _fold(cur_base) in aliases)
             ):
                 # the IAU name belongs to the primary only: AT-HYG / SIMBAD "Tianji B" next to
-                # "Zeta Herculis" is "Zeta Herculis B"
+                # "Zeta Herculis" is "Zeta Herculis B"; another designation of the primary's system
+                # too: "e Virginis B" next to "59 Virginis" is "59 Virginis B"
                 new_comp = cur_comp
-                iau_letter = True
+                iau_letter = _fold(cur_base) == iau_name
             elif cur is not None and name_src[i] in PROTECTED_SOURCES:
                 continue  # Wikipedia, IAU and SIMBAD common names are a star's own
             elif cur is not None and cur_base != base_en and _fold(cur_base) == _fold(base_en):
@@ -907,10 +946,11 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
                 if cur is None or (name_rank[i] > base_rank and not own_name):
                     # only letters of the primary's own system / Gliese number: in a wide system that
                     # joins two pairs, "Struve 2576 A/B" must not become a second "17 Cygni A/B"
-                    fam = letter_family(row_of(i))
                     pf = _families(row_of(p), external.get(int(s.index[p]), {}))
-                    if fam is not None and pf.get(fam[0]) == fam[1]:
-                        new_comp = c
+                    for fam in letter_families(row_of(i)):
+                        if pf.get(fam[0]) == fam[1]:
+                            new_comp = fam[2]
+                            break
             if not new_comp:
                 continue
             new_en = f"{base_en} {new_comp}"
@@ -938,6 +978,29 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
                 src = name_src[i]
                 rename(i, k, new_en, new_de, int(name_rank[i]))
                 name_src[i] = src
+        # one German name per system name: the German article title of one member ("Alrakis" for
+        # Mu Draconis B) is also used for the others called "Mu Draconis A" / "Mu Draconis C"
+        for k, mem in members.items():
+            by_base: dict[str, list[int]] = {}
+            for i in mem:
+                if name_en[i]:
+                    by_base.setdefault(split_component(name_en[i])[0], []).append(i)
+            for b_en, lst in by_base.items():
+                if len(lst) < 2:
+                    continue
+                de_base = None
+                for i in lst:
+                    wde = external.get(int(s.index[i]), {}).get("wiki_de")
+                    if name_de[i] and isinstance(wde, str) and split_component(name_de[i])[0] == split_component(clean_title(wde))[0]:
+                        de_base = split_component(name_de[i])[0]
+                        break
+                if not de_base:
+                    continue
+                for i in lst:
+                    lt = split_component(name_en[i])[1]
+                    want = de_base + (f" {lt}" if lt else "")
+                    if (name_de[i] or name_en[i]) != want and _fold(split_component(name_de[i] or name_en[i])[0]) != _fold(de_base):
+                        name_de[i] = want if want != name_en[i] else None
         log.info("naming: %d system components named after their primary; %d stars renamed that shared a name", renamed, distinguished)
         for i in comp_of:
             if alt[i] and name_en[i] in alt[i]:
