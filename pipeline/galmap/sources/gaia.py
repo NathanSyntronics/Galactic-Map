@@ -1,8 +1,14 @@
-"""Gaia DR3 astrometry and photometry for the Tycho-2 and Hipparcos stars of AT-HYG.
+"""Gaia DR3 astrometry and photometry, and the Hipparcos new reduction, from the Gaia archive.
 
-AT-HYG has Gaia DR3 distances but no parallax errors, Gaia positions or BP-RP colours.
-We fetch them from the Gaia archive through the official cross-match tables, in source_id
-range chunks small enough for synchronous TAP queries (~50k rows each, a few seconds).
+AT-HYG has Gaia DR3 ids and distances but no parallax errors, Gaia positions or BP-RP colours.
+We fetch them
+  * for the official Tycho-2 / Hipparcos cross-matches, in source_id range chunks small enough
+    for synchronous TAP queries,
+  * for all other Gaia ids that AT-HYG assigns (lists of ids per query),
+  * for all stars of the Gaia Catalogue of Nearby Stars (joined on the server with the copy of
+    GCNS in the archive), so that every Gaia parallax gets the same zero-point correction,
+and the Hipparcos new reduction (van Leeuwen 2007) as the fallback for bright stars whose Gaia
+solution is poor.
 """
 
 from __future__ import annotations
@@ -27,7 +33,17 @@ COLUMNS = (
     "g.astrometric_params_solved"
 )
 
+TABLES = {
+    "tycho2": "gaiadr3.tycho2tdsc_merge_best_neighbour",
+    "hipparcos2": "gaiadr3.hipparcos2_best_neighbour",
+    "gcns": "external.gaiaedr3_gcns_main_1",
+}
 QUERIES = {
+    "gcns": (
+        "SELECT {cols} FROM external.gaiaedr3_gcns_main_1 AS x "
+        "JOIN gaiadr3.gaia_source AS g ON g.source_id = x.source_id "
+        "WHERE x.source_id >= {lo} AND x.source_id < {hi}"
+    ),
     "tycho2": (
         "SELECT x.original_ext_source_id AS tyc, {cols} FROM gaiadr3.tycho2tdsc_merge_best_neighbour AS x "
         "JOIN gaiadr3.gaia_source AS g ON g.source_id = x.source_id "
@@ -41,9 +57,16 @@ QUERIES = {
 }
 
 
+IDS_PER_QUERY = 2000
+NUMERIC = (
+    "ra", "dec", "parallax", "parallax_error", "pmra", "pmdec", "ruwe", "phot_g_mean_mag", "bp_rp",
+    "nu_eff_used_in_astrometry", "pseudocolour", "ecl_lat", "astrometric_params_solved",
+)
+HIP_COLUMNS = "hip, ra, dec, plx, e_plx, pm_ra, pm_de, hp_mag, b_v"
+
+
 def _count(name: str, lo: int, hi: int) -> int:
-    table = {"tycho2": "gaiadr3.tycho2tdsc_merge_best_neighbour", "hipparcos2": "gaiadr3.hipparcos2_best_neighbour"}[name]
-    q = f"SELECT COUNT(*) AS n FROM {table} AS x WHERE x.source_id >= {lo} AND x.source_id < {hi}"
+    q = f"SELECT COUNT(*) AS n FROM {TABLES[name]} AS x WHERE x.source_id >= {lo} AND x.source_id < {hi}"
     return int(tap_sync(GAIA_TAP, q, timeout=300)["n"].iloc[0])
 
 
@@ -85,29 +108,90 @@ def fetch_xmatch(name: str, chunks: int, cache: Path | None = None, refresh: boo
         log.info("gaia %s chunk %d/%d: %d rows", name, i + 1, chunks, len(df))
         if len(df):
             frames.append(df)
-    df = pd.concat(frames, ignore_index=True)
-    df["source_id"] = exact_int64(df["source_id"])
-    for c in (
-        "ra", "dec", "parallax", "parallax_error", "pmra", "pmdec", "ruwe", "phot_g_mean_mag", "bp_rp",
-        "nu_eff_used_in_astrometry", "pseudocolour", "ecl_lat", "astrometric_params_solved",
-    ):
-        df[c] = pd.to_numeric(df[c], errors="coerce")
+    df = _numeric(pd.concat(frames, ignore_index=True))
     if "hip" in df:
         df["hip"] = pd.to_numeric(df["hip"]).astype("Int64")
     df.to_parquet(out, index=False)
     return df
 
 
-def load(refresh: bool = False) -> pd.DataFrame:
-    """Gaia DR3 rows (deduplicated by source_id) for all Tycho-2 and Hipparcos cross-matches."""
+def _numeric(df: pd.DataFrame) -> pd.DataFrame:
+    df["source_id"] = exact_int64(df["source_id"])
+    for c in NUMERIC:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+    return df
+
+
+def fetch_ids(ids, cache: Path | None = None, refresh: bool = False) -> pd.DataFrame:
+    """gaia_source rows for a list of source_ids (ids that do not exist in DR3 are simply absent).
+
+    Results are cached together with the list of ids already asked for, so a changed id list only
+    costs the queries for the new ids.
+    """
+    cache = cache or CACHE_DIR / "gaia"
+    out = cache / "gaia_dr3_by_id.parquet"
+    asked_file = cache / "gaia_dr3_by_id_asked.npy"
+    ids = np.unique(np.asarray(ids, dtype=np.int64))
+    have = pd.read_parquet(out) if out.exists() and not refresh else None
+    asked = np.load(asked_file) if asked_file.exists() and have is not None else np.array([], dtype=np.int64)
+    todo = np.setdiff1d(ids, asked)
+    if len(todo):
+        frames = [] if have is None else [have]
+        for k in range(0, len(todo), IDS_PER_QUERY):
+            chunk = todo[k : k + IDS_PER_QUERY]
+            q = f"SELECT {COLUMNS} FROM gaiadr3.gaia_source AS g WHERE g.source_id IN ({','.join(str(int(v)) for v in chunk)})"
+            df = tap_sync(GAIA_TAP, q, timeout=900, maxrec=MAXREC)
+            if len(df) > len(chunk):
+                raise RuntimeError(f"Gaia id query returned {len(df)} rows for {len(chunk)} ids")
+            if len(df):
+                frames.append(_numeric(df))
+            log.info("gaia ids %d/%d: %d rows", min(k + IDS_PER_QUERY, len(todo)), len(todo), len(df))
+        have = pd.concat(frames, ignore_index=True).drop_duplicates("source_id").reset_index(drop=True)
+        cache.mkdir(parents=True, exist_ok=True)
+        have.to_parquet(out, index=False)
+        np.save(asked_file, np.union1d(asked, todo))
+    return have if have is not None else pd.DataFrame(columns=["source_id", *NUMERIC])
+
+
+def load_hipparcos(refresh: bool = False) -> pd.DataFrame:
+    """Hipparcos new reduction (van Leeuwen 2007): hip, ra, dec (deg, epoch 1991.25), plx, e_plx (mas), ..."""
+    out = CACHE_DIR / "gaia" / "hipparcos2007.parquet"
+    if out.exists() and not refresh:
+        return pd.read_parquet(out)
+    frames = []
+    for lo in range(0, 125_000, 25_000):
+        hi = lo + 25_000
+        cnt = int(tap_sync(GAIA_TAP, f"SELECT COUNT(*) AS n FROM public.hipparcos_newreduction WHERE hip >= {lo} AND hip < {hi}")["n"].iloc[0])
+        df = tap_sync(GAIA_TAP, f"SELECT {HIP_COLUMNS} FROM public.hipparcos_newreduction WHERE hip >= {lo} AND hip < {hi}", timeout=900, maxrec=MAXREC)
+        if len(df) != cnt:
+            raise RuntimeError(f"Hipparcos range [{lo}, {hi}): got {len(df)} rows, expected {cnt}")
+        frames.append(df)
+    df = pd.concat(frames, ignore_index=True)
+    for c in df.columns:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+    df["hip"] = df["hip"].astype("int64")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    df.to_parquet(out, index=False)
+    log.info("Hipparcos new reduction: %d stars", len(df))
+    return df
+
+
+def load(refresh: bool = False, extra_ids=None) -> pd.DataFrame:
+    """Gaia DR3 rows (unique source_ids) for the Tycho-2 and Hipparcos cross-matches, the GCNS stars
+    and any further ids (AT-HYG's own Gaia ids), with the parallax zero point in 'parallax_zp'."""
     tyc = fetch_xmatch("tycho2", chunks=48, refresh=refresh)
     hip = fetch_xmatch("hipparcos2", chunks=4, refresh=refresh)
-    cols = [
-        "source_id", "ra", "dec", "parallax", "parallax_error", "pmra", "pmdec", "ruwe", "phot_g_mean_mag", "bp_rp",
-        "nu_eff_used_in_astrometry", "pseudocolour", "ecl_lat", "astrometric_params_solved",
-    ]
-    both = pd.concat([tyc[cols], hip[cols]], ignore_index=True).drop_duplicates("source_id").reset_index(drop=True)
+    gcns = fetch_xmatch("gcns", chunks=16, refresh=refresh)
+    cols = ["source_id", *NUMERIC]
+    parts = [tyc[cols], hip[cols], gcns[cols]]
+    if extra_ids is not None:
+        known = pd.concat([p["source_id"] for p in parts]).to_numpy(dtype=np.int64)
+        missing = np.setdiff1d(np.asarray(extra_ids, dtype=np.int64), known)
+        if len(missing):
+            parts.append(fetch_ids(missing, refresh=refresh)[cols])
+    both = pd.concat(parts, ignore_index=True).drop_duplicates("source_id").reset_index(drop=True)
     both["parallax_zp"] = parallax_zero_point(both)
+    log.info("Gaia DR3: %d sources (%d Tycho-2, %d Hipparcos, %d GCNS cross-matches)", len(both), len(tyc), len(hip), len(gcns))
     return both
 
 

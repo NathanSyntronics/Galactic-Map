@@ -194,7 +194,7 @@ def encode_node(node: Node, cols: dict[str, np.ndarray], sys_info: dict[int, lis
                 extra["S"] = table
     if spect:
         extra["t"] = spect
-    extra_bytes = json.dumps(extra, ensure_ascii=False, separators=(",", ":")).encode("utf-8") if extra else b""
+    extra_bytes = json.dumps(extra, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8") if extra else b""
 
     body = bytearray(HEADER_BYTES)
     offsets = []
@@ -332,21 +332,21 @@ def write_dataset(
             entry.append(list(a))
         search.append(entry)
     search.sort(key=lambda e: (e[7], e[0]))
-    (out_dir / "search.json").write_text(json.dumps(search, ensure_ascii=False, separators=(",", ":")), "utf-8")
+    (out_dir / "search.json").write_text(json.dumps(search, ensure_ascii=False, separators=(",", ":"), allow_nan=False), "utf-8")
 
     sys_out: dict[str, list] = {}
     if systems is not None and len(systems):
         for row in systems.itertuples(index=False):
             de = row.name_de if isinstance(row.name_de, str) and row.name_de != row.name_en else None
             sys_out[str(int(row.system_id))] = [
-                row.name_en,
+                row.name_en if isinstance(row.name_en, str) else None,
                 de,
                 int(row.members),
                 round(float(row.cx), 3),
                 round(float(row.cy), 3),
                 round(float(row.cz), 3),
             ]
-    (out_dir / "systems.json").write_text(json.dumps(sys_out, ensure_ascii=False, separators=(",", ":")), "utf-8")
+    (out_dir / "systems.json").write_text(json.dumps(sys_out, ensure_ascii=False, separators=(",", ":"), allow_nan=False), "utf-8")
 
     manifest = {
         "format": "galmap-octree",

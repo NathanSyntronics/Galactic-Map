@@ -35,6 +35,24 @@ def positions(s: pd.DataFrame) -> pd.DataFrame:
     return s
 
 
+def place(s: pd.DataFrame, rows) -> None:
+    """Recompute xyz, dist_pc and dist_err of the given rows after their parallax changed."""
+    rows = np.asarray(rows, dtype=np.int64)
+    if not len(rows):
+        return
+    plx = s["plx"].to_numpy(dtype=float)[rows]
+    dist_pc = 1000.0 / plx
+    xyz = icrs_to_galactic_xyz(s["ra"].to_numpy(float)[rows], s["dec"].to_numpy(float)[rows], dist_pc) * LY_PER_PC
+    for k, c in enumerate(("x", "y", "z")):
+        v = s[c].to_numpy(dtype=float).copy()
+        v[rows] = xyz[:, k]
+        s[c] = v
+    for c, val in (("dist_pc", dist_pc), ("dist_err", s["plx_err"].to_numpy(dtype=float)[rows] / plx)):
+        v = s[c].to_numpy(dtype=float).copy()
+        v[rows] = val
+        s[c] = v
+
+
 def physics(s: pd.DataFrame, phot: Photometry) -> pd.DataFrame:
     s = s.copy()
     n = len(s)

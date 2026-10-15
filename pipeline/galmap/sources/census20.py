@@ -73,7 +73,7 @@ def _sexagesimal(ra: pd.Series, dec: pd.Series) -> tuple[np.ndarray, np.ndarray]
 
 # For objects without a measured parallax the census notes often give an estimate:
 # "Expected parallax is 64.2 mas", "Estimates are distance 17.6 pc", "d~19.9 pc", "at ~20 pc".
-_EST_PLX = re.compile(r"[Ee]xpected parallax is ([\d.]+) mas")
+_EST_PLX = re.compile(r"[Ee]xpected parallax is (?:>=|≥|~)?\s*([\d.]+) mas")
 _EST_DIST = re.compile(r"(?:\bd\s*~\s*|[Dd]istance(?: estimate)?(?: for [^.;()]*?)?(?: is)?\s+~?|\bat\s*~\s*)(\d+(?:\.\d+)?)\s*pc")
 EST_REL_ERR = 0.15  # typical uncertainty of the spectrophotometric distances
 
@@ -189,15 +189,24 @@ def load(refresh: bool = False) -> pd.DataFrame:
     # inherit astrometry from the nearest ancestor that has it
     df["plx_estimated"] = 0.0
     _inherit(df, parent, ["ra", "dec", "epoch", "pmra", "pmdec"])
-    _inherit(df, parent, ["plx", "plx_err"])
-    # still no parallax: use the estimate from the notes (and pass it on to the components)
     est = raw["GeneralNotes"].map(estimated_parallax).to_numpy(float) if "GeneralNotes" in raw else np.full(n, np.nan)
+    # a trigonometric parallax that is unusable ("poorly constrained") gives way to the estimate
+    p0, e0 = df["plx"].to_numpy(float), df["plx_err"].to_numpy(float)
+    poor = np.isfinite(p0) & ((p0 <= 0) | (e0 / np.where(p0 > 0, p0, 1.0) > 0.5)) & np.isfinite(est)
+    df.loc[poor, "plx"] = est[poor]
+    df.loc[poor, "plx_err"] = EST_REL_ERR * est[poor]
+    df.loc[poor, "plx_estimated"] = 1.0
+    own_plx = df["plx"].notna().to_numpy().copy()
+    _inherit(df, parent, ["plx", "plx_err", "plx_estimated"])
+    # still no parallax: use the estimate from the notes (and pass it on to the components)
     use = np.isnan(df["plx"].to_numpy(float)) & np.isfinite(est)
     df.loc[use, "plx"] = est[use]
     df.loc[use, "plx_err"] = EST_REL_ERR * est[use]
     df.loc[use, "plx_estimated"] = 1.0
+    own_plx |= use
     _inherit(df, parent, ["plx", "plx_err", "plx_estimated"])
     df["plx_estimated"] = df["plx_estimated"] > 0
+    _unify_tight_systems(df, parent, own_plx)
     log.info("20 pc census: %d objects placed by an estimated distance", int((df["plx_estimated"] & df["is_leaf"]).sum()))
 
     _propagate_to_primary_leaf(df, parent)
@@ -266,9 +275,78 @@ def _propagate_to_primary_leaf(df: pd.DataFrame, parent: np.ndarray) -> None:
             if isinstance(v, str) and not isinstance(df.at[target, col], str):
                 df.at[target, col] = v
                 moved += 1
-        if pd.notna(df.at[i, "hip"]) and pd.isna(df.at[target, "hip"]) and pd.isna(df.at[target, "gaia"]):
-            df.at[target, "hip"] = df.at[i, "hip"]
+        h = df.at[i, "hip"]
+        if pd.notna(h) and pd.isna(df.at[target, "hip"]) and not (df["hip"] == h).fillna(False).to_numpy(bool)[leaves].any():
+            df.at[target, "hip"] = h
     log.debug("census: %d system-level names moved to components", moved)
+
+
+TIGHT_SYSTEM_AU = 2000.0
+
+
+def _unify_tight_systems(df: pd.DataFrame, parent: np.ndarray, own_plx: np.ndarray) -> None:
+    """Components of a tight system (all leaves within TIGHT_SYSTEM_AU in projection) are placed at
+    one common distance. Their individual parallaxes are often perturbed by the orbital motion or
+    mix Hipparcos and Gaia values, which would put components a few au apart light-years apart in
+    depth (Wolf 424 A/B: 231.1 vs 223.5 mas). The common value is the error-weighted mean when the
+    measured parallaxes agree, otherwise the system row's own measurement or the most precise one."""
+    n = len(df)
+    children: dict[int, list[int]] = {}
+    for i in range(n):
+        if parent[i] >= 0:
+            children.setdefault(int(parent[i]), []).append(i)
+    is_leaf = df["is_leaf"].to_numpy()
+    ra, dec = df["ra"].to_numpy(float), df["dec"].to_numpy(float)
+    plx, err = df["plx"].to_numpy(float).copy(), df["plx_err"].to_numpy(float).copy()
+    est = df["plx_estimated"].to_numpy(bool).copy()
+
+    def leaves_below(i: int) -> list[int]:
+        out, stack = [], [i]
+        while stack:
+            k = stack.pop()
+            ch = children.get(k)
+            if not ch:
+                out.append(k)
+            else:
+                stack.extend(ch)
+        return out
+
+    unified = 0
+
+    def visit(i: int) -> None:
+        nonlocal unified
+        leaves = [k for k in leaves_below(i) if is_leaf[k]]
+        if len(leaves) >= 2 and np.isfinite(ra[leaves]).all():
+            u = np.stack([np.cos(np.radians(dec[leaves])) * np.cos(np.radians(ra[leaves])),
+                          np.cos(np.radians(dec[leaves])) * np.sin(np.radians(ra[leaves])),
+                          np.sin(np.radians(dec[leaves]))], axis=1)
+            sep = np.degrees(np.arccos(np.clip(u @ u.T, -1, 1))).max() * 3600.0
+            p_med = np.nanmedian(plx[leaves])
+            if np.isfinite(p_med) and p_med > 0 and sep * 1000.0 / p_med < TIGHT_SYSTEM_AU:
+                meas = [k for k in leaves if own_plx[k] and not est[k] and np.isfinite(err[k]) and err[k] > 0]
+                if meas:
+                    p, e = plx[meas], err[meas]
+                    w = 1.0 / e**2
+                    mean = float((w * p).sum() / w.sum())
+                    chi2 = float((((p - mean) / e) ** 2).sum()) / max(len(meas) - 1, 1)
+                    if chi2 <= 4.0:
+                        val, verr = mean, float(1.0 / np.sqrt(w.sum()))
+                    elif own_plx[i] and np.isfinite(plx[i]) and np.isfinite(err[i]):
+                        val, verr = plx[i], err[i]
+                    else:
+                        k = meas[int(np.argmin(e))]
+                        val, verr = plx[k], err[k]
+                    changed = [k for k in leaves if plx[k] != val]
+                    plx[leaves], err[leaves], est[leaves] = val, verr, False
+                    unified += len(changed)
+                return
+        for c in children.get(i, []):
+            visit(c)
+
+    for i in np.nonzero(parent < 0)[0]:
+        visit(int(i))
+    df["plx"], df["plx_err"], df["plx_estimated"] = plx, err, est
+    log.info("20 pc census: %d components of tight systems moved to their system's common distance", unified)
 
 
 def strip_component_note(name: str | None) -> str | None:

@@ -61,8 +61,13 @@ SPEC_WD = 10
 SPEC_OTHER = 11
 SPEC_UNKNOWN = 255
 
-_SPEC_RE = re.compile(r"^\s*(?:sd|esd|usd|d|g|sg)?\s*([OBAFGKMLTY])\s*(\d+(?:\.\d+)?)?", re.IGNORECASE)
-_WD_RE = re.compile(r"^\s*(?:w?D[ABOQZCX]|WD|D\d)", re.IGNORECASE)
+# luminosity-class prefixes are lower case (d = dwarf, sd = subdwarf, g = giant), the class letter upper case
+_SPEC_RE = re.compile(r"^\s*(?:d/sd|sd|esd|usd|d|g|sg)?\s*([OBAFGKMLTY])\s*(\d+(?:\.\d+)?)?")
+# white dwarfs: an upper-case D, alone or followed by its class letters or a temperature index
+# ('DA2', 'DC', 'DQ9', 'D', 'D?', 'Dpec'); 'dC' is a dwarf carbon star, not a white dwarf
+_WD_RE = re.compile(r"^\s*(?:w?D[ABOQZCXHP]|D\d|Dpec|D(?![a-z])|[Ww][Dd]\b)")
+# Am stars written with Ca II K line, hydrogen and metal types ('kA5hF1mF5'): the hydrogen type counts
+_AM_RE = re.compile(r"^\s*k[OBAFGKM]\d*(?:\.\d+)?\s*h([OBAFGKM])\s*(\d+(?:\.\d+)?)?")
 
 
 def spectral_code(spect: str | None) -> int:
@@ -74,9 +79,10 @@ def spectral_code(spect: str | None) -> int:
         m = re.search(r"(\d+(?:\.\d+)?)", s)
         sub = int(float(m.group(1))) if m else 0
         return SPEC_WD * 10 + min(sub, 9)
-    m = _SPEC_RE.match(s)
+    m = _AM_RE.match(s) or _SPEC_RE.match(s)
     if not m:
-        if s[0] in "CSWNRcswnr":
+        core = re.sub(r"^(?:sd|d)(?=[CSN])", "", s)  # dwarf carbon stars 'dC'
+        if core[0] in "CSWNRcswnr":
             return SPEC_OTHER * 10
         return SPEC_UNKNOWN
     cls = SPEC_CLASSES.index(m.group(1).upper())
