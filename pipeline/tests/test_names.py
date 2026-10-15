@@ -116,24 +116,66 @@ def test_wikidata_attach():
 
     wd = pd.DataFrame(
         {
-            "qid": ["Q1", "Q2", "Q3"],
-            "simbad": [["* eps Eri"], ["NAME Barnard's star"], ["* alf Lyr"]],
-            "en": ["Epsilon Eridani", "Barnard's Star", "Vega"],
-            "en_is_title": [True, True, True],
-            "de": ["Epsilon Eridani", "Barnards Pfeilstern", None],
-            "hip": [[16537], [87937], [91262]],
-            "gaia": [[], [4472832130942575872], []],
+            "qid": ["Q1", "Q2", "Q3", "Q4"],
+            "simbad": [["* eps Eri"], ["NAME Barnard's star"], ["* alf Lyr"], ["V* BO Mus"]],
+            "en": ["Epsilon Eridani", "Barnard's Star", "Vega", None],
+            "de": ["Epsilon Eridani", "Barnards Pfeilstern", None, "HIP 61404"],
+            "en_label": [None, None, None, "BO Mus"],
+            "de_label": [None, None, "Wega", None],
+            "hip": [[16537], [87937], [91262], [61404]],
+            "gaia": [[], [4472832130942575872], [], []],
         }
     )
     stars = pd.DataFrame(
         {
-            "simbad_main_id": ["* eps Eri", None, None, None],
-            "gaia": pd.array([None, 4472832130942575872, None, None], dtype="Int64"),
-            "hip": pd.array([16537, None, 91262, 91262], dtype="Int64"),
+            "simbad_main_id": ["* eps Eri", None, None, None, None],
+            "gaia": pd.array([None, 4472832130942575872, None, None, None], dtype="Int64"),
+            "hip": pd.array([16537, None, 91262, 91262, 61404], dtype="Int64"),
         }
     )
     out = attach(stars, wd)
     assert out[0]["wiki_en"] == "Epsilon Eridani"
     assert out[1]["wiki_de"] == "Barnards Pfeilstern"
-    assert out[2]["wiki_en"] == "Vega" and out[2]["wiki_de"] is None
+    assert out[2]["wiki_en"] == "Vega" and out[2]["wiki_de"] is None and out[2]["label_de"] == "Wega"
     assert 3 not in out  # one Wikidata item names one star only
+    # a label is not an article title
+    assert out[4]["wiki_en"] is None and out[4]["label_en"] == "BO Mus" and out[4]["wiki_de"] == "HIP 61404"
+
+
+def test_wikidata_attach_exact_simbad_match_wins():
+    """An exact SIMBAD main-id match is not taken away by an earlier row's HIP match (Iota Cas)."""
+    import pandas as pd
+
+    from galmap.sources.wikidata import attach
+
+    wd = pd.DataFrame(
+        {
+            "qid": ["Q1"],
+            "simbad": [["* iot Cas"]],
+            "en": ["Iota Cassiopeiae"],
+            "de": [None],
+            "en_label": [None],
+            "de_label": [None],
+            "hip": [[11569]],
+            "gaia": [[]],
+        }
+    )
+    stars = pd.DataFrame(
+        {
+            "simbad_main_id": ["* iot Cas A", "* iot Cas"],
+            "gaia": pd.array([None, None], dtype="Int64"),
+            "hip": pd.array([11569, None], dtype="Int64"),
+        }
+    )
+    out = attach(stars, wd)
+    assert 0 not in out and out[1]["wiki_en"] == "Iota Cassiopeiae"
+
+
+def test_wikidata_non_stellar_items():
+    from galmap.sources.wikidata import is_stellar
+
+    assert not is_stellar(["Q13632"], ["Eskimo Nebula", "Eskimonebel"])  # planetary nebula
+    assert not is_stellar([], ["Prawn Nebula", "IC 4628"])
+    assert not is_stellar([], ["Red Rectangle", "Roter Rechtecknebel"])
+    assert is_stellar(["Q523"], ["Vega", "Wega"])
+    assert is_stellar(["Q50053"], ["Alpha Centauri", "Alpha Centauri"])
