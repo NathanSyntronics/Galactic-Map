@@ -5,9 +5,14 @@ commonly used ("Epsilon Eridani" rather than the newer IAU name "Ran"), and the 
 Wikipedia provides the German names ("Wega", "Barnards Pfeilstern").
 
 We query all items that have a SIMBAD identifier (P3083) and an English or German Wikipedia
-article. The public Wikidata query service often times out on such queries, so we use the
-QLever SPARQL engine (University of Freiburg), which answers this one in a few seconds.
-Matching to our stars is done through the SIMBAD main identifier, Gaia DR3 id or HIP number.
+article, with their labels, HIP / Gaia DR3 numbers and classes (P31). The public Wikidata query
+service often times out on such queries, so we use the QLever SPARQL engine (University of
+Freiburg), which answers this one in a few seconds.
+
+Only article titles count as Wikipedia names; labels of items without an article in that
+language are ordinary name candidates. Nebulae, clusters, galaxies and planets are dropped
+(their HIP codes would otherwise put "Eskimo Nebula" on the central star). Items are matched to
+our stars in passes: SIMBAD main identifier first, then Gaia DR3 id, then HIP number.
 """
 
 from __future__ import annotations
@@ -23,7 +28,8 @@ from ..download import CACHE_DIR, session
 log = logging.getLogger(__name__)
 
 ENDPOINT = "https://qlever.dev/api/wikidata"
-FILE = CACHE_DIR / "wikidata" / "wikidata_stars.csv"
+# v2: with the P31 classes (the v1 file without them is left alone)
+FILE = CACHE_DIR / "wikidata" / "wikidata_stars_v2.csv"
 MIN_ROWS = 15_000
 
 SOURCE_INFO = {
@@ -45,6 +51,7 @@ PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 SELECT ?item (GROUP_CONCAT(DISTINCT ?s; SEPARATOR="|") AS ?simbad) (SAMPLE(?en) AS ?entitle) (SAMPLE(?de) AS ?detitle)
        (SAMPLE(?el) AS ?enlabel) (SAMPLE(?dl) AS ?delabel) (SAMPLE(?ml) AS ?mullabel)
        (GROUP_CONCAT(DISTINCT ?hip; SEPARATOR="|") AS ?hips) (GROUP_CONCAT(DISTINCT ?gaia; SEPARATOR="|") AS ?gaias)
+       (GROUP_CONCAT(DISTINCT STR(?cls); SEPARATOR="|") AS ?classes)
 WHERE {
   ?item wdt:P3083 ?s .
   OPTIONAL { ?a schema:about ?item ; schema:isPartOf <https://en.wikipedia.org/> ; schema:name ?en . }
@@ -55,9 +62,40 @@ WHERE {
   OPTIONAL { ?item rdfs:label ?ml . FILTER(LANG(?ml) = "mul") }
   OPTIONAL { ?item p:P528 ?st1 . ?st1 pq:P972 wd:Q537199 ; ps:P528 ?hip . }
   OPTIONAL { ?item p:P528 ?st3 . ?st3 pq:P972 wd:Q66061041 ; ps:P528 ?gaia . }
+  OPTIONAL { ?item wdt:P31 ?cls . }
 }
 GROUP BY ?item
 """
+
+# Classes (P31) of items that are not stars, although they carry a SIMBAD id and sometimes the
+# HIP number of a star in them: nebulae, clusters and associations, galaxies, planets, ...
+NON_STELLAR_CLASSES = {
+    # nebulae and interstellar matter
+    "Q42372", "Q13632", "Q2035809", "Q11282", "Q202265", "Q203958", "Q204194", "Q854857", "Q2722426",
+    "Q207436", "Q2318940", "Q41872", "Q272447", "Q1054444", "Q3346004", "Q50048", "Q27150479",
+    "Q1621824",
+    # star clusters, associations, moving groups, streams, asterisms
+    "Q168845", "Q11387", "Q11276", "Q736194", "Q921336", "Q12046080", "Q935337", "Q9262", "Q650001",
+    "Q882646", "Q72803708", "Q56425403",
+    # galaxies and beyond
+    "Q318", "Q2488", "Q192078", "Q184348", "Q72802508", "Q71965638", "Q217012", "Q644507", "Q46587",
+    "Q195577", "Q1151284", "Q83373", "Q115518", "Q71965429", "Q28738741", "Q190397", "Q204107",
+    "Q2490", "Q213930", "Q190438", "Q195385", "Q1491746", "Q1284344", "Q726611", "Q654754", "Q221221",
+    "Q27521", "Q3272595", "Q752374", "Q65259218", "Q211301", "Q2495", "Q195724", "Q3757442", "Q308492",
+    "Q845371", "Q2743798", "Q1565388", "Q53403265", "Q234077", "Q2557101", "Q1133705", "Q15922837",
+    "Q14515149", "Q2311038",
+    # planets and moons
+    "Q44559", "Q18611609", "Q327757", "Q382979", "Q97359320", "Q83148567", "Q3388369", "Q420490",
+    "Q115772494", "Q634",
+    # not an object
+    "Q4167410", "Q15623926", "Q7936582", "Q1369227", "Q82794", "Q185243", "Q912471",
+}
+# titles that name a nebula, a cluster or a galaxy rather than a star
+NON_STELLAR_TITLE = re.compile(
+    r"(nebula|nebel\b|cluster|haufen\b|galax|\bassociation\b|assoziation\b|\bmoving group\b|"
+    r"^(?:NGC|IC|M|Messier|Sh ?2-|LDN|Barnard)\s?\d)",
+    re.IGNORECASE,
+)
 
 
 def _fetch(refresh: bool) -> pd.DataFrame:
@@ -73,31 +111,51 @@ def _fetch(refresh: bool) -> pd.DataFrame:
     return df
 
 
+def _clean(v) -> str | None:
+    v = (v or "").strip() if isinstance(v, str) else ""
+    return v or None
+
+
+def is_stellar(classes: list[str], titles: list[str | None]) -> bool:
+    """False for items that are nebulae, clusters, galaxies, planets etc."""
+    if NON_STELLAR_CLASSES.intersection(classes):
+        return False
+    return not any(isinstance(t, str) and NON_STELLAR_TITLE.search(t) for t in titles)
+
+
 def load(refresh: bool = False) -> pd.DataFrame:
-    """One row per Wikidata item: qid, simbad (list), en, de, hip (list of int), gaia (list of int)."""
+    """One row per stellar Wikidata item: qid, simbad (list), en / de (article titles or None),
+    en_label / de_label (labels of items without an article in that language), hip (list of int),
+    gaia (list of int)."""
     df = _fetch(refresh)
-
-    def clean(v: str) -> str | None:
-        v = (v or "").strip()
-        return v or None
-
+    classes = df["classes"].map(lambda v: [c.rsplit("/", 1)[-1] for c in v.split("|") if c]) if "classes" in df else [[]] * len(df)
+    en = df["entitle"].map(_clean)
+    de = df["detitle"].map(_clean)
+    en_label = [None if t else (_clean(a) or _clean(b)) for t, a, b in zip(en, df["enlabel"], df["mullabel"])]
+    de_label = [None if t else _clean(a) for t, a in zip(de, df["delabel"])]
     out = pd.DataFrame(
         {
             "qid": df["item"].str.rsplit("/", n=1).str[-1],
             "simbad": df["simbad"].map(lambda v: [re.sub(r"\s+", " ", x).strip() for x in v.split("|") if x.strip()]),
-            "en": [clean(a) or clean(b) or clean(c) for a, b, c in zip(df["entitle"], df["enlabel"], df["mullabel"])],
-            "en_is_title": df["entitle"].str.strip() != "",
-            "de": [clean(a) or clean(b) for a, b in zip(df["detitle"], df["delabel"])],
+            "en": en,
+            "de": de,
+            "en_label": en_label,
+            "de_label": de_label,
             "hip": df["hips"].map(lambda v: [int(m) for m in re.findall(r"HIP\s*(\d+)", v)]),
             "gaia": df["gaias"].map(lambda v: [int(m) for m in re.findall(r"Gaia DR3\s*(\d+)", v)]),
         }
     )
-    log.info("Wikidata: %d items with an English or German Wikipedia article", len(out))
-    return out
+    keep = [is_stellar(c, [a, b, x, y]) for c, a, b, x, y in zip(classes, out["en"], out["de"], out["en_label"], out["de_label"])]
+    log.info("Wikidata: %d items with an English or German Wikipedia article (%d non-stellar dropped)", int(sum(keep)), len(out) - int(sum(keep)))
+    return out[keep].reset_index(drop=True)
 
 
 def attach(stars: pd.DataFrame, wd: pd.DataFrame) -> dict[int, dict]:
-    """Row index -> {"wiki_en": ..., "wiki_de": ...}, matched by SIMBAD main id, Gaia DR3 id, HIP."""
+    """Row index -> {"wiki_en", "wiki_de", "label_en", "label_de"} (None where missing).
+
+    Each item names one star and each star gets one item. Matches are made in passes, so that an
+    exact SIMBAD main-identifier match is never taken away by a looser one: first by SIMBAD main
+    identifier, then by Gaia DR3 id, then by HIP number."""
     by_simbad: dict[str, int] = {}
     by_gaia: dict[int, int] = {}
     by_hip: dict[int, int] = {}
@@ -108,29 +166,38 @@ def attach(stars: pd.DataFrame, wd: pd.DataFrame) -> dict[int, dict]:
             by_gaia.setdefault(g, k)
         for h in row.hip:
             by_hip.setdefault(h, k)
-    out: dict[int, dict] = {}
-    main_id = stars["simbad_main_id"].to_numpy(dtype=object) if "simbad_main_id" in stars else [None] * len(stars)
+    n = len(stars)
+    main_id = stars["simbad_main_id"].to_numpy(dtype=object) if "simbad_main_id" in stars else [None] * n
     gaia = stars["gaia"].astype("Int64").to_numpy(dtype=object)
     hip = stars["hip"].astype("Int64").to_numpy(dtype=object)
+    item_of: dict[int, int] = {}
     used: set[int] = set()
-    n_s = n_g = n_h = 0
-    for i in range(len(stars)):
-        k = None
-        m = main_id[i]
-        if isinstance(m, str) and m in by_simbad:
-            k = by_simbad[m]
-            n_s += 1
-        elif pd.notna(gaia[i]) and int(gaia[i]) in by_gaia:
-            k = by_gaia[int(gaia[i])]
-            n_g += 1
-        elif pd.notna(hip[i]) and int(hip[i]) in by_hip:
-            k = by_hip[int(hip[i])]
-            n_h += 1
-        if k is None or k in used:
-            continue
-        used.add(k)
+    counts = []
+
+    def run(key_of, table) -> None:
+        c = 0
+        for i in range(n):
+            if i in item_of:
+                continue
+            key = key_of(i)
+            if key is None:
+                continue
+            k = table.get(key)
+            if k is None or k in used:
+                continue
+            item_of[i] = k
+            used.add(k)
+            c += 1
+        counts.append(c)
+
+    run(lambda i: main_id[i] if isinstance(main_id[i], str) else None, by_simbad)
+    run(lambda i: int(gaia[i]) if pd.notna(gaia[i]) else None, by_gaia)
+    run(lambda i: int(hip[i]) if pd.notna(hip[i]) else None, by_hip)
+    out: dict[int, dict] = {}
+    cols = ("en", "de", "en_label", "de_label")
+    keys = ("wiki_en", "wiki_de", "label_en", "label_de")
+    for i, k in item_of.items():
         r = wd.iloc[k]
-        # missing titles come back as NaN from the pandas string dtype
-        out[i] = {k: (v if isinstance(v, str) and v else None) for k, v in (("wiki_en", r["en"]), ("wiki_de", r["de"]))}
-    log.info("Wikidata: %d stars matched (%d by SIMBAD id, %d by Gaia DR3, %d by HIP)", len(out), n_s, n_g, n_h)
+        out[i] = {key: (r[c] if isinstance(r[c], str) and r[c] else None) for key, c in zip(keys, cols)}
+    log.info("Wikidata: %d stars matched (%d by SIMBAD id, %d by Gaia DR3, %d by HIP)", len(out), *counts)
     return out

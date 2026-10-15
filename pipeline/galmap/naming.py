@@ -1,10 +1,25 @@
-"""Choosing display names (English and German), alternative designations and the primary designation."""
+"""Choosing display names (English and German), alternative designations and the primary designation.
+
+English display name (see choose()):
+  1. the English Wikipedia article title, when it is a name or a designation up to the survey
+     rank ("Epsilon Eridani", "Gliese 436", "Luyten 726-8"); the IAU name only wins when the title
+     is the IAU name itself or the IAU name plus a component letter ("Sirius A");
+  2. otherwise the IAU name;
+  3. otherwise the best-ranked candidate (flags.Rank: Bayer, Flamsteed, historical catalogue
+     names, variable-star names, Gliese, survey numbers), ties broken by source and order.
+German display name (see german_name()): the German article title when it is not a worse kind of
+name than the English one or is the same designation in German; otherwise the German form of the
+English name ("My Cephei", "Barnards Pfeilstern").
+Components of multiple systems are named after the primary ("Sirius B") unless they have a name of
+their own (Wikipedia, IAU, SIMBAD common name), and no name is given twice within a system.
+"""
 
 from __future__ import annotations
 
 import logging
 import re
 import unicodedata
+from collections import Counter
 from dataclasses import dataclass
 
 import numpy as np
@@ -12,16 +27,25 @@ import pandas as pd
 
 from .flags import Desig, Flag, Rank
 from .names import (
+    COMPONENT,
     CONSTELLATIONS,
     bayer_name,
     classify_name,
+    classify_title,
+    clean_title,
     constellation,
+    designation_key,
+    english_greek,
     expand_abbreviated,
     flamsteed_name,
     german_variant,
+    latin_bayer_letters,
+    letters_conflict,
+    normalize_bayer,
     parse_hyg_bayer,
     prettify_simbad,
-    strip_disambiguation,
+    split_component,
+    superscript,
 )
 
 log = logging.getLogger(__name__)
@@ -39,9 +63,14 @@ GERMAN_NAMES = {
 }
 
 # source priority for equal ranks (lower wins)
-P_IAU, P_WIKI, P_CENSUS, P_SIMBAD, P_ATHYG, P_GENERATED, P_ID = range(7)
+P_IAU, P_WIKI, P_CENSUS, P_SIMBAD, P_LABEL, P_ATHYG, P_GENERATED, P_ID = range(8)
 
-_COMP_RE = re.compile(r"\s([A-H][a-c]?)$")
+# names that are a star's own and are never replaced by "<primary> <letter>": Wikipedia titles,
+# IAU names and SIMBAD common names ("NAME ...")
+PROTECTED_SOURCES = {"iau", "wiki", "simbad_name"}
+
+_COMP_RE = re.compile(rf"\s({COMPONENT})$")
+_SUP_RE = re.compile(r"[⁰¹²³⁴⁵⁶⁷⁸⁹]+")
 
 
 @dataclass
@@ -51,12 +80,15 @@ class Cand:
     rank: int
     prio: int
     seq: int = 0
+    # where the name comes from: iau, wiki, simbad_name, simbad, census, label, athyg, generated
+    src: str = ""
 
 
 def german_of(en: str) -> str | None:
     """German form of an English name, if it differs (generic rules)."""
-    if en in GERMAN_NAMES:
-        return GERMAN_NAMES[en]
+    base, comp = split_component(en)
+    if base in GERMAN_NAMES:
+        return GERMAN_NAMES[base] + (f" {comp}" if comp else "")
     g = german_variant(en)
     if g:
         return g
@@ -69,7 +101,7 @@ def german_of(en: str) -> str | None:
 
 
 def _fold(name: str) -> str:
-    """Accent- and case-insensitive form of a name ("Krüger" == "Kruger")."""
+    """Accent- and case-insensitive form of a name ("Krüger" == "Kruger", "Tau¹" == "Tau1")."""
     return "".join(ch for ch in unicodedata.normalize("NFKD", name) if not unicodedata.combining(ch)).lower()
 
 
@@ -87,22 +119,103 @@ def gliese_display(gj: str | None) -> str | None:
     return f"{prefix} {num}{frac}" + (f" {comp}" if comp else "")
 
 
+def _gj_number(g) -> tuple[str, str | None] | None:
+    """'GJ 765.4 A' -> ('765.4', 'A'), 'Gl 721.0' -> ('721', None)."""
+    if not isinstance(g, str):
+        return None
+    m = re.fullmatch(r"\s*(?:GJ|Gl|Gliese)\s*(\d+(?:\.\d+)?)\s*([A-D][a-c]?)?\s*", g)
+    if not m:
+        return None
+    return re.sub(r"\.0$", "", m.group(1)), m.group(2)
+
+
 def component_letter(row) -> str | None:
     """Component letter of a star that is a member of a multiple system (A, B, Ba, ...)."""
+    fam = letter_family(row)
+    return fam[2] if fam else None
+
+
+def letter_family(row) -> tuple[str, object, str] | None:
+    """(source, key, letter) of a star's component letter: the census designation it belongs to,
+    its Gliese number or its HYG system. Letters of different families are unrelated: "GJ 765.4 A"
+    and "GJ 767.1 A" are both "A", and the census "G 96-29 A" is Capella H, not Capella A."""
     name = row.get("census_name")
-    if isinstance(name, str) and (row.get("system_size") or 0) > 1:
-        m = _COMP_RE.search(name)
+    size = row.get("system_size")
+    if isinstance(name, str) and pd.notna(size) and float(size) > 1:
+        m = re.search(r"\s([A-H][a-c]?)$", name)
         if m:
-            return m.group(1)
+            return ("census", (_int_or_none(row.get("system_row")), designation_key(name[: m.start()])), m.group(1))
     for key in ("census_gj", "gj"):
         g = row.get(key)
         if isinstance(g, str):
             m = re.search(r"\d\s*([A-D])$", g.strip())
             if m:
-                return m.group(1)
+                num = _gj_number(g)
+                return ("gj", num[0] if num else g.strip()[: -1].strip(), m.group(1))
     if pd.notna(row.get("hyg_base")) and pd.notna(row.get("hyg_comp")):
-        return {1: "A", 2: "B", 3: "C", 4: "D"}.get(int(row["hyg_comp"]))
+        c = {1: "A", 2: "B", 3: "C", 4: "D"}.get(int(row["hyg_comp"]))
+        if c:
+            return ("hyg", row.get("hyg_base"), c)
     return None
+
+
+def _families(row) -> dict[str, object]:
+    """All designation families of a star (see letter_family)."""
+    out: dict[str, object] = {}
+    name = row.get("census_name")
+    if isinstance(name, str) and pd.notna(row.get("system_row")):
+        out["census"] = (_int_or_none(row.get("system_row")), designation_key(split_component(name)[0]))
+    for key in ("census_gj", "gj"):
+        num = _gj_number(row.get(key))
+        if num:
+            out["gj"] = num[0]
+            break
+    if pd.notna(row.get("hyg_base")):
+        out["hyg"] = row.get("hyg_base")
+    return out
+
+
+def _int_or_none(v):
+    try:
+        return int(v) if pd.notna(v) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def lettered_designations(row, census_only: bool = False) -> dict[str, str]:
+    """The star's own designations with a component letter, as designation_key(base) -> letter:
+    census name and catalogue names, the Gliese number ('Wolf 1130 C' -> {'wolf1130': 'C'}).
+    A SIMBAD alias with the same base and another letter belongs to another component."""
+    names = []
+    for key in ("census_name", "census_gj") + (() if census_only else ("gj",)):
+        if isinstance(row.get(key), str):
+            names.append(row.get(key))
+    cat = row.get("catalog_names")
+    if isinstance(cat, (list, tuple, np.ndarray)):
+        names.extend(x for x in cat if isinstance(x, str))
+    out: dict[str, str] = {}
+    for nm in names:
+        t = _clean_text(re.sub(r'\s*"[^"]*"', "", nm))
+        if not t:
+            continue
+        base, letter = split_component(gliese_display(t) if re.match(r"(GJ|Gl)\s*\d", t) else t)
+        k = designation_key(base) if letter else None
+        if k:
+            out.setdefault(k, letter)
+    return out
+
+
+def contradicts(ident: str, own: dict[str, str]) -> bool:
+    """True if a (SIMBAD) designation names another component of one of the star's own lettered
+    designations ('GJ 1001 C' for the star 'GJ 1001 B')."""
+    if not own:
+        return False
+    p = prettify_simbad(ident) or re.sub(r"^(?:NAME|HIDDEN NAME)\s+", "", ident.strip())
+    base, letter = split_component(p)
+    if not letter:
+        return False
+    k = designation_key(base)
+    return k in own and letters_conflict(letter, own[k])
 
 
 def _with_comp(name: str | None, comp: str | None) -> str | None:
@@ -113,145 +226,238 @@ def _with_comp(name: str | None, comp: str | None) -> str | None:
     return f"{name} {comp}"
 
 
+def _clean_text(text: str) -> str | None:
+    """A free-text name from the census or a label without notes: 'Mothallah (A?)' -> 'Mothallah',
+    'YY Gem A (alpha Gem C)' -> 'YY Gem A', '2MASS J0700+3157 [C]' -> '2MASS J0700+3157 C',
+    'NAME I Boo*' -> 'NAME I Boo'."""
+    t = re.sub(r"\s+", " ", text.strip())
+    m = re.fullmatch(rf"(.+?)\s*\[({COMPONENT})\]", t)
+    if m:
+        t = f"{m.group(1)} {m.group(2)}"
+    t = re.sub(r"\s*\([^()]*\)$", "", t).strip()
+    return re.sub(r"\s*\*+$", "", t).strip() or None
+
+
+def census_display(cname: str) -> str:
+    """The census designation of an object without a name, readable: 'YY Gem A (alpha Gem C)' ->
+    'YY Geminorum A', 'DENIS-P J0205.4-1159 [C]' -> 'DENIS-P J0205.4-1159 C', '** WJG 5C' -> 'WJG 5C'."""
+    t = re.sub(r'\s*"[^"]*"', "", cname).strip()
+    t = _clean_text(t) or t
+    t = re.sub(r"^\*\*\s+", "", t)
+    return prettify_simbad(t) or expand_abbreviated(t) or t
+
+
+def latin_letters(row, ext: dict) -> set[tuple[str, str]]:
+    """Latin-letter Bayer designations of a star (lowercase 'f Eridani' vs. capital 'P Cygni')."""
+    idents = list(ext.get("simbad") or [])
+    mid = row.get("simbad_main_id")
+    if isinstance(mid, str):
+        idents.append(mid)
+    bf = row.get("bayer_flamsteed")
+    if isinstance(bf, str):
+        idents.extend(bf.split("|"))
+    out = latin_bayer_letters(idents)
+    b = parse_hyg_bayer(row.get("bayer"))
+    con = constellation(row.get("con"))
+    if b and con and len(b[0]) == 1:
+        out.add((b[0], con))
+    return out
+
+
 def candidates(row, ext: dict) -> list[Cand]:
     """All name candidates of one star.
 
     ext: external names for this star: {"iau": str, "wiki_en": str, "wiki_de": str,
-    "simbad": [ident, ...]}.
+    "label_en": str, "label_de": str, "simbad": [ident, ...]}.
     """
     out: list[Cand] = []
     comp = component_letter(row)
     in_system = (int(row.get("flags", 0)) & Flag.IN_SYSTEM) != 0 or comp is not None
+    latin = latin_letters(row, ext)
 
-    def add(en, rank, prio, de=None):
-        if isinstance(en, str) and en.strip():
-            en = en.strip()
-            if rank == Rank.GJ:  # "GJ 1" -> "Gliese 1" (the usual form for the original Gliese numbers)
-                en = gliese_display(en) or en
-                de = None
-            out.append(Cand(en, de if de and de != en else german_of(en), rank, prio, len(out)))
+    def add(en, prio, de=None, src="", rank=None, title=False, max_rank=Rank.OTHER):
+        if not isinstance(en, str) or not en.strip():
+            return
+        en = normalize_bayer(re.sub(r"\s+", " ", en.strip()), latin)
+        de = normalize_bayer(de.strip(), latin) if isinstance(de, str) and de.strip() else None
+        r = rank if rank is not None else (classify_title(en) if title else classify_name(en))
+        if r > max_rank:
+            return
+        if r == Rank.GJ:  # "GJ 1" -> "Gliese 1" (the usual form for the original Gliese numbers)
+            en = gliese_display(en) or en
+            de = None
+        out.append(Cand(en, de if de and de != en else german_of(en), r, prio, len(out), src))
 
-    def add_text(text, prio, max_rank=Rank.SURVEY, force_rank=None):
+    def add_text(text, prio, src, max_rank=Rank.SURVEY):
         """Add a free-text name (expanding abbreviated Bayer/Flamsteed forms like 'tau Cet')."""
         if not isinstance(text, str) or not text.strip():
             return
         t = re.sub(r"\s+", " ", text.strip())
-        if t.startswith(("*", "V*", "NAME", "LAL ", "Gmb ", "L ")):
+        if t.startswith("("):  # census notes: "(this is not V* W Her)"
+            return
+        m = re.fullmatch(r'(.*?)\s*"([^"]+)"', t)  # 'G 96-29 A "Capella H"': a nickname
+        if m:
+            add_text(m.group(2), prio, src, max_rank)
+            t = m.group(1).strip()
+        t = _clean_text(t) if t else None
+        if not t:
+            return
+        if t.startswith(("*", "V*", "NAME", "HIDDEN NAME", "LAL ", "Gmb ")):
             p = prettify_simbad(t)
             if p:
-                add(p, classify_name(p), prio, prettify_simbad(t, "de"))
-            return
-        t = re.sub(r"^NAME\s+", "", t)
-        t = re.sub(r"\s*\(([A-Za-z]{1,3})\)\s*$", "", t).strip()
+                s2 = "simbad_name" if src == "simbad" and t.startswith(("NAME", "HIDDEN NAME")) else src
+                add(p, prio, prettify_simbad(t, "de"), s2, max_rank=max_rank)
+                return
+            if not t.startswith(("LAL ", "Gmb ")):
+                return
         full = expand_abbreviated(t)
         if full:
-            add(full, classify_name(full), prio, expand_abbreviated(t, "de"))
+            add(full, prio, expand_abbreviated(t, "de"), src, max_rank=max_rank)
             return
-        r = force_rank if force_rank is not None else classify_name(t)
-        if r <= max_rank:
-            add(t, r, prio)
+        add(t, prio, None, src, max_rank=max_rank)
 
     if ext.get("iau"):
-        add(ext["iau"], Rank.IAU, P_IAU)
+        add(ext["iau"], P_IAU, src="iau", rank=Rank.IAU)
     if isinstance(ext.get("wiki_en"), str):
-        en = strip_disambiguation(ext["wiki_en"])
-        de = strip_disambiguation(ext["wiki_de"]) if isinstance(ext.get("wiki_de"), str) else None
-        r = classify_name(en)
-        add(en, r, P_WIKI, de)
+        add(clean_title(ext["wiki_en"]), P_WIKI, src="wiki", title=True)
     cn = row.get("common_name")
     if isinstance(cn, str):
         for part in cn.split("|"):
-            add_text(part, P_CENSUS)
+            add_text(part, P_CENSUS, "census")
     proper = row.get("proper")
     if isinstance(proper, str) and proper != "Sol":
-        add_text(proper, P_ATHYG)
+        add_text(proper, P_ATHYG, "athyg")
+
+    # SIMBAD identifiers: aliases with the star's own component letter (or none) first; an alias
+    # of another component of one of the star's own designations is dropped (census designations,
+    # and HYG's Gliese number too if the SIMBAD object was matched only by position)
+    mid = row.get("simbad_main_id")
+    mid = mid.strip() if isinstance(mid, str) and mid.strip() not in ("", "None", "nan") else None
+    expect = split_component(prettify_simbad(mid) or mid)[1] if mid else None
+    expect = expect or comp
+    own_letters = lettered_designations(row, census_only=row.get("simbad_match") != "pos")
+
+    def letter_of(ident: str) -> str | None:
+        return split_component(prettify_simbad(ident) or re.sub(r"^(?:NAME|HIDDEN NAME)\s+", "", ident))[1]
+
     def simbad_order(ident: str) -> tuple:
-        # among several SIMBAD NAMEs prefer "X's Star", then the longest ("Proxima Centauri" over "Proxima Cen")
-        is_name = ident.startswith("NAME")
-        return (0 if is_name else 1, 0 if "'s star" in ident.lower() else 1, -len(ident) if is_name else 0)
+        is_name = ident.startswith(("NAME", "HIDDEN NAME"))
+        lt = letter_of(ident)
+        if lt == expect:
+            pen = 0
+        elif lt is None or expect is None or not letters_conflict(lt, expect):
+            pen = 1
+        else:
+            pen = 2
+        # among several NAMEs prefer "X's Star", then the longest ("Proxima Centauri" over "Proxima Cen")
+        return (pen, 0 if is_name else 1, 0 if ident == mid else 1, 0 if "'s star" in ident.lower() else 1, -len(ident) if is_name else 0)
 
     for ident in sorted(ext.get("simbad", []) or [], key=simbad_order):
-        p = prettify_simbad(ident)
-        if p:
-            de = prettify_simbad(ident, "de")
-            r = classify_name(p)
-            if r <= Rank.SURVEY:
-                add(p, r, P_SIMBAD, de)
-        else:
-            add_text(ident, P_SIMBAD)
+        if contradicts(ident, own_letters):
+            continue
+        add_text(ident, P_SIMBAD, "simbad")
+    if isinstance(ext.get("label_en"), str):
+        add_text(clean_title(ext["label_en"]), P_LABEL, "label")
     bf = row.get("bayer_flamsteed")
     if isinstance(bf, str):
         for ident in bf.split("|"):
             p = prettify_simbad(ident.strip())
             if p:
                 pde = prettify_simbad(ident.strip(), "de")
-                add(_with_comp(p, comp if in_system else None), classify_name(p), P_CENSUS, _with_comp(pde, comp if in_system else None))
+                c = comp if in_system else None
+                add(_with_comp(p, c), P_CENSUS, _with_comp(pde, c), "census")
     con = row.get("con")
     b = parse_hyg_bayer(row.get("bayer"))
     if b and constellation(con):
         letter, idx = b
-        if len(letter) == 1 and letter.islower():  # Latin Bayer letter, e.g. "p Eridani"
-            en = f"{letter} {CONSTELLATIONS[constellation(con)]}"
+        if len(letter) == 1:  # Latin Bayer letter, e.g. "p Eridani", "b¹ Hydrae", "P Cygni"
+            sup = superscript(idx) if idx else ""
+            en = f"{letter}{sup} {CONSTELLATIONS[constellation(con)]}"
             de = en
         else:
             en = bayer_name(letter, con, idx, None, "en")
             de = bayer_name(letter, con, idx, None, "de")
         if en:
             c = comp if (in_system and not idx) else None
-            add(_with_comp(en, c), Rank.BAYER, P_GENERATED, _with_comp(de, c))
+            add(_with_comp(en, c), P_GENERATED, _with_comp(de, c), "generated", rank=Rank.BAYER)
     flam = row.get("flam")
     if pd.notna(flam) and constellation(con):
         en = flamsteed_name(int(flam), con)
-        add(_with_comp(en, comp if in_system else None), Rank.FLAMSTEED, P_GENERATED)
+        add(_with_comp(en, comp if in_system else None), P_GENERATED, src="generated", rank=Rank.FLAMSTEED)
     var = row.get("hyg_var")
     # within 20 pc the census variable-star names are authoritative (HYG sometimes puts the
     # variable name of a companion on the primary)
     if pd.notna(row.get("census_row")):
         var = None
-    if isinstance(var, str) and constellation(con):
+    if isinstance(var, str) and constellation(con) and not var.startswith("("):
         b2 = parse_hyg_bayer(var)
         if not (b2 and b2[0].lower() in ("alp", "bet", "gam", "del", "eps", "zet", "eta", "the", "iot", "kap", "lam", "mu", "nu", "xi", "omi", "pi", "rho", "sig", "tau", "ups", "phi", "chi", "psi", "ome")):
-            add(f"{var} {CONSTELLATIONS[constellation(con)]}", Rank.VARIABLE, P_GENERATED)
+            add(f"{var} {CONSTELLATIONS[constellation(con)]}", P_GENERATED, src="generated", max_rank=Rank.SURVEY)
     vn = row.get("var_name")
-    if isinstance(vn, str):
+    if isinstance(vn, str) and not vn.strip().startswith("("):
         p = prettify_simbad(vn if vn.startswith("V*") else f"V* {vn}")
         if p:
-            add(p, Rank.VARIABLE, P_CENSUS)
+            add(p, P_CENSUS, src="census", max_rank=Rank.SURVEY)
     cat_names = row.get("catalog_names")
-    for nm in cat_names if isinstance(cat_names, (list, tuple)) else []:
-        add_text(nm, P_CENSUS)
+    for nm in cat_names if isinstance(cat_names, (list, tuple, np.ndarray)) else []:
+        add_text(nm, P_CENSUS, "census")
     cname = row.get("census_name")
     if isinstance(cname, str):
-        add_text(cname, P_CENSUS)
-    gj = gliese_display(row.get("census_gj") or row.get("gj"))
-    if gj:
-        add(gj, Rank.GJ, P_GENERATED)
+        add_text(cname, P_CENSUS, "census")
+    # the census Gliese number (with its component letter) before HYG's
+    if isinstance(row.get("census_gj"), str):
+        add(gliese_display(row.get("census_gj")), P_CENSUS, src="census", rank=Rank.GJ)
+    elif isinstance(row.get("gj"), str):
+        add(gliese_display(row.get("gj")), P_GENERATED, src="generated", rank=Rank.GJ)
     return out
 
 
 def choose(cands: list[Cand]) -> tuple[Cand | None, list[str]]:
-    """The English Wikipedia title is taken as the most commonly used name (if it is a name and
-    not a bare catalogue number); otherwise the IAU name; otherwise the best-ranked candidate."""
+    """The English Wikipedia title is taken as the most commonly used name if it is a name or a
+    designation up to the survey rank; the IAU name wins over a title that is the IAU name plus a
+    component letter ("Sirius A" -> "Sirius"). Otherwise the IAU name, otherwise the best-ranked
+    candidate. Alternatives: the other names, best first (so the IAU name comes first)."""
     if not cands:
         return None, []
     wiki = [c for c in cands if c.prio == P_WIKI and c.rank <= Rank.SURVEY]
     iau = [c for c in cands if c.prio == P_IAU]
     if wiki:
         best = wiki[0]
-        # keep the IAU name if Wikipedia only offers a catalogue-style title, or the IAU name
-        # with a component letter ("Sirius A" -> "Sirius")
-        if iau and (best.rank >= Rank.GJ or _COMP_RE.sub("", best.en) == iau[0].en):
+        if iau and _fold(split_component(best.en)[0]) == _fold(iau[0].en):
             best = iau[0]
     else:
         best = min(cands, key=lambda c: (c.rank, c.prio, c.seq))
     seen = {best.en.lower()}
     alts = []
-    for c in sorted(cands, key=lambda c: (c.rank, c.prio)):
+    for c in sorted(cands, key=lambda c: (c.rank, c.prio, c.seq)):
         k = c.en.lower()
         if k not in seen:
             seen.add(k)
             alts.append(c.en)
     return best, alts
+
+
+def _same_designation(a: str, b: str) -> bool:
+    """'Ny¹ Columbae' / 'Nu¹ Columbae', 'Krüger 60' / 'Kruger 60': the same designation in another
+    language or spelling."""
+    return _fold(english_greek(a)) == _fold(english_greek(b))
+
+
+def german_name(best: Cand, ext: dict, latin: set | frozenset = frozenset()) -> str | None:
+    """German display name: the German Wikipedia title if it is not a worse kind of name than the
+    English one ("Lacaille 9352" for "Gliese 887") or is the same designation in German ("Ny Scorpii"
+    for "Nu Scorpii"); otherwise the German form of the English name. The component letter
+    follows the English name."""
+    title = ext.get("wiki_de")
+    if isinstance(title, str) and title.strip():
+        t = normalize_bayer(clean_title(title), latin)
+        t_base, _ = split_component(t)
+        en_base, en_comp = split_component(best.en)
+        r_en = max(int(best.rank), int(Rank.COMMON))  # an IAU name counts as a common name here
+        if classify_title(t_base) <= r_en or _same_designation(t_base, en_base):
+            out = t_base + (f" {en_comp}" if en_comp else "")
+            return out if out != best.en else None
+    return best.de if best.de and best.de != best.en else None
 
 
 def catalogue_designations(row) -> list[tuple[int, str]]:
@@ -296,6 +502,12 @@ def primary_designation(row) -> tuple[int, int, int, str | None]:
     return Desig.STRING, 0, 0, None
 
 
+def _strip_index(name: str) -> str:
+    """'Zeta¹ Coronae Borealis' -> 'Zeta Coronae Borealis'."""
+    words = name.split(" ", 1)
+    return " ".join([_SUP_RE.sub("", words[0])] + words[1:])
+
+
 def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
     """Adds name_rank, name_en, name_de, alt, desig_* and system_name_* columns.
 
@@ -306,6 +518,7 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
     name_rank = np.full(n, Rank.NONE, dtype=np.int64)
     name_en = np.full(n, None, dtype=object)
     name_de = np.full(n, None, dtype=object)
+    name_src = np.full(n, "", dtype=object)
     alt = np.full(n, None, dtype=object)
     sys_en = np.full(n, None, dtype=object)
     sys_de = np.full(n, None, dtype=object)
@@ -334,17 +547,19 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
     bayer_sys: dict[int, tuple[str, str | None]] = {}
     for i in rows:
         r = row_of(i)
-        cands = candidates(r, external.get(int(s.index[i]), {}))
+        ext = external.get(int(s.index[i]), {})
+        cands = candidates(r, ext)
         best, alts = choose(cands)
         desigs = [d for _, d in catalogue_designations(r)]
         cname = r.get("census_name")
         if (best is None or best.rank > Rank.NAMED_MAX) and isinstance(cname, str) and cname != "Sun":
             # objects of the 20 pc census are listed (and searchable) under their census designation
-            best = Cand(cname, None, Rank.SURVEY, P_CENSUS)
+            best = Cand(census_display(cname), None, Rank.SURVEY, P_CENSUS, src="census")
         if best is not None and best.rank <= Rank.NAMED_MAX:
             name_rank[i] = best.rank
             name_en[i] = best.en
-            name_de[i] = best.de if best.de and best.de != best.en else None
+            name_de[i] = german_name(best, ext, latin_letters(r, ext))
+            name_src[i] = best.src
             more = [a for a in alts if a != best.en] + [d for d in desigs if d not in alts]
             alt[i] = more[:10] or None
         else:
@@ -355,63 +570,112 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
         if sid >= 0:
             for c in cands:
                 if c.rank in (Rank.BAYER, Rank.FLAMSTEED):
-                    base_en = re.sub(r"[⁰¹²³⁴⁵⁶⁷⁸⁹]+", "", _COMP_RE.sub("", c.en))
-                    base_de = re.sub(r"[⁰¹²³⁴⁵⁶⁷⁸⁹]+", "", _COMP_RE.sub("", c.de)) if c.de else None
+                    base_en = _SUP_RE.sub("", split_component(c.en)[0])
+                    base_de = _SUP_RE.sub("", split_component(c.de)[0]) if c.de else None
                     prev = bayer_sys.get(sid)
                     if prev is None or (c.rank == Rank.BAYER and classify_name(prev[0]) != Rank.BAYER):
                         bayer_sys[sid] = (base_en, base_de)
 
     # Components of a named system: "Sirius B", "Procyon B", "Groombridge 34 B".
+    members: dict[int, list[int]] = {}
     if "system_id" in s:
         sid_arr = s["system_id"].to_numpy()
         flags0 = s["flags"].to_numpy(np.int64)
+        for i in rows:
+            if sid_arr[i] >= 0:
+                members.setdefault(int(sid_arr[i]), []).append(int(i))
         comp_of = {}
         for i in rows:
             if sid_arr[i] >= 0:
                 c = component_letter(row_of(i))
                 if c:
-                    comp_of[i] = c
+                    comp_of[int(i)] = c
         # "Ross 614B" -> "Ross 614 B": the usual spacing, and needed to recognise the letter
         for i, c in comp_of.items():
             for arr in (name_en, name_de):
                 if arr[i] and re.search(rf"\d{c}$", arr[i]):
                     arr[i] = f"{arr[i][:-len(c)]} {c}"
-        prim_name: dict[int, tuple[str, str | None, int]] = {}
+        taken = {k: Counter(name_en[j] for j in m if name_en[j]) for k, m in members.items()}
+
+        def rename(i: int, k: int, new_en: str, new_de: str | None, rank: int) -> None:
+            old = name_en[i]
+            taken[k][new_en] += 1
+            if old:
+                taken[k][old] -= 1
+            name_en[i] = new_en
+            name_de[i] = new_de
+            name_rank[i] = rank
+            name_src[i] = "system"
+            if old and old != new_en:
+                alt[i] = [old] + [a for a in (alt[i] or []) if a != old and a != new_en][:9]
+
+        prim_name: dict[int, tuple] = {}
         for i in np.nonzero((flags0 & Flag.SYSTEM_PRIMARY) != 0)[0]:
             if name_en[i] and name_rank[i] <= Rank.TRADITIONAL:
-                prim_name[int(sid_arr[i])] = (_COMP_RE.sub("", name_en[i]), _COMP_RE.sub("", name_de[i]) if name_de[i] else None, int(name_rank[i]))
+                k = int(sid_arr[i])
+                ext = external.get(int(s.index[i]), {})
+                aliases = {_fold(split_component(a)[0]) for a in (alt[i] or [])}
+                if ext.get("iau"):
+                    aliases.add(_fold(ext["iau"]))
+                prim_name[k] = (
+                    split_component(name_en[i])[0],
+                    split_component(name_de[i])[0] if name_de[i] else None,
+                    int(name_rank[i]),
+                    int(i),
+                    aliases,
+                )
         renamed = 0
         for i, c in comp_of.items():
             k = int(sid_arr[i])
             if k not in prim_name:
                 continue
-            base_en, base_de, base_rank = prim_name[k]
-            if (flags0[i] & Flag.SYSTEM_PRIMARY) and name_en[i] and _COMP_RE.sub("", name_en[i]) == base_en:
+            base_en, base_de, base_rank, p, aliases = prim_name[k]
+            cur = name_en[i]
+            if i == p or (cur is not None and name_src[i] in PROTECTED_SOURCES):
+                continue  # Wikipedia, IAU and SIMBAD common names are a star's own
+            cur_base, cur_comp = split_component(cur) if cur else (None, None)
+            new_comp = None
+            if cur is not None and cur_base != base_en and _fold(cur_base) == _fold(base_en):
+                new_comp = cur_comp or c  # another spelling: "Kruger 60 B" next to "Krüger 60 A"
+            elif cur is not None and name_src[i] == "athyg" and cur_comp and _fold(cur_base) != _fold(base_en) and _fold(cur_base) in aliases:
+                new_comp = cur_comp  # AT-HYG "Tianji B" next to "Zeta Herculis": "Zeta Herculis B"
+            else:
+                # companions with a name of their own keep it ("Proxima Centauri", "Capella H")
+                own_name = cur is not None and (
+                    name_rank[i] <= Rank.COMMON or _fold(cur).startswith(_fold(base_en) + " ")
+                )
+                if cur is None or (name_rank[i] > base_rank and not own_name):
+                    # only letters of the primary's own system / Gliese number: in a wide system that
+                    # joins two pairs, "Struve 2576 A/B" must not become a second "17 Cygni A/B"
+                    fam = letter_family(row_of(i))
+                    pf = _families(row_of(p))
+                    if fam is None or fam[0] not in pf or pf[fam[0]] == fam[1]:
+                        new_comp = c
+            if not new_comp:
                 continue
-            # also unify spellings: "Kruger 60 B" next to "Krüger 60 A"
-            respelled = name_en[i] is not None and name_en[i] != f"{base_en} {c}" and _fold(_COMP_RE.sub("", name_en[i])) == _fold(base_en)
-            # companions with a name of their own keep it ("Proxima Centauri", "Capella H")
-            own_name = name_en[i] is not None and (
-                name_rank[i] <= Rank.COMMON or _fold(name_en[i]).startswith(_fold(base_en) + " ")
-            )
-            if (name_rank[i] > base_rank and not own_name) or name_en[i] is None or respelled:
-                old = name_en[i]
-                name_en[i] = f"{base_en} {c}"
-                name_de[i] = f"{base_de} {c}" if base_de else None
-                name_rank[i] = min(base_rank, Rank.COMMON) if base_rank <= Rank.COMMON else base_rank
-                if old and old != name_en[i]:
-                    alt[i] = [old] + [a for a in (alt[i] or []) if a != old and a != name_en[i]][:9]
-                renamed += 1
+            new_en = f"{base_en} {new_comp}"
+            if new_en == cur or taken[k][new_en] > 0:
+                continue  # never two stars of one system with the same name
+            rank = min(base_rank, Rank.COMMON) if base_rank <= Rank.COMMON else base_rank
+            rename(i, k, new_en, f"{base_de} {new_comp}" if base_de else None, rank)
+            renamed += 1
         # give a component its letter too once another one is called "<its name> B"
         bases: dict[int, set[str]] = {}
         for i in comp_of:
-            if name_en[i] and _COMP_RE.search(name_en[i]):
-                bases.setdefault(int(sid_arr[i]), set()).add(_COMP_RE.sub("", name_en[i]))
+            if name_en[i]:
+                b_, c_ = split_component(name_en[i])
+                if c_:
+                    bases.setdefault(int(sid_arr[i]), set()).add(b_)
         for i, c in comp_of.items():
-            if name_en[i] and name_en[i] in bases.get(int(sid_arr[i]), ()):
-                name_en[i] = f"{name_en[i]} {c}"
-                if name_de[i] and not _COMP_RE.search(name_de[i]):
-                    name_de[i] = f"{name_de[i]} {c}"
+            k = int(sid_arr[i])
+            if name_en[i] and name_en[i] in bases.get(k, ()):
+                new_en = f"{name_en[i]} {c}"
+                if taken[k][new_en] > 0:
+                    continue
+                new_de = f"{name_de[i]} {c}" if name_de[i] and not _COMP_RE.search(name_de[i]) else name_de[i]
+                src = name_src[i]
+                rename(i, k, new_en, new_de, int(name_rank[i]))
+                name_src[i] = src
         log.info("naming: %d system components named after their primary", renamed)
         for i in comp_of:
             if alt[i] and name_en[i] in alt[i]:
@@ -425,21 +689,30 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
     flags |= np.where(name_rank <= Rank.VARIABLE, Flag.NAMED, 0)
     s["flags"] = flags
 
-    # system names
+    # system names: the primary's name without its component letter, if it is a name or a
+    # classical designation ("Sirius", "Alpha Centauri", "59 Virginis", "Wolf 359"); otherwise a
+    # Bayer / Flamsteed designation of any member; otherwise the primary's name or designation
     if "system_id" in s:
         sid = s["system_id"].to_numpy()
         prim = np.nonzero((flags & Flag.SYSTEM_PRIMARY) != 0)[0]
         for i in prim:
             k = int(sid[i])
             en, de = name_en[i], name_de[i]
-            if en and name_rank[i] <= Rank.COMMON:  # "Sirius A" -> system "Sirius"
-                sys_en[i] = _COMP_RE.sub("", en)
-                sys_de[i] = _COMP_RE.sub("", de) if de else None
+            if en and name_rank[i] <= Rank.TRADITIONAL:
+                b_en = split_component(en)[0]
+                b_de = split_component(de)[0] if de else None
+                # "Zeta¹ Coronae Borealis" with "Zeta² Coronae Borealis": the system is "Zeta Coronae Borealis"
+                plain = _strip_index(b_en)
+                if plain != b_en:
+                    others = {split_component(name_en[j])[0] for j in members.get(k, []) if j != i and name_en[j]}
+                    if any(o != b_en and _strip_index(o) == plain for o in others):
+                        b_en, b_de = plain, (_strip_index(b_de) if b_de else None)
+                sys_en[i], sys_de[i] = b_en, b_de
             elif k in bayer_sys:
                 sys_en[i], sys_de[i] = bayer_sys[k]
             elif en:
-                sys_en[i] = _COMP_RE.sub("", en)
-                sys_de[i] = _COMP_RE.sub("", de) if de else None
+                sys_en[i] = split_component(en)[0]
+                sys_de[i] = split_component(de)[0] if de else None
             else:
                 d = primary_designation(row_of(i))
                 sys_en[i] = d[3] if d[3] else None
@@ -482,7 +755,7 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
         for i in np.nonzero((dc == Desig.GAIA_DR3) & pd.notna(mid))[0]:
             m = str(mid[i]).strip()
             m = prettify_simbad(m) or re.sub(r"\s+", " ", m)
-            if m and not m.startswith("Gaia") and classify_name(m) <= Rank.SURVEY:
+            if m and not m.startswith("Gaia") and classify_title(m) <= Rank.SURVEY:
                 dc[i], dlo[i], dhi[i], dstr[i] = Desig.STRING, 0, 0, m
                 swapped += 1
         log.info("naming: %d Gaia-only stars designated by their SIMBAD identifier", swapped)
