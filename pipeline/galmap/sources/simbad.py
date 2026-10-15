@@ -230,8 +230,8 @@ def _consistency_check(stars: pd.DataFrame, ident: pd.DataFrame, basic: pd.DataF
     for o, cat, num, let in zip(ident["oidref"].to_numpy()[ok], d[0][ok], d[1][ok], d[2][ok]):
         cat = "GJ" if cat == "Gl" else cat
         obj.setdefault(int(o), []).append((cat, re.sub(r"\.0$", "", num), let if isinstance(let, str) else None))
-    # identifiers that end in a component letter ("Wolf 1130 B", "* alf Com A")
-    lettered = ident[ident["id"].str.contains(r"\s[A-H][a-c]?$", regex=True)]
+    # identifiers that end in a component letter ("Wolf 1130 B", "* alf Com A", "HD 73752A")
+    lettered = ident[ident["id"].str.contains(r"(?:\s|\d)[A-H][a-c]?$", regex=True)]
     obj_lettered = lettered.groupby("oidref")["id"].apply(list).to_dict()
     main = dict(zip(basic["oid"].to_numpy(), basic["main_id"].to_numpy()))
     cols = [c for c in ("census_name", "system_size", "system_row", "census_gj", "gj", "hyg_base", "hyg_comp", "catalog_names") if c in stars]
