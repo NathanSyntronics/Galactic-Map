@@ -110,7 +110,7 @@ def gliese_display(gj: str | None) -> str | None:
     """SIMBAD-form 'GJ 551 A' -> 'Gliese 551 A'; numbers >= 1000 stay 'GJ 1061'."""
     if not isinstance(gj, str):
         return None
-    m = re.fullmatch(r"\s*(?:GJ|Gl|Gliese)\s*(\d+)(\.\d+)?\s*([A-D][a-c]?)?\s*", gj)
+    m = re.fullmatch(r"\s*(?:GJ|Gl|Gliese)\s*(\d+)(\.\d+)?\s*([A-H](?:[a-c]|[A-H]{1,2})?)?\s*", gj)
     if not m:
         return gj.strip() or None
     num, frac, comp = m.group(1), m.group(2) or "", m.group(3)
@@ -124,10 +124,22 @@ def _gj_number(g) -> tuple[str, str | None] | None:
     """'GJ 765.4 A' -> ('765.4', 'A'), 'Gl 721.0' -> ('721', None)."""
     if not isinstance(g, str):
         return None
-    m = re.fullmatch(r"\s*(?:GJ|Gl|Gliese)\s*(\d+(?:\.\d+)?)\s*([A-D][a-c]?)?\s*", g)
+    m = re.fullmatch(r"\s*(?:GJ|Gl|Gliese)\s*(\d+(?:\.\d+)?)\s*([A-H](?:[a-c]|[A-H]{1,2})?)?\s*", g)
     if not m:
         return None
     return re.sub(r"\.0$", "", m.group(1)), m.group(2)
+
+
+def census_gj(v) -> str | None:
+    """The census Gliese number without alternatives and doubtful ones: 'GJ 56.5|GJ 9054' ->
+    'GJ 56.5'; 'GJ 3406 (GJ 3407?)' and 'GJ 325 A or B' -> None."""
+    if not isinstance(v, str):
+        return None
+    for part in v.split("|"):
+        part = part.strip()
+        if "?" not in part and " or " not in part and _gj_number(part):
+            return part
+    return None
 
 
 def component_letter(row) -> str | None:
@@ -155,13 +167,10 @@ def letter_families(row) -> list[tuple[str, object, str]]:
         if m:
             out.append(("census", (_int_or_none(row.get("system_row")), designation_key(name[: m.start()])), m.group(1)))
     for key in ("census_gj", "gj"):
-        g = row.get(key)
-        if isinstance(g, str):
-            m = re.search(r"\d\s*([A-D])$", g.strip())
-            if m:
-                num = _gj_number(g)
-                out.append(("gj", num[0] if num else g.strip()[: -1].strip(), m.group(1)))
-                break
+        num = _gj_number(census_gj(row.get(key)))
+        if num and num[1] and re.fullmatch(r"[A-H][a-c]?", num[1]):
+            out.append(("gj", num[0], num[1]))
+            break
     if pd.notna(row.get("hyg_base")) and pd.notna(row.get("hyg_comp")):
         c = {1: "A", 2: "B", 3: "C", 4: "D"}.get(int(row["hyg_comp"]))
         if c:
@@ -177,7 +186,7 @@ def _families(row, ext: dict | None = None) -> dict[str, object]:
     if name and pd.notna(row.get("system_row")):
         out["census"] = (_int_or_none(row.get("system_row")), designation_key(split_component(name)[0]))
     for key in ("census_gj", "gj"):
-        num = _gj_number(row.get(key))
+        num = _gj_number(census_gj(row.get(key)))
         if num:
             out["gj"] = num[0]
             break
@@ -213,8 +222,9 @@ def lettered_designations(row, census_only: bool = False) -> dict[str, str]:
     A SIMBAD alias with the same base and another letter belongs to another component."""
     names = []
     for key in ("census_name", "census_gj") + (() if census_only else ("gj",)):
-        if isinstance(row.get(key), str):
-            names.append(row.get(key))
+        v = census_gj(row.get(key)) if key != "census_name" else row.get(key)
+        if isinstance(v, str):
+            names.append(v)
     cat = row.get("catalog_names")
     if isinstance(cat, (list, tuple, np.ndarray)):
         names.extend(x for x in cat if isinstance(x, str))
@@ -464,9 +474,11 @@ def candidates(row, ext: dict) -> list[Cand]:
     cname = row.get("census_name")
     if isinstance(cname, str):
         add_text(cname, P_CENSUS, "census")
-    # the census Gliese number (with its component letter) before HYG's
-    if isinstance(row.get("census_gj"), str):
-        add(gliese_display(row.get("census_gj")), P_CENSUS, src="census", rank=Rank.GJ)
+    # the census Gliese number (with its component letter) before HYG's; an uncertain one
+    # ("GJ 3406 (GJ 3407?)") is not used
+    cgj = census_gj(row.get("census_gj"))
+    if cgj:
+        add(gliese_display(cgj), P_CENSUS, src="census", rank=Rank.GJ)
     elif isinstance(row.get("gj"), str):
         add(gliese_display(row.get("gj")), P_GENERATED, src="generated", rank=Rank.GJ)
     return out
@@ -650,8 +662,11 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
         desigs = [d for _, d in catalogue_designations(r)]
         cname = r.get("census_name")
         if (best is None or best.rank > Rank.NAMED_MAX) and isinstance(cname, str) and cname != "Sun":
-            # objects of the 20 pc census are listed (and searchable) under their census designation
-            best = Cand(census_display(cname), None, Rank.SURVEY, P_CENSUS, src="census")
+            # objects of the 20 pc census are listed (and searchable) under their census designation,
+            # unless it is a raw catalogue code ("[BHR2005] 832-2", "GR* 50 B")
+            disp = census_display(cname)
+            if not re.search(r"[\[\]()*\"]", disp):
+                best = Cand(disp, None, Rank.SURVEY, P_CENSUS, src="census")
         if best is not None and best.rank <= Rank.NAMED_MAX:
             name_rank[i] = best.rank
             name_en[i] = best.en
