@@ -6,12 +6,15 @@ English display name (see choose()):
      is the IAU name itself or the IAU name plus a component letter ("Sirius A");
   2. otherwise the IAU name;
   3. otherwise the best-ranked candidate (flags.Rank: Bayer, Flamsteed, historical catalogue
-     names, variable-star names, Gliese, survey numbers), ties broken by source and order.
+     names, variable-star names, Gliese, survey numbers), ties broken by source and order; a
+     Wikipedia title that is an HR / HIP / HD number goes before survey numbers.
 German display name (see german_name()): the German article title when it is not a worse kind of
 name than the English one or is the same designation in German; otherwise the German form of the
 English name ("My Cephei", "Barnards Pfeilstern").
 Components of multiple systems are named after the primary ("Sirius B") unless they have a name of
-their own (Wikipedia, IAU, SIMBAD common name), and no name is given twice within a system.
+their own (Wikipedia, IAU, SIMBAD common name), with the letter of the designation they share with
+the primary; "<IAU name of another star> B" becomes "<that star's display name> B". No display
+name is shown for two stars (see distinguish_shared_names in assign_names).
 """
 
 from __future__ import annotations
