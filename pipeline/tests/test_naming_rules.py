@@ -378,3 +378,37 @@ def test_system_article_titles_name_the_system():
     assert out["system_name_en"].iloc[2] == "Epsilon Lyrae"
     assert names[5:7] == ["30 Arietis A", "30 Arietis B"] and out["system_name_en"].iloc[5] == "30 Arietis"
     assert names[7] == "81 Cancri"
+
+
+def test_system_article_of_an_unresolved_pair():
+    import pandas as pd
+
+    from galmap.naming import assign_names
+    from galmap.sources.wikidata import attach
+
+    # Gliese 65 (= Luyten 726-8): SIMBAD id of the unresolved pair, our stars are its components
+    wd = pd.DataFrame(
+        {
+            "qid": ["Q494595"], "simbad": [["G 272-61"]], "en": ["Gliese 65"], "de": ["Luyten 726-8"],
+            "en_label": [None], "de_label": [None], "hip": [[]], "gaia": [[]], "stellar": [True], "codes": [[]],
+            "system": [False],
+        }
+    )
+    s = _frame([
+        {"census_name": "G 272-61 A", "simbad_main_id": "G 272-61A", "var_name": "V* BL Cet", "system_size": 2,
+         "system_row": 1, "flags": P_FLAGS, "system_id": 1},
+        {"census_name": "G 272-61 B", "simbad_main_id": "G 272-61B", "var_name": "V* UV Cet", "system_size": 2,
+         "system_row": 1, "flags": C_FLAGS, "system_id": 1},
+        # a star of another system with the same letter-stripped id is not matched
+        {"simbad_main_id": "G 272-61C", "flags": P_FLAGS, "system_id": 2},
+    ])
+    ext = attach(s, wd)
+    assert ext == {}  # the id matches two systems
+    s.loc[2, "system_id"] = 1
+    s.loc[2, "flags"] = C_FLAGS
+    ext = attach(s, wd)
+    assert ext == {0: {"sys_wiki_en": "Gliese 65", "sys_wiki_de": "Luyten 726-8"}}
+    out = assign_names(s, ext)
+    assert list(out["name_en"])[:2] == ["BL Ceti", "UV Ceti"]  # the title names the system, not a star
+    assert out["system_name_en"].iloc[0] == "Gliese 65"
+    assert "Gliese 65" in out["alt"].iloc[0]

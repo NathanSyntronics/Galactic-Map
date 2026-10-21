@@ -15,7 +15,8 @@ Only article titles count as Wikipedia names; labels of items without an article
 language are ordinary name candidates. Nebulae, clusters, galaxies and planets are dropped
 (their HIP codes would otherwise put "Eskimo Nebula" on the central star). Items are matched to
 our stars in passes: SIMBAD main identifier first, then Gaia DR3 id, then HIP number, then the
-HD / HR / Gliese / Bayer / Flamsteed catalogue codes.
+HD / HR / Gliese / Bayer / Flamsteed catalogue codes. An article whose SIMBAD identifier is that of
+an unresolved pair ("G 272-61" = Gliese 65) names the system of its components ("G 272-61A/B").
 """
 
 from __future__ import annotations
@@ -284,7 +285,9 @@ def _row_strings(stars: pd.DataFrame, idents: dict[int, list[str]] | None):
 def attach(stars: pd.DataFrame, wd: pd.DataFrame, idents: dict[int, list[str]] | None = None) -> dict[int, dict]:
     """Row index -> {"wiki_en", "wiki_de", "label_en", "label_de"} (None where missing), plus
     "wiki_system": True when the article is about a star system (an item of the second query), so
-    that its title names the system rather than the star it is attached to.
+    that its title names the system rather than the star it is attached to, and "sys_wiki_en" /
+    "sys_wiki_de": the titles of an article about the system of a component (see
+    _attach_to_systems).
 
     Each item names one star and each star gets one item. Matches are made in passes, so that an
     exact SIMBAD main-identifier match is never taken away by a looser one: first by SIMBAD main
@@ -333,6 +336,8 @@ def attach(stars: pd.DataFrame, wd: pd.DataFrame, idents: dict[int, list[str]] |
     run(lambda i: int(gaia[i]) if pd.notna(gaia[i]) else None, by_gaia)
     run(lambda i: int(hip[i]) if pd.notna(hip[i]) else None, by_hip)
     counts.append(_attach_by_codes(stars, wd, idents, item_of, used, stellar))
+    sys_of = _attach_to_systems(stars, wd, used, stellar)
+    counts.append(len(sys_of))
     out: dict[int, dict] = {}
     cols = ("en", "de", "en_label", "de_label")
     keys = ("wiki_en", "wiki_de", "label_en", "label_de")
@@ -342,7 +347,47 @@ def attach(stars: pd.DataFrame, wd: pd.DataFrame, idents: dict[int, list[str]] |
         out[i] = {key: (r[c] if isinstance(r[c], str) and r[c] else None) for key, c in zip(keys, cols)}
         if system[k] and (out[i]["wiki_en"] or out[i]["wiki_de"]):
             out[i]["wiki_system"] = True
-    log.info("Wikidata: %d stars matched (%d by SIMBAD id, %d by Gaia DR3, %d by HIP, %d by catalogue code)", len(out), *counts)
+    for i, k in sys_of.items():
+        r = wd.iloc[k]
+        e = out.setdefault(i, {})
+        e["sys_wiki_en"] = r["en"] if isinstance(r["en"], str) and r["en"] else None
+        e["sys_wiki_de"] = r["de"] if isinstance(r["de"], str) and r["de"] else None
+    log.info(
+        "Wikidata: %d stars matched (%d by SIMBAD id, %d by Gaia DR3, %d by HIP, %d by catalogue code); "
+        "%d systems named by the article about the unresolved pair",
+        len(item_of), *counts,
+    )
+    return out
+
+
+def _attach_to_systems(stars, wd, used: set[int], stellar) -> dict[int, int]:
+    """Pass 5 of attach(): items about a system whose SIMBAD identifier is that of the unresolved
+    pair, while our stars are its components: 'G 272-61' (Gliese 65 = Luyten 726-8) for the census
+    stars with the main identifiers 'G 272-61A' and 'G 272-61B'. Row of the system primary (or of
+    the first such component) -> item; the title names the system, not the star."""
+    if "simbad_main_id" not in stars or "system_id" not in stars:
+        return {}
+    main_id = stars["simbad_main_id"].to_numpy(dtype=object)
+    sid = stars["system_id"].to_numpy()
+    flags = stars["flags"].to_numpy(np.int64) if "flags" in stars else np.zeros(len(stars), np.int64)
+    stripped: dict[str, list[int]] = {}
+    for i in np.nonzero(pd.notna(main_id))[0]:
+        if not isinstance(main_id[i], str) or sid[i] < 0:
+            continue
+        m = re.fullmatch(r"(.*?\S)\s?([A-H])", re.sub(r"\s+", " ", main_id[i].strip()))
+        if m:
+            stripped.setdefault(m.group(1), []).append(int(i))
+    out: dict[int, int] = {}
+    for k, row in enumerate(wd.itertuples(index=False)):
+        if k in used or not stellar[k] or not (row.en or row.de):
+            continue
+        for ident in row.simbad:
+            rows = stripped.get(ident)
+            if not rows or len({int(sid[i]) for i in rows}) != 1:
+                continue  # components of one system only
+            i = min(rows, key=lambda j: (0 if flags[j] & 8 else 1, j))
+            out.setdefault(i, k)
+            break
     return out
 
 

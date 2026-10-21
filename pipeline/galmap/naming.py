@@ -486,6 +486,9 @@ def candidates(row, ext: dict) -> list[Cand]:
         add(gliese_display(cgj), P_CENSUS, src="census", rank=Rank.GJ)
     elif isinstance(row.get("gj"), str):
         add(gliese_display(row.get("gj")), P_GENERATED, src="generated", rank=Rank.GJ)
+    if isinstance(ext.get("sys_wiki_en"), str) and ext["sys_wiki_en"].strip():
+        # the article about the system of this component ("Gliese 65" for BL Ceti): an alternative only
+        add(normalize_bayer(clean_title(ext["sys_wiki_en"]), latin), P_ID, src="wiki_system", title=True)
     if wiki_en and ext.get("wiki_system"):
         # an article about the star system ("40 Eridani", "Epsilon Lyrae", "30 Arietis"): its title
         # names the system (see system_title), and a member of a system only together with the
@@ -519,6 +522,10 @@ def choose(cands: list[Cand]) -> tuple[Cand | None, list[str]]:
     candidate. Alternatives: the other names, best first (so the IAU name comes first)."""
     if not cands:
         return None, []
+    alts_only = [c for c in cands if c.src == "wiki_system"]  # the title of the system's article
+    cands = [c for c in cands if c.src != "wiki_system"]
+    if not cands:
+        return None, [c.en for c in alts_only]
     wiki = [c for c in cands if c.prio == P_WIKI and c.rank <= Rank.SURVEY]
     iau = [c for c in cands if c.prio == P_IAU]
     if wiki:
@@ -534,7 +541,7 @@ def choose(cands: list[Cand]) -> tuple[Cand | None, list[str]]:
             best = replace(wiki_cat[0], rank=Rank.SURVEY)
     seen = {best.en.lower()}
     alts = []
-    for c in sorted(cands, key=lambda c: (c.rank, c.prio, c.seq)):
+    for c in sorted(cands + alts_only, key=lambda c: (c.rank, c.prio, c.seq)):
         k = c.en.lower()
         if k not in seen:
             seen.add(k)
@@ -727,8 +734,9 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
             alt[i] = alts2[:10] or None
         # system naming material: Bayer / Flamsteed without component
         sid = int(r.get("system_id", -1)) if pd.notna(r.get("system_id", -1)) else -1
-        if sid >= 0 and ext.get("wiki_system") and sid not in sys_title:
-            t = system_title(ext, latin_letters(r, ext))
+        if sid >= 0 and sid not in sys_title and (ext.get("wiki_system") or ext.get("sys_wiki_en")):
+            src = ext if ext.get("wiki_system") else {"wiki_en": ext.get("sys_wiki_en"), "wiki_de": ext.get("sys_wiki_de")}
+            t = system_title(src, latin_letters(r, ext))
             if t:
                 sys_title[sid] = t
         if sid >= 0:
