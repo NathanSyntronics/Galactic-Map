@@ -239,3 +239,15 @@ def test_imprecise_system_member_moves_to_system_distance():
     s2 = s.assign(plx=[12.05, 16.69, 10.0], plx_err=[0.02, 1.60, 0.1])
     common_distances(s2)
     assert s2.loc[1, "plx"] == 16.69
+
+
+
+def test_census_component_takes_row_without_usable_parallax():
+    # xi UMa B: AT-HYG's Gaia-derived distance is unusable (link rejected), but the row's identifiers
+    # belong to the census component
+    a = athyg_frame([dict(id=1, gaia=pd.NA, dist=8.73, dist_src="G_R3", hd=98230, gj="GJ 423 B", ra_deg=169.5452, dec=31.5291)])
+    s = merge.athyg_rows(merge.link_gaia(a, gaia_frame([dict(source_id=1)])), hyg_frame())
+    assert np.isnan(s.loc[0, "plx"])
+    c = census_frame([dict(census_row=0, census_name="xi UMa Ba", gaia=pd.NA, ra=169.5452, dec=31.5291, plx=114.49)])
+    out = merge.merge_census(s, c)
+    assert len(out) == 1 and out.loc[0, "hd"] == 98230 and out.loc[0, "plx"] == 114.49
