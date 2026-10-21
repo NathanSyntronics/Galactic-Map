@@ -66,6 +66,8 @@ MUST_EXIST = {
     "Sirius B": Flag.WHITE_DWARF,
     "Teegarden's Star": 0,
 }
+# known planet hosts -> minimum number of planets (NASA Exoplanet Archive)
+PLANETS = {"Proxima Centauri": 2, "51 Pegasi": 1, "TRAPPIST-1": 7, "Epsilon Eridani": 1}
 
 
 def _read_node(out: Path, manifest: dict, path: str) -> dict:
@@ -77,7 +79,8 @@ def _read_node(out: Path, manifest: dict, path: str) -> dict:
     offs = struct.unpack_from("<" + "I" * 11, blob, 12)
     pos = np.frombuffer(blob, "<f4", count * 3, offs[0]).reshape(count, 3).astype(float)
     flags = np.frombuffer(blob, "<u2", count, offs[4])
-    return {"pos": pos, "flags": flags}
+    extra = json.loads(blob[offs[9]:offs[9] + offs[10]].decode("utf-8")) if offs[10] else {}
+    return {"pos": pos, "flags": flags, "extra": extra}
 
 
 def _norm(s: str) -> str:
@@ -90,7 +93,7 @@ def verify(out: Path) -> list[str]:
     search = json.loads((out / "search.json").read_text("utf-8"))
     by_name: dict[str, list] = {}
     for e in search:
-        for n in [e[0], e[1]] + (e[8] if len(e) > 8 else []):
+        for n in [e[0], e[1]] + ((e[8] or []) if len(e) > 8 else []):
             if n:
                 by_name.setdefault(_norm(n), []).append(e)
     problems = []
@@ -134,12 +137,37 @@ def verify(out: Path) -> list[str]:
             if not node["flags"][e[3]] & flag:
                 problems.append(f"{name}: expected flag {flag}")
     problems += check_names(search)
+    problems += check_designations(search)
+    for name, n in PLANETS.items():
+        hits = by_name.get(_norm(name)) or by_name.get(_norm(f"{name} A"))
+        if not hits:
+            problems.append(f"{name}: not found")
+            continue
+        e = hits[0]
+        got = _read_node(out, manifest, e[2])["extra"].get("p", {}).get(str(e[3]), 0)
+        if got < n:
+            problems.append(f"{name}: {got} known planets, expected at least {n}")
     # the Sun is in the root node at the origin
     root = _read_node(out, manifest, "r")
     sun = np.nonzero(root["flags"] & Flag.SUN)[0]
     if len(sun) != 1 or np.abs(root["pos"][sun[0]]).max() > 1e-6:
         problems.append("Sun: not at the origin of the root node")
     return problems
+
+
+def check_designations(search: list) -> list[str]:
+    """The primary designation identifies a star (user data is stored under it): unique, never empty."""
+    seen: dict[str, str] = {}
+    problems = []
+    for e in search:
+        d = e[9] if len(e) > 9 else None
+        if not d:
+            problems.append(f"{e[0]}: no primary designation")
+        elif d in seen:
+            problems.append(f"{e[0]}: primary designation '{d}' also used by {seen[d]}")
+        else:
+            seen[d] = e[0]
+    return problems[:20]
 
 
 def check_names(search: list) -> list[str]:

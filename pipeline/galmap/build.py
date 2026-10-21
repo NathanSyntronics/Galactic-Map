@@ -23,7 +23,7 @@ from .flags import Desig, Flag, Rank
 from .names import GREEK, designation_key, letters_conflict, split_component
 from .octree import write_dataset
 from .photometry import MAMAJEK_URL, Photometry, load_mamajek
-from .sources import athyg, census20, gaia, gcns, hyg, iau, simbad, wikidata
+from .sources import athyg, census20, exoplanets, gaia, gcns, hyg, iau, simbad, wikidata
 
 log = logging.getLogger("galmap.build")
 
@@ -211,7 +211,14 @@ def _write_debug_table(s: pd.DataFrame) -> None:
     d.to_parquet(out / "stars_100pc.parquet", index=False)
 
 
-def build(out: Path, refresh: bool = False, capacity: int = 4096, limit: int | None = None, use_simbad: bool = True) -> dict:
+def build(
+    out: Path,
+    refresh: bool = False,
+    capacity: int = 4096,
+    limit: int | None = None,
+    use_simbad: bool = True,
+    field: bool = True,
+) -> dict:
     t0 = time.time()
     phot = Photometry(load_mamajek(fetch(MAMAJEK_URL, MAMAJEK_FILE, refresh=refresh)))
 
@@ -225,6 +232,9 @@ def build(out: Path, refresh: bool = False, capacity: int = 4096, limit: int | N
     s = merge.merge_gcns(s, gcns.load(refresh), g)
     del a, g  # the full AT-HYG and Gaia tables are no longer needed (memory)
     gc.collect()
+    if field:
+        s = merge.add_gaia_field(s, gaia.load_field(refresh))
+        gc.collect()
     s = merge.dedupe_against_gaia(s)
     s = merge.merge_census(s, census20.load(refresh))
     s = pd.concat([s, sun_row()], ignore_index=True)
@@ -270,6 +280,11 @@ def build(out: Path, refresh: bool = False, capacity: int = 4096, limit: int | N
     sun = s["is_sun"].to_numpy()
     s.loc[sun, ["name_rank", "name_en", "name_de", "desig_cat", "desig_str"]] = [Rank.IAU, "Sun", "Sonne", Desig.STRING, "Sun"]
     s.loc[sun, ["x", "y", "z", "dist_err"]] = 0.0
+    try:
+        s["planets"] = exoplanets.attach(s, exoplanets.load(refresh))
+    except Exception as err:  # a bonus layer; the map works without it
+        log.warning("NASA Exoplanet Archive unavailable, continuing without planets: %s", err)
+        s["planets"] = 0
     sys_table = systems.system_table(s)
     _write_debug_table(s)
 
@@ -281,6 +296,9 @@ def build(out: Path, refresh: bool = False, capacity: int = 4096, limit: int | N
         "systems": int(len(sys_table)),
         "within20pc": int((s["dist_pc"] < 20).sum()),
         "within100pc": int((s["dist_pc"] < 100).sum()),
+        "within200pc": int((s["dist_pc"] < 200).sum()),
+        "planetHosts": int((s["planets"] > 0).sum()),
+        "planets": int(s["planets"].sum()),
     }
     sources = []
     for info, flag in (
@@ -293,6 +311,7 @@ def build(out: Path, refresh: bool = False, capacity: int = 4096, limit: int | N
         (iau.SOURCE_INFO, None),
         (simbad.SOURCE_INFO, None),
         (wikidata.SOURCE_INFO, None),
+        (exoplanets.SOURCE_INFO, None),
         (MAMAJEK_INFO, None),
     ):
         entry = dict(info)
@@ -304,6 +323,8 @@ def build(out: Path, refresh: bool = False, capacity: int = 4096, limit: int | N
         "maxRelativeDistanceError": derive.MAX_REL_ERR,
         "censusLimitPc": merge.CENSUS_LIMIT_PC,
         "wideBinaryMaxSepAu": systems.MAX_SEP_AU,
+        "gaiaFieldMinParallaxMas": merge.FIELD_MIN_PLX,
+        "gaiaFieldMaxRelativeError": merge.FIELD_MAX_REL_ERR,
     }
     manifest = write_dataset(s, sys_table, out, sources=sources, params=params, stats=stats, capacity=capacity)
     log.info("done in %.0f s: %s", time.time() - t0, stats)
@@ -317,9 +338,13 @@ def main() -> None:
     ap.add_argument("--capacity", type=int, default=4096, help="stars per octree node")
     ap.add_argument("--limit", type=int, default=None, help="use only a random sample of AT-HYG (for testing)")
     ap.add_argument("--no-simbad", action="store_true", help="skip the SIMBAD name lookup")
+    ap.add_argument("--no-field", action="store_true", help="skip the Gaia field stars between 100 and 200 pc")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
-    build(args.out, refresh=args.refresh, capacity=args.capacity, limit=args.limit, use_simbad=not args.no_simbad)
+    build(
+        args.out, refresh=args.refresh, capacity=args.capacity, limit=args.limit,
+        use_simbad=not args.no_simbad, field=not args.no_field,
+    )
 
 
 if __name__ == "__main__":

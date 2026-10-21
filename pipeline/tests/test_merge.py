@@ -251,3 +251,23 @@ def test_census_component_takes_row_without_usable_parallax():
     c = census_frame([dict(census_row=0, census_name="xi UMa Ba", gaia=pd.NA, ra=169.5452, dec=31.5291, plx=114.49)])
     out = merge.merge_census(s, c)
     assert len(out) == 1 and out.loc[0, "hd"] == 98230 and out.loc[0, "plx"] == 114.49
+
+
+def test_gaia_field_stars_are_added_once_and_only_with_precise_parallaxes():
+    a = athyg_frame([dict(id=1, gaia=222)])
+    s = merge.athyg_rows(merge.link_gaia(a, gaia_frame([dict(source_id=222, parallax=7.0)])), hyg_frame())
+    base = dict(ra=10.0, dec=0.0, parallax=7.0, parallax_error=0.1, pmra=0.0, pmdec=0.0, ruwe=1.0, phot_g_mean_mag=15.0,
+                bp_rp=2.0, parallax_zp=-0.02, astrometric_params_solved=31)
+    field = pd.DataFrame([
+        {**base, "source_id": 222},                              # already present (AT-HYG/Tycho)
+        {**base, "source_id": 333},                              # new red dwarf at 143 pc
+        {**base, "source_id": 444, "parallax_error": 0.6},      # 8.6 % error, but RUWE 1.5 makes it 12.9 %
+        {**base, "source_id": 555, "parallax": 4.95},            # beyond 200 pc after the zero point? 4.97 < 5
+        {**base, "source_id": 666, "parallax": 12.0},            # inside 100 pc: GCNS territory
+    ])
+    field.loc[2, "ruwe"] = 1.5
+    field["source_id"] = field["source_id"].astype("Int64")
+    out = merge.add_gaia_field(s, field)
+    assert sorted(int(v) for v in out["gaia"].dropna()) == [222, 333]
+    new = out[out["gaia"] == 333].iloc[0]
+    assert new["src"] == Flag.SRC_GAIA and abs(new["plx"] - 7.02) < 1e-9

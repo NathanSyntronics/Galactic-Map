@@ -172,5 +172,6 @@ function sourceText(flags: number): string {
   if (flags & Flag.SRC_GCNS) s.push('Gaia GCNS');
   if (flags & Flag.SRC_ATHYG) s.push('AT-HYG');
   if (flags & Flag.SRC_HYG) s.push('HYG');
+  if (flags & Flag.SRC_GAIA) s.push('Gaia DR3');
   return s.join(', ') || '–';
 }

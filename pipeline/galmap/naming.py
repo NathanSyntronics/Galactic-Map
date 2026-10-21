@@ -726,6 +726,85 @@ def _strip_index(name: str) -> str:
     return " ".join([_SUP_RE.sub("", words[0])] + words[1:])
 
 
+def designation_text(c: int, lo: int, hi: int, st) -> str | None:
+    """The designation as the web app displays it (see src/data/format.ts designationOf)."""
+    if c == Desig.HR:
+        return f"HR {lo}"
+    if c == Desig.HIP:
+        return f"HIP {lo}"
+    if c == Desig.HD:
+        return f"HD {lo}"
+    if c == Desig.TYC:
+        return f"TYC {lo & 0xFFFF}-{lo >> 16}-{hi}"
+    if c == Desig.GAIA_DR3:
+        return f"Gaia DR3 {(hi << 32) | lo}"
+    return st if isinstance(st, str) and st else None
+
+
+def _coordinate_designation(ra: float, dec: float) -> str:
+    h = (ra / 15.0) % 24.0
+    hh, mm = int(h), int((h * 60) % 60)
+    ss = (h * 3600) % 60
+    sign = "+" if dec >= 0 else "-"
+    d = abs(dec)
+    dd, dm, ds = int(d), int((d * 60) % 60), int((d * 3600) % 60)
+    return f"J{hh:02d}{mm:02d}{ss:04.1f}{sign}{dd:02d}{dm:02d}{ds:02d}"
+
+
+def unique_designations(s: pd.DataFrame, dc, dlo, dhi, dstr, name_en) -> None:
+    """Every star gets a designation of its own: it is the key under which the web app stores user
+    data for the star. Where several stars share one (an HD number on both components of a pair),
+    the most luminous keeps it and the others take their next own designation (HIP, HD, Tycho-2,
+    Gaia DR3, name); a star without any gets its name or a coordinate designation."""
+    n = len(dc)
+    text = [designation_text(int(dc[i]), int(dlo[i]), int(dhi[i]), dstr[i]) for i in range(n)]
+    logl = s["logl"].to_numpy(float) if "logl" in s else np.zeros(n)
+    order = np.argsort(-np.nan_to_num(logl, nan=-99.0), kind="stable")
+    used: set[str] = set()
+    hip = s["hip"].to_numpy(dtype=object)
+    hd = s["hd"].to_numpy(dtype=object) if "hd" in s else np.full(n, pd.NA)
+    tyc = s["tyc"].to_numpy(dtype=object) if "tyc" in s else np.full(n, None)
+    gaia = s["gaia"].to_numpy(dtype=object)
+    ra, dec = s["ra"].to_numpy(float), s["dec"].to_numpy(float)
+    census = s["census_name"].to_numpy(dtype=object) if "census_name" in s else np.full(n, None)
+    changed = 0
+    for i in order:
+        if text[i] is not None and text[i] not in used:
+            used.add(text[i])
+            continue
+        options: list[tuple[int, int, int, str | None]] = []
+        if pd.notna(hip[i]):
+            options.append((Desig.HIP, int(hip[i]), 0, None))
+        if pd.notna(hd[i]):
+            options.append((Desig.HD, int(hd[i]), 0, None))
+        if isinstance(tyc[i], str) and re.fullmatch(r"\d+-\d+-\d+", tyc[i]):
+            t1, t2, t3 = (int(v) for v in tyc[i].split("-"))
+            options.append((Desig.TYC, t1 | (t2 << 16), t3, None))
+        if pd.notna(gaia[i]):
+            g = int(gaia[i])
+            options.append((Desig.GAIA_DR3, g & 0xFFFFFFFF, g >> 32, None))
+        for v in (name_en[i], census[i]):
+            if isinstance(v, str) and v:
+                options.append((Desig.STRING, 0, 0, v))
+        if np.isfinite(ra[i]) and np.isfinite(dec[i]):
+            options.append((Desig.STRING, 0, 0, _coordinate_designation(ra[i], dec[i])))
+        for c, lo, hi, st in options:
+            k = designation_text(c, lo, hi, st)
+            if k and k not in used:
+                dc[i], dlo[i], dhi[i], dstr[i] = c, lo, hi, st
+                used.add(k)
+                changed += 1
+                break
+        else:
+            # every own designation is taken (two entries of one star at the same position)
+            base = text[i] or (designation_text(*options[0]) if options else None) or f"Star {i}"
+            k = next(f"{base} ({j})" for j in range(2, n + 2) if f"{base} ({j})" not in used)
+            dc[i], dlo[i], dhi[i], dstr[i] = Desig.STRING, 0, 0, k
+            used.add(k)
+            changed += 1
+    log.info("naming: %d stars moved to another designation so that every designation is unique", changed)
+
+
 def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
     """Adds name_rank, name_en, name_de, alt, desig_* and system_name_* columns.
 
@@ -1307,6 +1386,7 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
                 dc[i], dlo[i], dhi[i], dstr[i] = Desig.STRING, 0, 0, m
                 swapped += 1
         log.info("naming: %d Gaia-only stars designated by their SIMBAD identifier", swapped)
+    unique_designations(s, dc, dlo, dhi, dstr, name_en)
     s["desig_cat"] = dc
     s["desig_lo"] = dlo
     s["desig_hi"] = dhi

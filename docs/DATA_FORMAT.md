@@ -155,7 +155,8 @@ without copying once the blob is in its own `ArrayBuffer`.
 | 10  | `SUN`             | the Sun                                                         |
 | 11  | `GIANT`           | luminosity class I–III (giant / supergiant)                     |
 | 12  | `VARIABLE`        | known variable star                                             |
-| 13–15 | –               | reserved (0)                                                    |
+| 13  | `SRC_GAIA`        | Gaia DR3 field star between 100 and 200 pc (no other catalogue) |
+| 14–15 | –               | reserved (0)                                                    |
 
 #### spec
 
@@ -199,7 +200,9 @@ object keys they are strings).
   // the systems referenced in "s": systemId -> [nameEn, nameDe | null, memberCount]
   "S": { "1201": ["Sirius", null, 2] },
   // spectral type strings for stars that have one: localIndex -> string
-  "t": { "3": "A0mA1Va" }
+  "t": { "3": "A0mA1Va" },
+  // number of known exoplanets (NASA Exoplanet Archive) of planet hosts: localIndex -> count
+  "p": { "5": 3 }
 }
 ```
 
@@ -236,12 +239,16 @@ Array of named stars (rank ≤ 7):
 
 ```jsonc
 [
-  // [nameEn, nameDe | null, nodePath, localIndex, x, y, z, rank, [alt designations]]
-  ["Sirius", null, "r", 3, -5.03, -1.88, -1.34, 0, ["alf CMa A", "HIP 32349"]]
+  // [nameEn, nameDe | null, nodePath, localIndex, x, y, z, rank, [alt designations] | null,
+  //  designation, systemId]
+  ["Sirius A", null, "r", 3, -5.03, -1.88, -1.34, 0, ["Sirius", "Alpha Canis Majoris A"], "HR 2491", 4149]
 ]
 ```
 
-Coordinates in ly, rounded to 0.001.
+Coordinates in ly, rounded to 0.001. `designation` is the star's primary designation exactly as
+`designationOf()` renders it from the node data; it is unique over the whole dataset and is the key
+under which the web app stores user data for the star. `systemId` is the star's system (`-1` for
+single stars).
 
 ## systems.json
 

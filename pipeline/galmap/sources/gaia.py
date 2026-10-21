@@ -38,7 +38,24 @@ TABLES = {
     "hipparcos2": "gaiadr3.hipparcos2_best_neighbour",
     "gcns": "external.gaiaedr3_gcns_main_1",
 }
+# All Gaia DR3 stars in the shell beyond the GCNS (100 pc) out to about 200 pc (652 ly) whose
+# parallax is measured to better than about 11 % (the final cut, after the zero point and the
+# RUWE inflation of the error, is made in merge.add_gaia_field).
+FIELD_MIN_PLX = 4.9
+FIELD_MAX_PLX = 10.2
+FIELD_WHERE = (
+    f"g.parallax > {FIELD_MIN_PLX} AND g.parallax < {FIELD_MAX_PLX} AND g.parallax_over_error > 9 "
+    "AND g.visibility_periods_used >= 10"
+)
+COUNTS = {
+    "field200": "SELECT COUNT(*) AS n FROM gaiadr3.gaia_source AS g "
+    f"WHERE g.source_id >= {{lo}} AND g.source_id < {{hi}} AND {FIELD_WHERE}",
+}
 QUERIES = {
+    "field200": (
+        "SELECT {cols} FROM gaiadr3.gaia_source AS g "
+        f"WHERE g.source_id >= {{lo}} AND g.source_id < {{hi}} AND {FIELD_WHERE}"
+    ),
     "gcns": (
         "SELECT {cols} FROM external.gaiaedr3_gcns_main_1 AS x "
         "JOIN gaiadr3.gaia_source AS g ON g.source_id = x.source_id "
@@ -66,7 +83,10 @@ HIP_COLUMNS = "hip, ra, dec, plx, e_plx, pm_ra, pm_de, hp_mag, b_v"
 
 
 def _count(name: str, lo: int, hi: int) -> int:
-    q = f"SELECT COUNT(*) AS n FROM {TABLES[name]} AS x WHERE x.source_id >= {lo} AND x.source_id < {hi}"
+    if name in COUNTS:
+        q = COUNTS[name].format(lo=lo, hi=hi)
+    else:
+        q = f"SELECT COUNT(*) AS n FROM {TABLES[name]} AS x WHERE x.source_id >= {lo} AND x.source_id < {hi}"
     return int(tap_sync(GAIA_TAP, q, timeout=300)["n"].iloc[0])
 
 
@@ -173,6 +193,15 @@ def load_hipparcos(refresh: bool = False) -> pd.DataFrame:
     out.parent.mkdir(parents=True, exist_ok=True)
     df.to_parquet(out, index=False)
     log.info("Hipparcos new reduction: %d stars", len(df))
+    return df
+
+
+def load_field(refresh: bool = False) -> pd.DataFrame:
+    """Gaia DR3 stars between about 100 and 200 pc with precise parallaxes (see FIELD_WHERE), with
+    the parallax zero point in 'parallax_zp'."""
+    df = fetch_xmatch("field200", chunks=128, refresh=refresh)
+    df["parallax_zp"] = parallax_zero_point(df)
+    log.info("Gaia DR3 field stars 100-200 pc: %d", len(df))
     return df
 
 

@@ -38,6 +38,7 @@ import numpy as np
 import pandas as pd
 
 from .flags import Flag
+from .naming import designation_text
 
 MAGIC = 0x4D4C4147
 VERSION = 1
@@ -155,6 +156,8 @@ def encode_node(node: Node, cols: dict[str, np.ndarray], sys_info: dict[int, lis
     names: list = []
     systems: dict[str, int] = {}
     spect: dict[str, str] = {}
+    planets: dict[str, int] = {}
+    planet_col = cols["planets"]
     desig_str = cols["desig_str"]
     name_rank = cols["name_rank"]
     name_en = cols["name_en"]
@@ -182,6 +185,8 @@ def encode_node(node: Node, cols: dict[str, np.ndarray], sys_info: dict[int, lis
         st = spect_col[gi]
         if isinstance(st, str) and st:
             spect[str(local)] = st
+        if planet_col[gi] > 0:
+            planets[str(local)] = int(planet_col[gi])
     if d:
         extra["d"] = d
     if names:
@@ -194,6 +199,8 @@ def encode_node(node: Node, cols: dict[str, np.ndarray], sys_info: dict[int, lis
                 extra["S"] = table
     if spect:
         extra["t"] = spect
+    if planets:
+        extra["p"] = planets
     extra_bytes = json.dumps(extra, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8") if extra else b""
 
     body = bytearray(HEADER_BYTES)
@@ -252,6 +259,7 @@ def _columns(stars: pd.DataFrame) -> dict[str, np.ndarray]:
         "alt": obj("alt"),
         "system_id": num("system_id", -1, np.int64),
         "spect": obj("spect"),
+        "planets": num("planets", 0, np.int64),
     }
 
 
@@ -327,9 +335,10 @@ def write_dataset(
             y,
             z,
             int(rank[gi]),
+            list(a) if isinstance(a, (list, tuple)) and len(a) else None,
+            designation_text(int(cols["desig_cat"][gi]), int(cols["desig_lo"][gi]), int(cols["desig_hi"][gi]), cols["desig_str"][gi]),
+            int(cols["system_id"][gi]),
         ]
-        if isinstance(a, (list, tuple)) and len(a):
-            entry.append(list(a))
         search.append(entry)
     search.sort(key=lambda e: (e[7], e[0]))
     (out_dir / "search.json").write_text(json.dumps(search, ensure_ascii=False, separators=(",", ":"), allow_nan=False), "utf-8")

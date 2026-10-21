@@ -20,6 +20,7 @@ export const Flag = {
   SUN: 1 << 10,
   GIANT: 1 << 11,
   VARIABLE: 1 << 12,
+  SRC_GAIA: 1 << 13,
 } as const;
 
 export const DesigCat = {
@@ -40,6 +41,7 @@ export interface NodeExtra {
   s?: Record<string, number>;
   S?: Record<string, [string | null, string | null, number]>;
   t?: Record<string, string>;
+  p?: Record<string, number>;
 }
 
 export interface SystemInfo {
@@ -74,6 +76,8 @@ export interface NodeData {
   systems: Map<number, number>;
   systemInfo: Map<number, SystemInfo>;
   spectralTypes: Map<number, string>;
+  /** Number of known exoplanets (NASA Exoplanet Archive) of the host stars in this node. */
+  planets: Map<number, number>;
 }
 
 export class FormatError extends Error {}
@@ -145,6 +149,7 @@ export function decodeNode(buffer: ArrayBuffer, path: string): NodeData {
       Object.entries(extra.S ?? {}).map(([k, v]) => [Number(k), { nameEn: v[0], nameDe: v[1], members: v[2] }]),
     ),
     spectralTypes: toMap(extra.t),
+    planets: toMap(extra.p),
   };
 }
 

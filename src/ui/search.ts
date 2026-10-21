@@ -2,8 +2,23 @@ import { Vector3 } from 'three';
 import { galacticToWorld } from '../data/galactic';
 import { formatLy, localName, t } from '../i18n';
 
-/** [nameEn, nameDe | null, nodePath, localIndex, x, y, z, rank, alt designations] */
-export type SearchTuple = [string, string | null, string, number, number, number, number, number, string[]?];
+/**
+ * [nameEn, nameDe | null, nodePath, localIndex, x, y, z, rank, alt designations | null,
+ *  primary designation, system id (-1: single star)]
+ */
+export type SearchTuple = [
+  string,
+  string | null,
+  string,
+  number,
+  number,
+  number,
+  number,
+  number,
+  (string[] | null)?,
+  string?,
+  number?,
+];
 
 export interface SearchHit {
   nameEn: string;

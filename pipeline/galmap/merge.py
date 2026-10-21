@@ -279,6 +279,54 @@ def merge_gcns(stars: pd.DataFrame, gcns: pd.DataFrame, gaia: pd.DataFrame | Non
     return pd.concat([s, add], ignore_index=True)
 
 
+# Gaia field stars: beyond the GCNS (100 pc) out to this parallax (200 pc, 652 ly), with at most
+# 10 % parallax error after the zero point and the RUWE inflation of the error.
+FIELD_MIN_PLX = 5.0
+FIELD_MAX_REL_ERR = 0.1
+
+
+def add_gaia_field(stars: pd.DataFrame, field: pd.DataFrame) -> pd.DataFrame:
+    """Adds the Gaia DR3 stars between 100 and 200 pc that no other catalogue has: beyond 100 pc the
+    other sources contain only the Tycho-2 stars (V < ~11.5), i.e. no red dwarfs. Inside 100 pc the
+    GCNS (which rejects spurious Gaia solutions) stays the complete list."""
+    plx, err = gaia_parallax(field["parallax"], field["parallax_error"], field["parallax_zp"], field["ruwe"])
+    sol = field["astrometric_params_solved"].to_numpy(float)
+    keep = (plx >= FIELD_MIN_PLX) & (plx < 10.0) & (err > 0) & (err / plx < FIELD_MAX_REL_ERR) & np.isin(sol, (31, 95))
+    present = field["source_id"].astype("Int64").isin(stars["gaia"].dropna()).to_numpy()
+    new = field[keep & ~present].reset_index(drop=True)
+    plx, err = plx[keep & ~present], err[keep & ~present]
+    log.info(
+        "Gaia field 100-200 pc: %d candidates, %d with < %.0f %% parallax error, %d already present, %d added",
+        len(field), int(keep.sum()), FIELD_MAX_REL_ERR * 100, int((keep & present).sum()), len(new),
+    )
+    add = pd.DataFrame(
+        {
+            "src": Flag.SRC_GAIA,
+            "ra": new["ra"].to_numpy(float),
+            "dec": new["dec"].to_numpy(float),
+            "epoch": COMMON_EPOCH,
+            "plx": plx,
+            "plx_err": err,
+            "plx_src": "gaia",
+            "pmra": new["pmra"].to_numpy(float),
+            "pmdec": new["pmdec"].to_numpy(float),
+            "ruwe": new["ruwe"].to_numpy(float),
+            "vmag": np.nan,
+            "gmag": new["phot_g_mean_mag"].to_numpy(float),
+            "bp_rp": new["bp_rp"].to_numpy(float),
+            "bv": np.nan,
+            "jmag": np.nan,
+            "spect": None,
+            "teff_cat": np.nan,
+            "gaia": new["source_id"].astype("Int64").to_numpy(),
+            "wd_prob": np.nan,
+            "name_2mass": None,
+            "is_sun": False,
+        }
+    )
+    return pd.concat([stars, add], ignore_index=True)
+
+
 def dedupe_against_gaia(s: pd.DataFrame) -> pd.DataFrame:
     """Safety net: a row without Gaia astrometry (old Tycho/Hipparcos/Gliese entry whose Gaia link is
     missing or was wrong) that coincides with a Gaia row in position, parallax and brightness is the

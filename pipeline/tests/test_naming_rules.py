@@ -496,3 +496,46 @@ def test_hd_number_beats_durchmusterung_number():
     assert prefer_hd_over_durchmusterung(best, [], {"hd": None})[0].en == "BD+16 523"
     lhs = Cand("LHS 288", None, Rank.SURVEY, P_SIMBAD, src="simbad")
     assert prefer_hd_over_durchmusterung(lhs, [], {"hd": 123})[0].en == "LHS 288"
+
+
+def test_designation_text_matches_the_web_app():
+    from galmap.flags import Desig
+    from galmap.naming import designation_text
+
+    assert designation_text(Desig.HIP, 70890, 0, None) == "HIP 70890"
+    assert designation_text(Desig.TYC, 9007 | (2 << 16), 1, None) == "TYC 9007-2-1"
+    g = 5853498713190525696
+    assert designation_text(Desig.GAIA_DR3, g & 0xFFFFFFFF, g >> 32, None) == f"Gaia DR3 {g}"
+    assert designation_text(Desig.STRING, 0, 0, "WISE J0855-0714") == "WISE J0855-0714"
+    assert designation_text(Desig.STRING, 0, 0, None) is None
+
+
+def test_every_star_gets_a_designation_of_its_own():
+    import numpy as np
+    import pandas as pd
+
+    from galmap.flags import Desig
+    from galmap.naming import designation_text, unique_designations
+
+    # two components sharing HD 1, a star without any designation, and two entries at the same spot
+    s = pd.DataFrame({
+        "logl": [0.5, 1.5, 0.0, -1.0, -1.1],
+        "hip": pd.array([None, None, None, None, None], dtype="Int64"),
+        "hd": pd.array([1, 1, None, None, None], dtype="Int64"),
+        "tyc": [None, None, None, None, None],
+        "gaia": pd.array([11, 12, None, 13, 13], dtype="Int64"),
+        "ra": [10.0, 10.001, 150.25, 20.0, 20.0],
+        "dec": [-5.0, -5.0, 2.5, 1.0, 1.0],
+    })
+    dc = np.array([Desig.HD, Desig.HD, Desig.STRING, Desig.GAIA_DR3, Desig.GAIA_DR3], dtype=np.int64)
+    dlo = np.array([1, 1, 0, 13, 13], dtype=np.int64)
+    dhi = np.zeros(5, dtype=np.int64)
+    dstr = np.array([None] * 5, dtype=object)
+    names = np.array([None, None, None, None, None], dtype=object)
+    unique_designations(s, dc, dlo, dhi, dstr, names)
+    text = [designation_text(int(dc[i]), int(dlo[i]), int(dhi[i]), dstr[i]) for i in range(5)]
+    assert text[1] == "HD 1"  # the more luminous component keeps the shared number
+    assert text[0] == "Gaia DR3 11"
+    assert text[2] == "J100100.0+023000"
+    assert text[3] == "Gaia DR3 13" and text[4] == "J012000.0+010000"
+    assert len(set(text)) == 5
