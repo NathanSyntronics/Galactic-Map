@@ -128,12 +128,14 @@ specified in [`docs/JUMP_NETWORK.md`](docs/JUMP_NETWORK.md):
 * **Region.** The network is computed from the stars within the visible radius plus a margin of
   three jump ranges around the view centre, so links inside the visible sphere do not change
   when the view moves. More than 150,000 places or 1.5 million candidate pairs are not
-  computed (the settings then ask for a smaller radius), which keeps a computation below about
-  0.3 s on a desktop computer. The default view (20 ly) takes about 10 ms, 200 ly about 0.15 s.
-* **Display.** Lines in the stars' colours (or one blue, or coloured by length) fade out at the
-  edge of the visible sphere like the stars. The selected star's links are highlighted, and
-  its info card lists them with distances; a click on one goes there. **J** switches the
-  network on and off.
+  computed, and neither is a region whose stars are not all loaded at the chosen detail level
+  (the settings then ask for a smaller radius); with the default detail level this allows radii
+  up to about 200 ly. The default view (20 ly) takes about 15 ms, 100 ly about 30 ms, 200 ly
+  about 0.2 s; a slow computation waits until the view rests.
+* **Display.** Lines in the stars' colours (or one teal, or coloured by length) end at the edge
+  of the visible sphere, fading out like the stars, and get fainter when many stars are in
+  view. The selected star's links are highlighted (the others dimmed), and its info card lists
+  them with distances; a click on one goes there. **J** switches the network on and off.
 
 Settings (section *Jump network*): jump range (2–25 ly), number of links by luminosity or by an
 attribute, links of faint, Sun-like and bright stars (0–20), prefer big stars (0–2), connect

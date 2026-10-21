@@ -13,6 +13,7 @@ import {
   isPermanentError,
   retryDelay,
   selectNodes,
+  selectionComplete,
   type Manifest,
   type OctreeNode,
 } from './data/octree';
@@ -25,6 +26,7 @@ import {
   linksOfStar,
   placeOfStar,
   type CapacityRule,
+  type NetworkOptions,
 } from './network/places';
 import { JumpLines } from './render/links';
 import { DropLines, Marker, PolarGrid } from './render/overlays';
@@ -96,6 +98,10 @@ export class App {
   private lastJump = -Infinity;
   /** Duration of the last network computation (ms); recomputations are spaced by a multiple of it. */
   private jumpCost = 0;
+  /** Time of the last view change; a slow network computation waits until the view rests. */
+  private lastViewChange = -Infinity;
+  /** The level of detail holds all stars of the network region (not cut by the point budget). */
+  private lodComplete = true;
   /** Stable number per octree node path (tie-break keys of the network). */
   private readonly nodeOrdinal = new Map<string, number>();
   private readonly labels: LabelLayer;
@@ -203,6 +209,7 @@ export class App {
     this.search.onFocus = () => void this.loadSearch();
 
     this.nav.onChange = () => {
+      this.lastViewChange = performance.now();
       this.lodDirty = true;
       this.candidatesDirty = true;
       this.scheduleHash();
@@ -510,17 +517,22 @@ export class App {
     const budget = QUALITY_BUDGET[s.quality];
     const h = this.renderer.domElement.clientHeight || window.innerHeight;
     const pxPerUnit = h / (2 * Math.tan(MathUtils.degToRad(this.camera.fov) / 2));
+    // the jump network also needs the stars just outside the visible sphere (faded out by the shader)
+    const radius = s.jumps ? s.radius + jumpMargin(s.jumpRange) : s.radius;
     const selected = selectNodes(this.octree, {
       cameraPos: this.camera.position,
       target: this.nav.target,
-      // the jump network also needs the stars just outside the visible sphere (faded out by the shader)
-      radius: s.jumps ? s.radius + jumpMargin(s.jumpRange) : s.radius,
+      radius,
       budget,
       pixelsPerUnitAtUnitDistance: pxPerUnit,
     });
     const before = this.selectedPaths;
     this.selectedPaths = new Set(selected.map((n) => n.path));
     if (before.size !== this.selectedPaths.size || [...before].some((p) => !this.selectedPaths.has(p))) this.jumpDirty = true;
+    // a network from a budget-cut selection would change with the camera position
+    const complete = selectionComplete(selected, this.nav.target, radius);
+    if (complete !== this.lodComplete) this.jumpDirty = true;
+    this.lodComplete = complete;
     // keep loading the node of a star picked in the search even if the LOD does not choose it
     const pending = this.pendingSelect ? this.octree.nodes.get(this.pendingSelect.path) : undefined;
     const request = pending && !this.selectedPaths.has(pending.path) ? [...selected, pending] : selected;
@@ -786,7 +798,7 @@ export class App {
     const region = s.radius + jumpMargin(s.jumpRange);
     const sources = this.starfield.visibleNodes().filter((rn) => rn.node.box.distanceToPoint(centre) <= region);
     const wasOverflow = !!this.jumpLines.network?.overflow;
-    const net = computeNetwork(sources, {
+    const opt: NetworkOptions = {
       centre: { x: centre.x, y: centre.y, z: centre.z },
       radius: region,
       capacity: this.capacityRule(s),
@@ -797,7 +809,9 @@ export class App {
       kSun: s.jumpSun,
       connect: s.jumpConnect,
       maxCandidates: MAX_PAIRS,
-    });
+    };
+    // without all stars of the region the links would depend on the camera: not computed
+    const net = this.lodComplete ? computeNetwork(sources, opt) : { ...computeNetwork([], opt), overflow: 'detail' as const };
     // links with an end inside the sphere; the extra covers view moves until the next computation
     this.jumpLines.set(net, s.radius * 1.06, s.jumpColor);
     this.highlightJumps();
@@ -825,6 +839,7 @@ export class App {
     if (!s.jumps || !net) return this.panel.setJumpStatus('');
     if (net.overflow === 'places') return this.panel.setJumpStatus(t('jumpTooMany', { n: formatNumber(MAX_PLACES) }), true);
     if (net.overflow === 'pairs') return this.panel.setJumpStatus(t('jumpTooManyPairs'), true);
+    if (net.overflow === 'detail') return this.panel.setJumpStatus(t('jumpIncomplete'), true);
     // counted inside the visible sphere
     const { places, links } = net;
     const p = places.positions;
@@ -1088,10 +1103,15 @@ export class App {
     if (s.jumps && this.octree) {
       const net = this.jumpLines.network;
       const c = this.nav.target;
-      if (net && Math.hypot(c.x - net.centre.x, c.y - net.centre.y, c.z - net.centre.z) > 0.05 * s.radius) this.jumpDirty = true;
+      const moved = net ? Math.hypot(c.x - net.centre.x, c.y - net.centre.y, c.z - net.centre.z) : 0;
+      if (moved > 0.05 * s.radius) this.jumpDirty = true;
+      // a slow computation waits until the view rests (or has moved far), so that moving stays smooth
+      const ready = this.jumpCost < 50 || now - this.lastViewChange > 300 || moved > 0.3 * s.radius;
       // after a pending restyle (shown stars), and spaced so that it takes at most ~20 % of the time
-      if (this.jumpDirty && !this.styleDirty && now - this.lastJump >= Math.max(250, 4 * this.jumpCost)) this.recomputeJumps();
-      this.jumpLines.update(c, s.radius, s.jumpOpacity);
+      if (this.jumpDirty && ready && !this.styleDirty && now - this.lastJump >= Math.max(250, 4 * this.jumpCost)) this.recomputeJumps();
+      // like the faint stars: the more stars in view, the fainter the lines, so dense regions stay readable
+      const density = MathUtils.clamp(Math.sqrt(1500 / Math.max(this.inView, 1)), 0.2, 1);
+      this.jumpLines.update(c, s.radius, s.jumpOpacity * density);
     }
     if (this.candidatesDirty && now - this.lastCandidates > 200) {
       this.candidatesDirty = false;

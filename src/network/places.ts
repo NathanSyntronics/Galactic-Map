@@ -231,8 +231,11 @@ export interface NetworkOptions extends PlaceOptions {
 export interface JumpNetwork {
   places: PlaceSet;
   links: JumpLinks;
-  /** Why there are no links although there are places: too many places or candidate pairs. */
-  overflow: 'places' | 'pairs' | null;
+  /**
+   * Why there are no links: too many places or candidate pairs, or the region's stars are not all
+   * loaded at this quality ('detail', set by the app).
+   */
+  overflow: 'places' | 'pairs' | 'detail' | null;
   /** View centre and region radius of the computation. */
   centre: { x: number; y: number; z: number };
   region: number;

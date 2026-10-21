@@ -3,35 +3,40 @@ import type { JumpNetwork } from '../network/places';
 import type { JumpColor } from '../settings';
 import { paletteColor } from './style';
 
-/** Line colour of the 'uniform' mode: a calm blue. */
-export const JUMP_UNIFORM_RGB: [number, number, number] = [104, 150, 222];
+/** Line colour of the 'uniform' mode: a calm teal, apart from the blue grid and height lines. */
+export const JUMP_UNIFORM_RGB: [number, number, number] = [76, 201, 176];
 /** Palette of the 'length' mode, short to long. */
 export const JUMP_LENGTH_PALETTE = 'turbo';
 /** Highlight of the selected star's links (the accent colour). */
 export const JUMP_HIGHLIGHT_RGB: [number, number, number] = [255, 200, 97];
+/** Opacity factor of the other links while a star's links are highlighted. */
+export const JUMP_DIM = 0.45;
 
 // Vertices are stored relative to the group's origin (near the view centre). The alpha fades
-// towards the edge of the visible sphere per vertex, like the stars (see starfield.ts).
+// towards the edge of the visible sphere like the stars (see starfield.ts), per fragment, so a
+// link to a star outside the sphere ends at the edge.
 const vertexShader = /* glsl */ `
 attribute vec4 aColor;
-uniform vec3 uCentre;
-uniform float uRadius;
-uniform float uFade;
 uniform float uOpacity;
 varying vec4 vColor;
+varying vec3 vPos;
 void main() {
-  float d = distance(position, uCentre);
-  float a = 1.0 - smoothstep(uRadius * uFade, uRadius, d);
-  vColor = vec4(aColor.rgb, aColor.a * uOpacity * a);
+  vColor = vec4(aColor.rgb, aColor.a * uOpacity);
+  vPos = position;
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }
 `;
 
 const fragmentShader = /* glsl */ `
+uniform vec3 uCentre;
+uniform float uRadius;
+uniform float uFade;
 varying vec4 vColor;
+varying vec3 vPos;
 void main() {
-  if (vColor.a <= 0.003) discard;
-  gl_FragColor = vColor;
+  float a = vColor.a * (1.0 - smoothstep(uRadius * uFade, uRadius, distance(vPos, uCentre)));
+  if (a <= 0.003) discard;
+  gl_FragColor = vec4(vColor.rgb, a);
 }
 `;
 
@@ -154,7 +159,7 @@ export class JumpLines {
     const u = this.material.uniforms;
     (u.uCentre.value as Vector3).copy(this.tmp.copy(target).sub(this.group.position));
     u.uRadius.value = radius;
-    u.uOpacity.value = opacity;
+    u.uOpacity.value = this.highlightLines.visible ? opacity * JUMP_DIM : opacity;
     const h = this.highlightMaterial.uniforms;
     (h.uCentre.value as Vector3).copy(u.uCentre.value as Vector3);
     h.uRadius.value = radius;

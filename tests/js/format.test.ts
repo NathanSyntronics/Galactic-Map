@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { Vector3 } from 'three';
 import { describe, expect, it } from 'vitest';
 import { DesigCat, Flag, decodeNode, designationOf, spectralClassOf } from '../../src/data/format';
-import { Octree, selectNodes, type Manifest } from '../../src/data/octree';
+import { Octree, selectNodes, selectionComplete, type Manifest } from '../../src/data/octree';
 
 // Fixture written by pipeline/tests/make_js_fixture.py
 const dir = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'data');
@@ -76,6 +76,28 @@ describe('node selection', () => {
       pixelsPerUnitAtUnitDistance: 1000,
     });
     expect(sel.map((n) => n.path)).toEqual(['r']);
+  });
+
+  it('tells whether a selection holds every node the sphere touches', () => {
+    // a root of 100 stars with eight children of 1000 stars each, cube half size 100 around 0
+    const nodes: Manifest['nodes'] = [['r', 100, 0, 0xff, 0, 0]];
+    for (let i = 0; i < 8; i++) nodes.push([`r${i}`, 1000, 0, 0, 0, 0]);
+    const tree = new Octree({ ...manifest, root: { center: [0, 0, 0], halfSize: 100 }, nodes });
+    const select = (radius: number, budget: number) =>
+      selectNodes(tree, { cameraPos: new Vector3(0, 0, 300), target: new Vector3(0, 0, 0), radius, budget, pixelsPerUnitAtUnitDistance: 1000 });
+    const all = select(50, 10_000);
+    expect(all.length).toBe(9);
+    expect(selectionComplete(all, new Vector3(0, 0, 0), 50)).toBe(true);
+    // the budget cuts some children
+    const cut = select(50, 3000);
+    expect(cut.length).toBeLessThan(9);
+    expect(selectionComplete(cut, new Vector3(0, 0, 0), 50)).toBe(false);
+    // a small sphere inside one child cube needs only that child
+    const p = new Vector3(50, 50, 50);
+    const one = selectNodes(tree, { cameraPos: new Vector3(50, 50, 300), target: p, radius: 10, budget: 1200, pixelsPerUnitAtUnitDistance: 1000 });
+    expect(one.length).toBe(2);
+    expect(selectionComplete(one, p, 10)).toBe(true);
+    expect(selectionComplete([tree.root], p, 10)).toBe(false);
   });
 
   it('selects nothing when the sphere is outside the data cube', () => {

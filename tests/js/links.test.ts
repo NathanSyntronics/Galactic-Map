@@ -1,7 +1,7 @@
-import type { BufferAttribute } from 'three';
+import { Vector3, type BufferAttribute, type ShaderMaterial } from 'three';
 import { describe, expect, it } from 'vitest';
 import { computeNetwork, placeOfStar, type NetworkOptions } from '../../src/network/places';
-import { JUMP_HIGHLIGHT_RGB, JUMP_LENGTH_PALETTE, JUMP_UNIFORM_RGB, JumpLines } from '../../src/render/links';
+import { JUMP_DIM, JUMP_HIGHLIGHT_RGB, JUMP_LENGTH_PALETTE, JUMP_UNIFORM_RGB, JumpLines } from '../../src/render/links';
 import { paletteColor } from '../../src/render/style';
 import { source } from './fixtures/stars';
 
@@ -99,5 +99,22 @@ describe('jump lines', () => {
     lines.clear();
     expect(attrs(lines).main.visible).toBe(false);
     expect(lines.network).toBe(null);
+  });
+
+  it('dims the other links while a place is highlighted', () => {
+    const src = chain();
+    const net = computeNetwork([src], options);
+    const lines = new JumpLines();
+    lines.set(net, 100, 'stars');
+    const opacity = () => ((attrs(lines).main as unknown as { material: ShaderMaterial }).material.uniforms.uOpacity.value as number);
+    lines.update(new Vector3(1000, 0, 0), 20, 0.6);
+    expect(opacity()).toBeCloseTo(0.6);
+    lines.highlight(placeOfStar(net.places, 'r', 2));
+    lines.update(new Vector3(1000, 0, 0), 20, 0.6);
+    expect(opacity()).toBeCloseTo(0.6 * JUMP_DIM);
+    // a place without links highlights nothing and dims nothing
+    lines.highlight(placeOfStar(net.places, 'r', 5));
+    lines.update(new Vector3(1000, 0, 0), 20, 0.6);
+    expect(opacity()).toBeCloseTo(0.6);
   });
 });

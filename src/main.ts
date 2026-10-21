@@ -33,4 +33,6 @@ if (!webgl2Available()) {
     showFatal(container, err);
   }
   if (app) void app.start();
+  // dev only: lets browser tests read the app's state
+  if (import.meta.env.DEV && app) (window as unknown as { __app?: App }).__app = app;
 }

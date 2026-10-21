@@ -169,6 +169,20 @@ export function selectNodes(octree: Octree, p: SelectionParams): OctreeNode[] {
   return selected;
 }
 
+/**
+ * True when a selection holds every node whose cube intersects the sphere, i.e. all stars inside
+ * it and not just the brighter part the point budget allowed.
+ */
+export function selectionComplete(selected: OctreeNode[], center: Vector3, radius: number): boolean {
+  const set = new Set(selected);
+  for (const node of selected) {
+    for (const child of node.children) {
+      if (!set.has(child) && sphereIntersectsBox(center, radius, child.box)) return false;
+    }
+  }
+  return true;
+}
+
 type FetchFn = (url: string, init?: RequestInit) => Promise<Response>;
 
 /** An HTTP error response. */

@@ -59,27 +59,44 @@ them apart.
 ## Computation region
 
 * The network is computed from the loaded, shown stars within `R + M` of the view centre, where `R`
-  is the visible radius and `M` a margin (start with `M = 3 · jumpRange`; verify that moving the
-  view does not visibly change links inside `R`).
+  is the visible radius and `M = 3 · jumpRange` a margin. Measured with the real data: computing
+  the same region from two centres 0.3 `R` apart gives the same links inside both spheres
+  (`R` = 20, 50, 100 and 200 ly, several directions: no differing link except 1 of 2,063 at 50 ly
+  and 1 of 135,000 at 200 ly). It cannot be exactly 0 for every margin, because the connection
+  step is not local.
 * Drawn are the links with at least one end within `R`. Their opacity fades towards the edge of the
-  visible sphere like the stars (smoothstep from `0.85 R` to `R`, per vertex).
+  visible sphere like the stars (smoothstep from `0.85 R` to `R`, per fragment, so a link to a
+  star outside the sphere ends at its edge).
 * While the network is on, the level-of-detail selection uses the radius `R + M` instead of `R`
   (same point budget), so that the stars just outside the visible sphere are loaded too; they stay
   invisible because the star shader fades them out at `R`.
-* If the region holds more places than a safe limit (to be measured; the computation must stay
-  well below 0.5 s), the network is not computed and the settings show a hint to reduce the radius.
-* Recomputed (throttled, at most every 250 ms) when the view centre has moved by more than a small
-  fraction of `R`, when nodes are loaded or evicted, when a setting that affects the network
-  changes, and when attributes change (capacity by attribute, hidden stars).
+* If the region holds more than 150,000 places or 1.5 million candidate pairs, the network is not
+  computed and the settings show a hint to reduce the radius. Measured in a browser (4-core
+  container, software rendering): 20 ly about 15 ms, 100 ly 25–35 ms, 150 ly 65–95 ms, 200 ly
+  (105,000 places) 150–200 ms, occasionally up to 0.45 s. With the default detail level the
+  limit is reached at about 230 ly.
+* If the point budget cuts the level-of-detail selection inside the region (not every node that
+  touches the region is selected), the network is not computed either, because its links would
+  change with the camera position; the settings ask to reduce the radius or raise the detail
+  level. With the default detail level this happens beyond about 200 ly, with the phone default
+  (low) beyond about 150 ly.
+* Recomputed (throttled, at most every 250 ms and spaced by 4× the last computation time) when the
+  view centre has moved by more than 5 % of `R`, when nodes are loaded or evicted, when a setting
+  that affects the network changes, and when attributes change (capacity by attribute, hidden
+  stars). A computation that took more than 50 ms waits until the view has rested for 300 ms (or
+  the centre has moved by 0.3 `R`), so that moving the view stays smooth.
 
 ## Display
 
 * Thin lines (`THREE.LineSegments`, vertex colours with alpha), positioned relative to an origin
   near the view centre so that float32 precision is not lost far from the Sun.
 * Colour (`jumpColor`): `stars` – each end takes the current colour of its star (temperature or
-  data layer, so faction colours show), `uniform` – a calm blue, `length` – short to long links on
-  a palette. Opacity: `jumpOpacity`.
-* The links of the selected star's place are highlighted (accent colour, full opacity).
+  data layer, so faction colours show), `uniform` – a calm teal (apart from the blue grid and
+  height lines), `length` – short to long links on a palette. Opacity: `jumpOpacity`, lowered
+  automatically when many stars are in view (factor `√(1500 / stars in view)`, at least 0.2), like
+  the faint stars, so that dense regions stay readable.
+* The links of the selected star's place are highlighted (accent colour, full opacity); the other
+  links are dimmed to 45 % meanwhile.
 * The info card lists the selected star's links: partner name (or designation) and distance,
   sorted by distance. Clicking one selects that star and centres the view on it.
 * The legend shows a line sample "Jump link ≤ 10 ly" while the network is on.
