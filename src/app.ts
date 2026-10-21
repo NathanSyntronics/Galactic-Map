@@ -28,6 +28,10 @@ import { LabelLayer, type LabelCandidate } from './ui/labels';
 import { SettingsPanel } from './ui/panel';
 import { SearchBox, SearchIndex, type SearchHit, type SearchTuple } from './ui/search';
 
+interface DownloadsApi {
+  save(request: { filename: string; data: string }): Promise<unknown>;
+}
+
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
@@ -145,7 +149,7 @@ export class App {
     this.attrs.onSaveError = () => {
       if (this.saveWarned) return;
       this.saveWarned = true;
-      window.alert(t('saveFailed'));
+      this.toast(t('saveFailed'));
     };
 
     this.status = el('div', 'status');
@@ -302,14 +306,34 @@ export class App {
       },
       lang,
     );
+    const filename = lang === 'de' ? 'galaktische-karte-attribute.csv' : 'galactic-map-attributes.csv';
+    // inside the claude.ai artifact viewer, files are handed over by its downloads capability
+    const viewer = (window as { claude?: { use?: (name: string) => Promise<unknown> } }).claude;
+    const downloads = viewer?.use ? ((await viewer.use('downloads')) as DownloadsApi | null) : null;
+    if (downloads) {
+      try {
+        await downloads.save({ filename, data: csv });
+      } catch (err) {
+        if ((err as { code?: string })?.code !== 'declined') throw err;
+      }
+      return;
+    }
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
     const a = document.createElement('a');
     a.href = url;
-    a.download = lang === 'de' ? 'galaktische-karte-attribute.csv' : 'galactic-map-attributes.csv';
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  }
+
+  /** A short message at the bottom of the screen. */
+  private toast(text: string): void {
+    const box = el('div', 'toast', text);
+    box.setAttribute('role', 'alert');
+    this.container.appendChild(box);
+    setTimeout(() => box.remove(), 9000);
   }
 
   /** Loads the manifest, retrying transient failures a few times. */

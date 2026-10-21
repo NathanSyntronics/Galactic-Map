@@ -730,6 +730,26 @@ label.check input {
   color: #ff9b9b;
 }
 
+.btn.danger {
+  border-color: #ff6b6b;
+  color: #ffb3b3;
+}
+
+.toast {
+  position: absolute;
+  left: 50%;
+  bottom: max(48px, calc(env(safe-area-inset-bottom) + 40px));
+  transform: translateX(-50%);
+  width: min(460px, calc(100vw - 32px));
+  padding: 10px 14px;
+  border: 1px solid #ff6b6b;
+  border-radius: var(--radius);
+  background: var(--surface-strong);
+  box-shadow: var(--shadow);
+  font-size: 13px;
+  z-index: 20;
+}
+
 .attr-report {
   font-size: 13px;
   border: 1px solid var(--border);

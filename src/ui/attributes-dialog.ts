@@ -35,6 +35,32 @@ export interface AttributesDialogActions {
   deleteAll(): void;
 }
 
+/**
+ * A button that asks for a second click before it acts (native confirm() dialogs are blocked in
+ * some embedding frames).
+ */
+function confirmingButton(label: string, confirmLabel: () => string | null, action: () => void, cls = 'btn subtle small'): HTMLButtonElement {
+  const btn = el('button', cls, label);
+  let armed = 0;
+  btn.addEventListener('click', () => {
+    const ask = confirmLabel();
+    if (ask && !armed) {
+      btn.textContent = ask;
+      btn.classList.add('danger');
+      armed = window.setTimeout(() => {
+        armed = 0;
+        btn.textContent = label;
+        btn.classList.remove('danger');
+      }, 4000);
+      return;
+    }
+    window.clearTimeout(armed);
+    armed = 0;
+    action();
+  });
+  return btn;
+}
+
 /** Content of the "Attributes & CSV" dialog: attribute list, new attribute, CSV, storage. */
 export class AttributesDialog {
   readonly body = el('div', 'dialog-body attr-dialog');
@@ -92,13 +118,17 @@ export class AttributesDialog {
         sys.checked = def.system;
         sys.setAttribute('aria-label', t('attrSystem'));
         sys.addEventListener('change', () => this.attrs.updateDef(def.id, { system: sys.checked }));
-        const del = el('button', 'btn subtle small', t('deleteAttr'));
-        del.addEventListener('click', () => {
-          const n = this.attrs.valueCount(def.id);
-          if (n > 0 && !window.confirm(t('confirmDeleteAttr', { name: def.name, n: formatNumber(n) }))) return;
-          this.attrs.removeDef(def.id);
-          this.render();
-        });
+        const del = confirmingButton(
+          t('deleteAttr'),
+          () => {
+            const n = this.attrs.valueCount(def.id);
+            return n > 0 ? t('reallyDeleteValues', { n: formatNumber(n) }) : null;
+          },
+          () => {
+            this.attrs.removeDef(def.id);
+            this.render();
+          },
+        );
         const cells = [name, type, sys, el('span', 'count', formatNumber(this.attrs.valueCount(def.id))), del];
         for (const c of cells) tr.appendChild(el('td')).appendChild(c);
         tbody.appendChild(tr);
@@ -160,7 +190,14 @@ export class AttributesDialog {
     imp.addEventListener('click', () => file.click());
     const exp = el('button', 'btn', t('exportCsv'));
     exp.disabled = defs.length === 0;
-    exp.addEventListener('click', () => void this.actions.exportCsv());
+    exp.addEventListener('click', async () => {
+      try {
+        await this.actions.exportCsv();
+      } catch (err) {
+        console.warn('export failed', err);
+        this.say(t('exportFailed'), true);
+      }
+    });
     row.append(imp, exp);
     file.addEventListener('change', async () => {
       const f = file.files?.[0];
@@ -185,23 +222,29 @@ export class AttributesDialog {
     const store = el('div', 'attr-buttons');
     if (this.actions.hasSiteData()) {
       b.appendChild(el('p', 'hint', t('siteDataHelp')));
-      const reset = el('button', 'btn subtle', t('resetToSite'));
-      reset.addEventListener('click', async () => {
-        if (!window.confirm(t('confirmDeleteData'))) return;
-        await this.actions.resetToSite();
-        this.importResult = null;
-        this.render();
-      });
+      const reset = confirmingButton(
+        t('resetToSite'),
+        () => t('reallyReset'),
+        async () => {
+          await this.actions.resetToSite();
+          this.importResult = null;
+          this.render();
+        },
+        'btn subtle',
+      );
       store.appendChild(reset);
     }
-    const del = el('button', 'btn subtle', t('deleteMyData'));
+    const del = confirmingButton(
+      t('deleteMyData'),
+      () => t('reallyDelete'),
+      () => {
+        this.actions.deleteAll();
+        this.importResult = null;
+        this.render();
+      },
+      'btn subtle',
+    );
     del.disabled = defs.length === 0;
-    del.addEventListener('click', () => {
-      if (!window.confirm(t('confirmDeleteData'))) return;
-      this.actions.deleteAll();
-      this.importResult = null;
-      this.render();
-    });
     store.appendChild(del);
     b.appendChild(store);
   }
