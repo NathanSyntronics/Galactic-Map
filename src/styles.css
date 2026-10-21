@@ -301,6 +301,15 @@ select {
   background: #0d1426;
 }
 
+.row.select.stacked {
+  display: grid;
+  gap: 4px;
+}
+
+.row.select.stacked select {
+  width: 100%;
+}
+
 .hint {
   color: var(--text-dim);
   font-size: 12px;

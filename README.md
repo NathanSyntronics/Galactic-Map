@@ -6,9 +6,10 @@ An interactive 3-D map of the Sun's stellar neighbourhood, built from real star 
   a trigonometric parallax from Gaia DR3, Hipparcos or the 20 pc census. The positions are
   converted into a heliocentric galactic coordinate system (X towards the Galactic Centre,
   Z towards the North Galactic Pole).
-* **As many stars as possible.** About 2.8 million stars are included:
+* **As many stars as possible.** About 4.3 million stars are included:
   * every known object within 20 pc (65 ly), including brown dwarfs;
   * every star with good Gaia astrometry within 100 pc (326 ly);
+  * every Gaia DR3 star between 100 and 200 pc (650 ly) whose parallax is better than 10 %;
   * all Tycho-2 stars, which are the brighter stars, out to several thousand light years.
 * **The most common names first.** Each star is labelled with its most commonly used name:
   * the title of its English Wikipedia article, if that is a name or a designation up to a
@@ -34,6 +35,9 @@ An interactive 3-D map of the Sun's stellar neighbourhood, built from real star 
   the title with their letter, "40 Eridani A").
 * **Explore by mouse, touch or keyboard.** Only stars within an adjustable radius around the
   view centre are shown (20 ly by default). Move the view centre and new stars stream in.
+* **Your own data on the map.** Give stars attributes of your own (a faction, an economy value,
+  a colour …), edit them on the map or as a CSV file, and colour or size the stars by them or by
+  catalogue data such as the number of known exoplanets or the spectral class.
 * **English and German**, switchable in the settings.
 
 ## Using the map
@@ -57,10 +61,45 @@ The settings panel (☰) controls:
 * labels, star size, brightness and colour saturation;
 * the galactic grid and the height lines;
 * the level of detail (how many stars may be loaded at once; it matters only for view radii of a few hundred light years and more);
+* the data layers (below);
 * the language.
 
 Star colours follow the effective temperature. Symbol sizes follow the luminosity; true
 stellar diameters would be invisibly small.
+
+### Data layers and your own attributes
+
+Under *Data layers* in the settings, the star colours and sizes can follow any attribute:
+* **catalogue data**: known exoplanets (NASA Exoplanet Archive), spectral class, temperature,
+  luminosity, absolute magnitude, distance from the Sun, distance uncertainty;
+* **your own attributes**.
+
+Numbers are drawn on a colour scale (four palettes, adjustable range, optionally logarithmic or
+reversed) and can set the symbol size; text values get one colour per value; colour attributes
+(`#rrggbb`) colour each star directly. Stars without a value are drawn grey and small, hidden, or
+as usual. A legend explains the colours.
+
+**Attributes** are managed under *Attributes & CSV…*: each has a name, a type (text, number,
+colour) and optionally *whole system*: a value given to one star then applies to all stars of its
+multiple system (it is stored on the system's primary star). Values are edited on a star's info
+card or imported from a CSV file.
+
+**CSV files** have one row per star. The star is named in the first column, or in a column
+called `designation`, `Bezeichnung` or `name`: a name ("Sirius", "Barnards Pfeilstern") or a
+catalogue designation ("HIP 32349", "HD 48915", "TYC 9007-5848-1", "Gaia DR3 …"). Every other
+column is an attribute. A tag in the header sets the type and the system flag:
+`Faction [text, system]`, `Economy [number]`, `Flag colour [color]` (German: `[Zahl]`, `[Farbe]`,
+`[Text]`); without a tag the type follows the values. Comma, semicolon and tab separated files
+and decimal commas are recognised. The export writes the same format: English with `,`, German
+with `;` and decimal commas, so that spreadsheet programs open it directly. Try
+[`docs/example-attributes.csv`](docs/example-attributes.csv).
+
+Every star has a primary designation (shown under its name on the info card) that is unique in
+the dataset; attribute values are stored under it, so they survive rebuilds of the star data.
+
+The attributes are stored in the browser (localStorage). A site can ship a dataset of its own
+as `public/user/attributes.csv`: visitors see it until they change something, and *Back to the
+site's dataset* returns to it.
 
 ## Data sources
 
@@ -68,12 +107,13 @@ stellar diameters would be invisibly small.
 |---|---|
 | [20 pc census](https://exoplanetarchive.ipac.caltech.edu/docs/20pcCensus.html) (Kirkpatrick et al. 2024, ApJS 271, 55) | everything within 20 pc: positions, parallaxes, spectral types, brown dwarfs, system hierarchy, names |
 | [Gaia Catalogue of Nearby Stars](https://doi.org/10.1051/0004-6361/202039498) (Gaia Collaboration, Smart et al. 2021) | stars within 100 pc |
-| [Gaia DR3](https://www.cosmos.esa.int/web/gaia/dr3) (Gaia Collaboration 2023), parallax zero point after Lindegren et al. 2021 | astrometry and colours of the Tycho-2 / Hipparcos and GCNS stars |
+| [Gaia DR3](https://www.cosmos.esa.int/web/gaia/dr3) (Gaia Collaboration 2023), parallax zero point after Lindegren et al. 2021 | astrometry and colours of the Tycho-2 / Hipparcos and GCNS stars; all stars between 100 and 200 pc |
 | [Hipparcos new reduction](https://doi.org/10.1051/0004-6361:20078357) (van Leeuwen 2007) | parallaxes of bright stars whose Gaia solution is poor |
 | [AT-HYG v4.0](https://codeberg.org/astronexus/athyg) and [HYG v4.4](https://codeberg.org/astronexus/hyg) (D. Nash, CC BY-SA 4.0) | 2.5 million Tycho-2 / Hipparcos stars, classical designations, Gliese systems |
 | [IAU Catalog of Star Names](https://exopla.net/star-names/modern-iau-star-names/) (WGSN) | official proper names |
 | [SIMBAD](https://simbad.cds.unistra.fr/) (Wenger et al. 2000, CDS Strasbourg) | identifiers, common names, object types and spectral types within 100 pc |
 | [Wikidata](https://www.wikidata.org/) (CC0), queried via [QLever](https://qlever.dev/) | English and German Wikipedia article titles, the reference for the most common name |
+| [NASA Exoplanet Archive](https://exoplanetarchive.ipac.caltech.edu/) (Planetary Systems Composite Parameters, DOI 10.26133/NEA13) | number of known planets per host star |
 | [Mamajek's dwarf sequence](https://www.pas.rochester.edu/~emamajek/EEM_dwarf_UBVIJHK_colors_Teff.txt) (Pecaut & Mamajek 2013) | colour → temperature, bolometric corrections |
 
 The generated star data contains data derived from HYG / AT-HYG and is therefore published
@@ -109,6 +149,9 @@ It handles the following cases:
 * **Multiple systems.** Components of a tight census system share one distance (individual
   parallaxes of close pairs are perturbed by the orbit); a faint companion with a noisy parallax
   is placed at its system's distance if that lies within its own error bars.
+* **Gaia field stars.** Between 100 and 200 pc, every Gaia DR3 source with a five- or six-parameter
+  solution whose corrected parallax is better than 10 % (errors inflated by the RUWE) is added,
+  unless it is already in the catalogue: 1.5 million stars.
 * **Quality cut.** Stars with a parallax error above 100 % or beyond 15 kpc are dropped. The
   app can additionally hide stars by distance uncertainty (20 % by default).
 
@@ -131,7 +174,7 @@ The stars are stored in an octree (`pipeline/galmap/octree.py`):
 Requirements: Python ≥ 3.11 and Node ≥ 20.
 
 ```bash
-# star data (downloads ~600 MB of catalogues on the first run, ~15 min)
+# star data (downloads ~900 MB of catalogues on the first run, ~30 min)
 python -m venv .venv && .venv/bin/pip install -r pipeline/requirements.txt
 cd pipeline && ../.venv/bin/python -m galmap.build --out ../public/data
 ../.venv/bin/python -m galmap.verify ../public/data    # sanity checks against known stars

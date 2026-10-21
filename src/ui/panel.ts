@@ -335,7 +335,7 @@ export class SettingsPanel {
 
   /** A select with plain options plus option groups (empty groups are left out). */
   private dynSelect(label: string, options: Option[], groups: OptGroup[], get: () => string, set: (v: string) => void): HTMLElement {
-    const wrap = el('label', 'row select');
+    const wrap = el('label', 'row select stacked');
     wrap.appendChild(el('span', '', label));
     const sel = el('select');
     const add = (parent: HTMLElement, [v, text]: Option) => {

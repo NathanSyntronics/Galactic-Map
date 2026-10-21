@@ -64,7 +64,9 @@ export class Legend {
       } else if (color.type === 'text') {
         const cats = [...categoryColors(color.id, store)];
         const list = el('ul', 'legend-cats');
-        for (const [name, css] of cats.slice(0, MAX_CATEGORIES)) list.appendChild(this.swatch(css, name));
+        for (const [name, css] of cats.slice(0, MAX_CATEGORIES)) {
+          list.appendChild(this.swatch(css, color.id === '@spec' && name === 'D' ? `D · ${t('whiteDwarf')}` : name));
+        }
         if (cats.length > MAX_CATEGORIES) list.appendChild(el('li', 'more', t('moreCategories', { n: cats.length - MAX_CATEGORIES })));
         this.root.appendChild(list);
       } else {

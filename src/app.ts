@@ -18,7 +18,7 @@ import {
 import { formatLy, formatNumber, localName, setLang, t, type MessageKey } from './i18n';
 import { DropLines, Marker, PolarGrid } from './render/overlays';
 import { Starfield, apparentMag, starLogL } from './render/starfield';
-import { SIZE_LUMINOSITY, SIZE_UNIFORM, attributeInfo, buildPlan, type StylePlan } from './render/style';
+import { SIZE_LUMINOSITY, SIZE_UNIFORM, attributeInfo, buildPlan, planetsOf, type StylePlan } from './render/style';
 import { QUALITY_BUDGET, RADIUS_MAX, RADIUS_MIN, SettingsStore, type Settings } from './settings';
 import { AttributesDialog } from './ui/attributes-dialog';
 import { InfoPanel, displayName, type StarInfo } from './ui/info';
@@ -645,7 +645,7 @@ export class App {
       distErr: d.distErr[i],
       spec: d.spec[i],
       specType: d.spectralTypes.get(i) ?? null,
-      planets: d.planets.get(i) ?? 0,
+      planets: planetsOf(d, i),
       systemPrimary: sys?.primary ?? null,
       system:
         sysId !== undefined && sys

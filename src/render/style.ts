@@ -32,6 +32,11 @@ function logLOf(node: NodeData, i: number): number {
   return node.flags[i] & Flag.BROWN_DWARF ? -4.5 : -1.5;
 }
 
+/** Known planets of star i; the Sun's eight are not in the exoplanet archive. */
+export function planetsOf(node: NodeData, i: number): number {
+  return node.flags[i] & Flag.SUN ? 8 : (node.planets.get(i) ?? 0);
+}
+
 /** Attributes every star has from the catalogue data; ids start with '@'. */
 export const BUILTIN_ATTRIBUTES: BuiltinAttribute[] = [
   {
@@ -39,13 +44,19 @@ export const BUILTIN_ATTRIBUTES: BuiltinAttribute[] = [
     label: 'knownPlanets',
     type: 'number',
     scale: { min: 1, max: 8, palette: 'turbo' },
-    value: (n, i) => n.planets.get(i) || undefined,
+    value: (n, i) => planetsOf(n, i) || undefined,
   },
   {
     id: '@spec',
     label: 'spectralClass',
     type: 'text',
-    scale: {},
+    // hues along the temperature sequence, more distinct than the natural star colours
+    scale: {
+      colors: {
+        O: '#6f8cff', B: '#9db4ff', A: '#e8eeff', F: '#fff1b8', G: '#ffd84d', K: '#ffa040',
+        M: '#ff5a4a', L: '#d93f6a', T: '#b45ad6', Y: '#7e6cf0', D: '#5ad6e0',
+      },
+    },
     categories: [...SPEC_LETTERS, 'D'],
     value: (n, i) => {
       if (n.flags[i] & Flag.WHITE_DWARF) return 'D';
@@ -216,8 +227,9 @@ export function categoryColors(id: string, store: AttributeStore): Map<string, s
   const b = builtin(id);
   const cats = b?.categories ?? store.distinct(id).sort((a, c) => a.localeCompare(c, undefined, { numeric: true }));
   const user = store.scale(id).colors ?? {};
+  const preset = b?.scale.colors ?? {};
   const out = new Map<string, string>();
-  cats.forEach((c, k) => out.set(c, user[c] ?? CATEGORY_COLORS[k % CATEGORY_COLORS.length]));
+  cats.forEach((c, k) => out.set(c, user[c] ?? preset[c] ?? CATEGORY_COLORS[k % CATEGORY_COLORS.length]));
   return out;
 }
 
@@ -243,8 +255,11 @@ export interface StylePlan {
 
 /** Symbol radius for a position 0..1 on a size scale (the Sun's luminosity symbol is 0.2 ly). */
 export function sizeForPosition(t: number): number {
-  return 0.2 * Math.pow(10, -0.6 + 1.3 * t);
+  return 0.2 * Math.pow(10, -0.4 + 1.4 * t);
 }
+
+/** Symbol radius of stars drawn 'grey and small' for lack of a value. */
+export const MISSING_SIZE = 0.04;
 
 export const UNIFORM_SIZE = 0.2;
 

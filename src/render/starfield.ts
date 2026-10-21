@@ -15,7 +15,7 @@ import { LY_PER_PC } from '../data/galactic';
 import type { OctreeNode } from '../data/octree';
 import type { Settings } from '../settings';
 import { temperatureColor } from './colors';
-import { MISSING_COLOR, hexToRgb, sizeForPosition, type StylePlan } from './style';
+import { MISSING_COLOR, MISSING_SIZE, hexToRgb, type StylePlan } from './style';
 
 const MISSING_RGB = hexToRgb(MISSING_COLOR);
 const DEFAULT_PLAN: StylePlan = { color: null, size: null, missing: 'dim' };
@@ -273,7 +273,7 @@ export function computeStyle(node: NodeData, s: Settings, plan: StylePlan, color
       colors[3 * i] = MISSING_RGB[0];
       colors[3 * i + 1] = MISSING_RGB[1];
       colors[3 * i + 2] = MISSING_RGB[2];
-      size = 0.6 * (size ?? sizeForPosition(0));
+      size = MISSING_SIZE;
     }
     sizes[i] = size;
   }

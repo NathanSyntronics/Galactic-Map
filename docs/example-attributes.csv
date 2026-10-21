@@ -1,0 +1,14 @@
+name,Faction [text, system],Economy [number],Population [number],Flag colour [color],Note [text]
+Sun,Terran Union,10,9.5,#4e9bff,Capital
+Alpha Centauri A,Terran Union,7.5,4.2,#4e9bff,
+Barnard's Star,Free Worlds,2,0.3,#ff9f43,Mining outpost
+Wolf 359,Free Worlds,1.5,0.1,#ff9f43,
+Lalande 21185,Free Worlds,3,0.8,#ff9f43,
+Sirius A,Sirius Compact,8,3.1,#3ddc84,Shipyards
+Epsilon Eridani,Terran Union,6,2.4,#4e9bff,
+Procyon A,Sirius Compact,5.5,1.9,#3ddc84,
+Tau Ceti,Terran Union,7,3.3,#4e9bff,Research station
+61 Cygni A,Free Worlds,4,1.2,#ff9f43,
+Epsilon Indi,Sirius Compact,3.5,0.7,#3ddc84,
+Altair,Vega League,6.5,2.2,#ff5c6c,
+Vega,Vega League,9,5.0,#ff5c6c,League capital
