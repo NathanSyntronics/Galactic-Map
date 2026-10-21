@@ -150,6 +150,7 @@ export class SettingsPanel {
         (v) => this.store.set({ quality: v }),
       ),
     );
+    b.appendChild(el('p', 'hint', t('qualityHint')));
     b.appendChild(
       this.select<'en' | 'de'>(
         'language',

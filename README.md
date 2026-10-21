@@ -33,7 +33,7 @@ An interactive 3-D map of the Sun's stellar neighbourhood, built from real star 
   whole system ("Epsilon Lyrae"; its members keep their own names, "Epsilon² Lyrae A", or take
   the title with their letter, "40 Eridani A").
 * **Explore by mouse, touch or keyboard.** Only stars within an adjustable radius around the
-  view centre are shown (50 ly by default). Move the view centre and new stars stream in.
+  view centre are shown (20 ly by default). Move the view centre and new stars stream in.
 * **English and German**, switchable in the settings.
 
 ## Using the map
@@ -56,7 +56,7 @@ The settings panel (☰) controls:
 * a maximum distance uncertainty;
 * labels, star size, brightness and colour saturation;
 * the galactic grid and the height lines;
-* the level of detail;
+* the level of detail (how many stars may be loaded at once; it matters only for view radii of a few hundred light years and more);
 * the language.
 
 Star colours follow the effective temperature. Symbol sizes follow the luminosity; true

@@ -24,9 +24,9 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   lang: 'en',
-  radius: 50,
+  radius: 20,
   labels: true,
-  labelCount: 60,
+  labelCount: 30,
   labelDesignations: true,
   showBrownDwarfs: false,
   showWhiteDwarfs: true,
@@ -50,6 +50,13 @@ export const RADIUS_MIN = 2;
 export const RADIUS_MAX = 50_000;
 
 const STORAGE_KEY = 'galactic-map:settings:v1';
+/** Marker of the stored format that holds only the values that differ from the defaults. */
+const STORED_FORMAT = 2;
+/**
+ * Defaults of the first version, which stored the complete settings: values equal to these were
+ * almost certainly never changed by the user, so they give way to the current defaults.
+ */
+const LEGACY_DEFAULTS: Partial<Settings> = { radius: 50, labelCount: 60 };
 
 type Listener = (s: Settings, changed: (keyof Settings)[]) => void;
 
@@ -61,7 +68,7 @@ export class SettingsStore {
     this.state = { ...DEFAULT_SETTINGS, ...loadStored() };
     if (window.matchMedia?.('(max-width: 700px)').matches && !hasStored()) {
       this.state.quality = 'low';
-      this.state.labelCount = 35;
+      this.state.labelCount = 25;
     }
   }
 
@@ -74,7 +81,7 @@ export class SettingsStore {
     if (changed.length === 0) return;
     this.state = { ...this.state, ...patch };
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(storedForm(this.state)));
     } catch {
       // storage unavailable (private mode etc.) – settings simply are not persisted
     }
@@ -99,18 +106,32 @@ function hasStored(): boolean {
   }
 }
 
+/** Only the values that differ from the defaults are stored, so changed defaults reach every user. */
+export function storedForm(s: Settings): Record<string, unknown> {
+  const out: Record<string, unknown> = { v: STORED_FORMAT };
+  for (const k of Object.keys(DEFAULT_SETTINGS) as (keyof Settings)[]) {
+    if (s[k] !== DEFAULT_SETTINGS[k]) out[k] = s[k];
+  }
+  return out;
+}
+
+/** Settings from their stored form (current or first version). */
+export function parseStored(raw: string | null): Partial<Settings> {
+  if (!raw) return {};
+  const parsed = JSON.parse(raw) as Partial<Settings> & { v?: number };
+  const legacy = parsed.v === undefined;
+  const out: Partial<Settings> = {};
+  for (const k of Object.keys(DEFAULT_SETTINGS) as (keyof Settings)[]) {
+    if (!(k in parsed) || typeof parsed[k] !== typeof DEFAULT_SETTINGS[k]) continue;
+    if (legacy && k in LEGACY_DEFAULTS && parsed[k] === LEGACY_DEFAULTS[k]) continue;
+    (out as Record<string, unknown>)[k] = parsed[k];
+  }
+  return out;
+}
+
 function loadStored(): Partial<Settings> {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as Partial<Settings>;
-    const out: Partial<Settings> = {};
-    for (const k of Object.keys(DEFAULT_SETTINGS) as (keyof Settings)[]) {
-      if (k in parsed && typeof parsed[k] === typeof DEFAULT_SETTINGS[k]) {
-        (out as Record<string, unknown>)[k] = parsed[k];
-      }
-    }
-    return out;
+    return parseStored(localStorage.getItem(STORAGE_KEY));
   } catch {
     return {};
   }
