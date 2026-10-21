@@ -27,6 +27,13 @@ def test_raw_simbad_identifiers_are_not_names():
     assert classify_name("LoTr 5") > Rank.HD
 
 
+def test_wds_discoverer_codes():
+    assert prettify_simbad("** STF 2398A") == "Struve 2398 A"
+    assert prettify_simbad("** KR 60B") == "Kruger 60 B"
+    assert prettify_simbad("** LUH 4A") is None  # HN Pegasi A, not "Luhman 4 A"
+    assert prettify_simbad("NAME Luhman 16") == "Luhman 16"
+
+
 def test_abbreviated_and_suffixed_forms_are_not_names():
     assert classify_name("BO Mus") == Rank.OTHER
     assert classify_name("iot Cas AB") == Rank.OTHER

@@ -241,10 +241,11 @@ def prettify_simbad(ident: str, lang: str = "en") -> str | None:
         if full:
             return full
         return re.sub(r"'s star\b", "'s Star", name)
-    # double-star discoverer codes that carry the traditional names of nearby systems
-    m = re.match(r"^\*\* (KR|STF|GRB|LUH) (\d+)\s*([A-H][a-c]?)?$", s)
+    # double-star discoverer codes that carry the traditional names of nearby systems; not the
+    # WDS pairs found by Luhman ("** LUH 4" is HN Pegasi, Luhman 16 has its own NAME)
+    m = re.match(r"^\*\* (KR|STF|GRB) (\d+)\s*([A-H][a-c]?)?$", s)
     if m:
-        who = {"KR": "Kruger", "STF": "Struve", "GRB": "Groombridge", "LUH": "Luhman"}[m.group(1)]
+        who = {"KR": "Kruger", "STF": "Struve", "GRB": "Groombridge"}[m.group(1)]
         return f"{who} {m.group(2)}" + (f" {m.group(3)}" if m.group(3) else "")
     if s.startswith("** "):
         return None
