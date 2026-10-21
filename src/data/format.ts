@@ -39,7 +39,7 @@ export interface NodeExtra {
   d?: Record<string, string>;
   n?: NameTuple[];
   s?: Record<string, number>;
-  S?: Record<string, [string | null, string | null, number]>;
+  S?: Record<string, [string | null, string | null, number, (string | null)?]>;
   t?: Record<string, string>;
   p?: Record<string, number>;
 }
@@ -48,6 +48,8 @@ export interface SystemInfo {
   nameEn: string | null;
   nameDe: string | null;
   members: number;
+  /** Primary designation of the system's primary star (the key of whole-system user data). */
+  primary: string | null;
 }
 
 export interface StarName {
@@ -146,7 +148,7 @@ export function decodeNode(buffer: ArrayBuffer, path: string): NodeData {
     designations: toMap(extra.d),
     systems: toMap(extra.s),
     systemInfo: new Map(
-      Object.entries(extra.S ?? {}).map(([k, v]) => [Number(k), { nameEn: v[0], nameDe: v[1], members: v[2] }]),
+      Object.entries(extra.S ?? {}).map(([k, v]) => [Number(k), { nameEn: v[0], nameDe: v[1], members: v[2], primary: v[3] ?? null }]),
     ),
     spectralTypes: toMap(extra.t),
     planets: toMap(extra.p),

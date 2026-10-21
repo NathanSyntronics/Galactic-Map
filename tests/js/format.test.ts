@@ -42,6 +42,7 @@ describe('node decoding', () => {
     expect(designationOf(data, i)).toBe('HIP 32349');
     expect(data.names.get(i)?.alt).toEqual(['Alpha Canis Majoris A', 'HD 48915']);
     expect(data.systems.get(i)).toBe(7);
+    expect(data.systemInfo.get(7)).toEqual({ nameEn: 'Sirius', nameDe: null, members: 2, primary: 'HIP 32349' });
     expect(data.spectralTypes.get(i)).toBe('A1V');
     expect(spectralClassOf(data.spec[i])).toBe('A1');
     expect(data.absMag[i]).toBe(142);
@@ -52,6 +53,9 @@ describe('node decoding', () => {
   it('renders 64-bit Gaia ids and Tycho ids', () => {
     const designations = [...Array(data.count).keys()].map((k) => designationOf(data, k));
     expect(designations).toContain('Gaia DR3 5853498713190525696');
+    const host = designations.indexOf('Gaia DR3 5853498713190525696');
+    expect(data.planets.get(host)).toBe(2);
+    expect(data.planets.size).toBe(1);
     expect(designations).toContain('TYC 9007-5848-1');
     const bd = [...Array(data.count).keys()].find((k) => data.desigCat[k] === DesigCat.TYC)!;
     expect(data.flags[bd] & Flag.BROWN_DWARF).toBeTruthy();

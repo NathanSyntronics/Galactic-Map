@@ -14,6 +14,7 @@ solution is poor.
 from __future__ import annotations
 
 import logging
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -132,6 +133,7 @@ def fetch_xmatch(name: str, chunks: int, cache: Path | None = None, refresh: boo
     if "hip" in df:
         df["hip"] = pd.to_numeric(df["hip"]).astype("Int64")
     df.to_parquet(out, index=False)
+    shutil.rmtree(part_dir, ignore_errors=True)  # the parquet file now holds everything
     return df
 
 

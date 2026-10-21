@@ -304,7 +304,8 @@ def write_dataset(
         for row in systems.itertuples(index=False):
             de = row.name_de if isinstance(row.name_de, str) and row.name_de != row.name_en else None
             en = row.name_en if isinstance(row.name_en, str) else None
-            sys_info[int(row.system_id)] = [en, de, int(row.members)]
+            d = getattr(row, "designation", None)
+            sys_info[int(row.system_id)] = [en, de, int(row.members), d if isinstance(d, str) and d else None]
     for node in iter_nodes(root):
         blob = encode_node(node, cols, sys_info)
         if current and len(current) + len(blob) > pack_bytes:
@@ -354,6 +355,7 @@ def write_dataset(
                 round(float(row.cx), 3),
                 round(float(row.cy), 3),
                 round(float(row.cz), 3),
+                d if isinstance(d := getattr(row, "designation", None), str) and d else None,
             ]
     (out_dir / "systems.json").write_text(json.dumps(sys_out, ensure_ascii=False, separators=(",", ":"), allow_nan=False), "utf-8")
 

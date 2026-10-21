@@ -197,8 +197,9 @@ object keys they are strings).
   "n": [ [3, 0, "Sirius", null, ["alf CMa A", "HIP 32349", "HD 48915", "GJ 244 A"]] ],
   // system membership: localIndex -> systemId (key into systems.json)
   "s": { "3": 1201 },
-  // the systems referenced in "s": systemId -> [nameEn, nameDe | null, memberCount]
-  "S": { "1201": ["Sirius", null, 2] },
+  // the systems referenced in "s": systemId -> [nameEn, nameDe | null, memberCount,
+  //   primary designation of the system's primary star]
+  "S": { "1201": ["Sirius", null, 2, "HR 2491"] },
   // spectral type strings for stars that have one: localIndex -> string
   "t": { "3": "A0mA1Va" },
   // number of known exoplanets (NASA Exoplanet Archive) of planet hosts: localIndex -> count
@@ -254,8 +255,8 @@ single stars).
 
 ```jsonc
 {
-  // systemId: [nameEn, nameDe | null, memberCount, cx, cy, cz]
-  "1201": ["Sirius", null, 2, -5.03, -1.88, -1.34]
+  // systemId: [nameEn, nameDe | null, memberCount, cx, cy, cz, primary designation of the primary star]
+  "1201": ["Sirius", null, 2, -5.03, -1.88, -1.34, "HR 2491"]
 }
 ```
 

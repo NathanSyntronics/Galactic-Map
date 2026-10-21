@@ -221,7 +221,7 @@ def system_table(s: pd.DataFrame) -> pd.DataFrame:
     """One row per system: id, name (from the primary), member count, luminosity-weighted centroid."""
     m = s[s["system_id"] >= 0]
     if m.empty:
-        return pd.DataFrame(columns=["system_id", "name_en", "name_de", "members", "cx", "cy", "cz"])
+        return pd.DataFrame(columns=["system_id", "name_en", "name_de", "members", "cx", "cy", "cz", "designation"])
     w = 10 ** np.clip(m["logl"].fillna(-3).to_numpy(float), -6, 7)
     g = pd.DataFrame({"sid": m["system_id"].to_numpy(), "w": w, "wx": w * m["x"].to_numpy(), "wy": w * m["y"].to_numpy(), "wz": w * m["z"].to_numpy()})
     agg = g.groupby("sid").agg(members=("w", "size"), w=("w", "sum"), wx=("wx", "sum"), wy=("wy", "sum"), wz=("wz", "sum"))
@@ -237,4 +237,16 @@ def system_table(s: pd.DataFrame) -> pd.DataFrame:
     )
     out["name_en"] = out["system_id"].map(prim["system_name_en"]) if "system_name_en" in prim else None
     out["name_de"] = out["system_id"].map(prim["system_name_de"]) if "system_name_de" in prim else None
+    # the primary's designation: the key of values that apply to the whole system (web app user data)
+    if "desig_cat" in prim:
+        from .naming import designation_text
+
+        desig = pd.Series(
+            [designation_text(int(c), int(lo), int(hi), st)
+             for c, lo, hi, st in zip(prim["desig_cat"], prim["desig_lo"], prim["desig_hi"], prim["desig_str"])],
+            index=prim.index, dtype=object,
+        )
+        out["designation"] = out["system_id"].map(desig[~desig.index.duplicated()])
+    else:
+        out["designation"] = None
     return out
