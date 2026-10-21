@@ -84,7 +84,8 @@ class Cand:
     rank: int
     prio: int
     seq: int = 0
-    # where the name comes from: iau, wiki, simbad_name, simbad, census, label, athyg, generated
+    # where the name comes from: iau, wiki, simbad_name, simbad, census, label, athyg, generated,
+    # wiki_system (the title of an article about the star's system, an alternative only)
     src: str = ""
 
 
@@ -503,7 +504,7 @@ def candidates(row, ext: dict) -> list[Cand]:
                 own_letter is not None and own_letter == letter and own.rank < classify_title(t)
             )
         if keep:
-            add(t, P_LABEL, src="label", title=True)
+            add(t, P_ID, src="wiki_system", title=True)  # only an alternative
         elif member and letter:
             add(f"{t} {letter}", P_WIKI, src="wiki", title=True)
         else:
@@ -644,7 +645,7 @@ def _source_strength(src: str, row) -> int:
         return 1
     if src in ("simbad", "simbad_name"):
         return 4 if row.get("simbad_match") == "pos" else 2
-    if src in ("athyg", "label"):
+    if src in ("athyg", "label", "wiki_system"):
         return 3
     if src == "system":
         return 5  # "<primary> <letter>" given by us
@@ -886,7 +887,7 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
                 candidates (not '<IAU name of another star> <letter>', no other component's
                 letter), else its census designation."""
                 for c in sorted(cs, key=lambda c: (c.rank, c.prio, c.seq)):
-                    if c.rank > Rank.NAMED_MAX or c.en == nm or used[c.en] > 0:
+                    if c.rank > Rank.NAMED_MAX or c.en == nm or used[c.en] > 0 or c.src == "wiki_system":
                         continue
                     if c.src != "iau" and _fold(split_component(c.en)[0]) in iau_names:
                         continue  # "Sabik B": the IAU name of another star plus a letter
