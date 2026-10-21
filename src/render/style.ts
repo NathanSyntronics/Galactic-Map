@@ -146,6 +146,15 @@ function paletteLut(id: PaletteId): Uint8Array {
   return lut;
 }
 
+/** Writes the RGB colour at position t (0..1) of a palette into out[o..o+2]. */
+export function paletteColor(id: PaletteId, t: number, out: Uint8Array, o: number): void {
+  const lut = paletteLut(id);
+  const k = 3 * Math.round(Math.min(Math.max(Number.isFinite(t) ? t : 0, 0), 1) * (LUT_SIZE - 1));
+  out[o] = lut[k];
+  out[o + 1] = lut[k + 1];
+  out[o + 2] = lut[k + 2];
+}
+
 /** CSS linear-gradient of a palette (legend). */
 export function paletteGradient(id: PaletteId, reverse = false): string {
   const stops = [...(PALETTES[id] ?? PALETTES.turbo)];

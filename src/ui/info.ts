@@ -26,6 +26,17 @@ export interface StarInfo {
   planets: number;
 }
 
+/** Jump links of the selected star's place, nearest first. */
+export interface JumpListing {
+  /** Name of the system whose representative carries the links, when that is another star. */
+  via: string | null;
+  /** Jump range in light years. */
+  range: number;
+  links: { name: string; distance: number; kind: number; pick: () => void }[];
+}
+
+const KIND_TITLES = ['jumpKindCapacity', 'jumpKindAlone', 'jumpKindConnect'] as const;
+
 function valueText(def: AttributeDef, v: AttrValue): string {
   if (def.type === 'number' && typeof v === 'number') {
     const digits = Math.min((String(v).split('.')[1] ?? '').length, 8);
@@ -55,8 +66,13 @@ export class InfoPanel {
   onClose: () => void = () => {};
   onFlyTo: (info: StarInfo) => void = () => {};
   onManageAttributes: () => void = () => {};
+  /** Jump links of a star (null: the network is off or the star is not part of it). */
+  jumpsOf: (info: StarInfo) => JumpListing | null = () => null;
   /** True while the attribute form is open (the card is then not rebuilt by data changes). */
   editing = false;
+  private jumpBox: HTMLElement | null = null;
+  /** Content of the shown jump list, so that an unchanged list is not rebuilt. */
+  private jumpKey = '';
 
   constructor(
     parent: HTMLElement,
@@ -98,10 +114,50 @@ export class InfoPanel {
     row.dd.hidden = !show;
   }
 
+  /** Updates the jump links (after the network was recomputed); an unchanged list stays as it is. */
+  updateJumps(): void {
+    if (this.info && this.jumpBox) this.renderJumps(this.info, this.jumpBox);
+  }
+
+  private renderJumps(info: StarInfo, box: HTMLElement): void {
+    const listing = this.jumpsOf(info);
+    const key = listing
+      ? [listing.via, listing.range, ...listing.links.map((l) => `${l.name}@${formatLy(l.distance)}/${l.kind}`)].join('|')
+      : '';
+    if (key === this.jumpKey) return;
+    this.jumpKey = key;
+    box.replaceChildren();
+    box.hidden = !listing;
+    if (!listing) return;
+    const head = el('div', 'attr-head');
+    head.appendChild(el('h3', '', t('jumpLinks', { n: listing.links.length })));
+    if (listing.via) head.appendChild(el('span', 'jump-via', t('jumpVia', { system: listing.via })));
+    box.appendChild(head);
+    if (!listing.links.length) {
+      const r = listing.range;
+      box.appendChild(el('p', 'hint', t('jumpNone', { range: `${formatNumber(r, Number.isInteger(r) ? 0 : 1)} ${t('ly')}` })));
+      return;
+    }
+    const list = el('ul', 'jump-list');
+    for (const l of listing.links) {
+      const li = el('li');
+      const btn = el('button', 'jump-link');
+      btn.type = 'button';
+      btn.title = t(KIND_TITLES[l.kind] ?? 'jumpKindCapacity');
+      btn.append(el('span', 'jump-name', l.name), el('span', 'jump-dist', formatLy(l.distance)));
+      btn.addEventListener('click', () => l.pick());
+      li.appendChild(btn);
+      list.appendChild(li);
+    }
+    box.appendChild(list);
+  }
+
   private render(target: Vector3): void {
     const info = this.info;
     this.root.replaceChildren();
     this.centreRow = null;
+    this.jumpBox = null;
+    this.jumpKey = '\0';
     this.root.classList.toggle('hidden', !info);
     if (!info) return;
 
@@ -173,6 +229,10 @@ export class InfoPanel {
     row(t('source'), sourceText(info.flags));
     this.root.appendChild(dl);
     this.root.appendChild(this.editing ? this.attributeForm(info, target) : this.attributeList(info, target));
+    const jumps = el('div', 'attr-box jump-box');
+    this.jumpBox = jumps;
+    this.renderJumps(info, jumps);
+    this.root.appendChild(jumps);
 
     const actions = el('div', 'info-actions');
     const fly = el('button', 'btn', t('flyTo'));

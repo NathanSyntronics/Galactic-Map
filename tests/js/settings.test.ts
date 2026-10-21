@@ -19,4 +19,25 @@ describe('stored settings', () => {
     expect(DEFAULT_SETTINGS.radius).toBe(20);
     expect(DEFAULT_SETTINGS.labelCount).toBe(30);
   });
+
+  it('has the jump network defaults of the specification', () => {
+    expect(DEFAULT_SETTINGS).toMatchObject({
+      jumps: true,
+      jumpRange: 10,
+      jumpFaint: 3,
+      jumpSun: 7,
+      jumpBright: 12,
+      jumpBy: '',
+      jumpHub: 1,
+      jumpConnect: true,
+      jumpColor: 'stars',
+      jumpOpacity: 0.6,
+    });
+  });
+
+  it('ignores unknown choices and clamps slider values when reading stored settings', () => {
+    const raw = JSON.stringify({ v: 2, jumpColor: 'neon', quality: 'insane', jumpRange: 500, jumpOpacity: 0, jumpHub: 1.5, jumps: false });
+    expect(parseStored(raw)).toEqual({ jumpRange: 25, jumpOpacity: 0.05, jumpHub: 1.5, jumps: false });
+    expect(parseStored(JSON.stringify({ v: 2, jumpColor: 'length', jumpBy: 'faction' }))).toEqual({ jumpColor: 'length', jumpBy: 'faction' });
+  });
 });

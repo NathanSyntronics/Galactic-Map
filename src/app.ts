@@ -17,12 +17,32 @@ import {
   type OctreeNode,
 } from './data/octree';
 import { formatLy, formatNumber, localName, setLang, t, type MessageKey } from './i18n';
+import {
+  MAX_PAIRS,
+  MAX_PLACES,
+  computeNetwork,
+  jumpMargin,
+  linksOfStar,
+  placeOfStar,
+  type CapacityRule,
+} from './network/places';
+import { JumpLines } from './render/links';
 import { DropLines, Marker, PolarGrid } from './render/overlays';
 import { Starfield, apparentMag, starLogL } from './render/starfield';
-import { SIZE_LUMINOSITY, SIZE_UNIFORM, attributeInfo, buildPlan, planetsOf, type StylePlan } from './render/style';
+import {
+  SIZE_LUMINOSITY,
+  SIZE_UNIFORM,
+  attributeInfo,
+  buildPlan,
+  numericScale,
+  planetsOf,
+  scalePosition,
+  valueGetter,
+  type StylePlan,
+} from './render/style';
 import { QUALITY_BUDGET, RADIUS_MAX, RADIUS_MIN, SettingsStore, type Settings } from './settings';
 import { AttributesDialog } from './ui/attributes-dialog';
-import { InfoPanel, displayName, type StarInfo } from './ui/info';
+import { InfoPanel, displayName, type JumpListing, type StarInfo } from './ui/info';
 import { Legend } from './ui/legend';
 import { LabelLayer, type LabelCandidate } from './ui/labels';
 import { SettingsPanel } from './ui/panel';
@@ -38,6 +58,17 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: 
   if (text !== undefined) e.textContent = text;
   return e;
 }
+
+/** Node path and star index of a StarInfo key ("path:index"). */
+function parseStarKey(key: string): { path: string; i: number } {
+  const k = key.lastIndexOf(':');
+  return { path: key.slice(0, k), i: Number(key.slice(k + 1)) };
+}
+
+/** Settings that change which stars are shown (and so the jump network). */
+const VISIBILITY_KEYS: (keyof Settings)[] = ['showBrownDwarfs', 'showWhiteDwarfs', 'maxDistErr', 'colorBy', 'sizeBy', 'missingStyle'];
+/** Settings that change the jump network. */
+const JUMP_KEYS: (keyof Settings)[] = ['jumps', 'jumpRange', 'jumpFaint', 'jumpSun', 'jumpBright', 'jumpBy', 'jumpHub', 'jumpConnect', 'radius'];
 
 export class App {
   private readonly store = new SettingsStore();
@@ -59,6 +90,14 @@ export class App {
   private readonly grid = new PolarGrid();
   private readonly dropLines = new DropLines();
   private readonly selMarker = new Marker(0xffc861, 30);
+  private readonly jumpLines = new JumpLines();
+  /** The jump network needs to be recomputed. */
+  private jumpDirty = true;
+  private lastJump = -Infinity;
+  /** Duration of the last network computation (ms); recomputations are spaced by a multiple of it. */
+  private jumpCost = 0;
+  /** Stable number per octree node path (tie-break keys of the network). */
+  private readonly nodeOrdinal = new Map<string, number>();
   private readonly labels: LabelLayer;
   private readonly panel: SettingsPanel;
   private readonly info: InfoPanel;
@@ -111,7 +150,7 @@ export class App {
       () => this.stylePlan,
     );
 
-    this.scene.add(this.grid.group, this.dropLines.lines, this.starfield.group, this.selMarker.points);
+    this.scene.add(this.grid.group, this.dropLines.lines, this.jumpLines.group, this.starfield.group, this.selMarker.points);
 
     this.labels = new LabelLayer(container);
 
@@ -142,9 +181,10 @@ export class App {
     this.info.onManageAttributes = () => this.showAttributes();
     this.info.onClose = () => this.select(null);
     this.info.onFlyTo = (info) => this.nav.flyTo(info.pos);
+    this.info.jumpsOf = (info) => this.jumpListing(info);
 
     this.legend = new Legend(container);
-    this.legend.update(this.store.get(), this.attrs);
+    this.updateLegend();
     this.attrs.subscribe((kind) => this.attributesChanged(kind));
     this.attrs.onSaveError = () => {
       if (this.saveWarned) return;
@@ -188,9 +228,14 @@ export class App {
       return;
     }
     this.octree = new Octree(this.manifest);
+    let k = 0;
+    for (const path of this.octree.nodes.keys()) this.nodeOrdinal.set(path, k++);
     this.loader = new NodeLoader(this.baseUrl, this.manifest.packs);
     this.loader.onLoaded = (node, data) => this.nodeLoaded(node, data);
-    this.loader.onEvicted = (path) => this.starfield.remove(path);
+    this.loader.onEvicted = (path) => {
+      if (this.starfield.get(path)?.points.visible) this.jumpDirty = true;
+      this.starfield.remove(path);
+    };
     this.loader.onFailed = (node) => this.nodeFailed(node);
     this.lodDirty = true;
     this.loop();
@@ -260,12 +305,15 @@ export class App {
       if (s.colorBy && !attributeInfo(s.colorBy, this.attrs)) patch.colorBy = '';
       const size = s.sizeBy !== SIZE_LUMINOSITY && s.sizeBy !== SIZE_UNIFORM ? attributeInfo(s.sizeBy, this.attrs) : undefined;
       if (size === null || (size && size.type !== 'number')) patch.sizeBy = SIZE_LUMINOSITY;
+      if (s.jumpBy && attributeInfo(s.jumpBy, this.attrs)?.type !== 'number') patch.jumpBy = '';
       if (Object.keys(patch).length) this.store.set(patch);
       this.panel.attributesChanged();
     }
     this.stylePlan = buildPlan(this.store.get(), this.attrs);
     this.styleDirty = true;
-    this.legend.update(this.store.get(), this.attrs);
+    // capacities by attribute and hidden stars
+    this.jumpDirty = true;
+    this.updateLegend();
     if (!this.info.editing) this.info.rerender(this.nav.target);
   }
 
@@ -392,8 +440,15 @@ export class App {
     if (has('showBrownDwarfs', 'showWhiteDwarfs', 'maxDistErr', 'saturation', 'colorBy', 'sizeBy', 'missingStyle')) {
       this.styleDirty = true;
     }
-    if (has('colorBy', 'sizeBy', 'missingStyle', 'legend', 'lang')) this.legend.update(s, this.attrs);
-    if (has('radius', 'quality')) this.lodDirty = true;
+    if (has('colorBy', 'sizeBy', 'missingStyle', 'legend', 'lang', 'jumps', 'jumpRange', 'jumpColor')) this.updateLegend();
+    if (has('radius', 'quality', 'jumps', 'jumpRange')) this.lodDirty = true;
+    if (has(...JUMP_KEYS, ...VISIBILITY_KEYS)) this.jumpDirty = true;
+    if (has('jumpColor')) this.jumpLines.setMode(s.jumpColor);
+    if (has('jumps') && !s.jumps) {
+      this.jumpLines.clear();
+      this.info.updateJumps();
+      this.updateJumpStatus();
+    }
     this.candidatesDirty = true;
     this.applySettings(s);
     this.scheduleHash();
@@ -406,6 +461,7 @@ export class App {
     u.uBrightness.value = s.brightness;
     this.grid.visible = s.grid;
     this.dropLines.lines.visible = s.dropLines && s.labels;
+    this.jumpLines.visible = s.jumps;
   }
 
   private refreshChrome(): void {
@@ -416,6 +472,12 @@ export class App {
     this.loadingEl.textContent = t(this.loadingKey);
     document.title = t('appTitle');
     this.updateStatus();
+    this.updateJumpStatus();
+  }
+
+  private updateLegend(): void {
+    const s = this.store.get();
+    this.legend.update(s, this.attrs, s.jumps && !!this.jumpLines.network?.overflow);
   }
 
   // ------------------------------------------------------------------ data
@@ -424,6 +486,7 @@ export class App {
     const r = this.starfield.add(node, data);
     r.points.visible = this.selectedPaths.has(node.path);
     this.candidatesDirty = true;
+    if (r.points.visible) this.jumpDirty = true;
     if (node.path === 'r') {
       this.loadingKey = 'loading';
       this.loadingEl.classList.remove('error');
@@ -450,11 +513,14 @@ export class App {
     const selected = selectNodes(this.octree, {
       cameraPos: this.camera.position,
       target: this.nav.target,
-      radius: s.radius,
+      // the jump network also needs the stars just outside the visible sphere (faded out by the shader)
+      radius: s.jumps ? s.radius + jumpMargin(s.jumpRange) : s.radius,
       budget,
       pixelsPerUnitAtUnitDistance: pxPerUnit,
     });
+    const before = this.selectedPaths;
     this.selectedPaths = new Set(selected.map((n) => n.path));
+    if (before.size !== this.selectedPaths.size || [...before].some((p) => !this.selectedPaths.has(p))) this.jumpDirty = true;
     // keep loading the node of a star picked in the search even if the LOD does not choose it
     const pending = this.pendingSelect ? this.octree.nodes.get(this.pendingSelect.path) : undefined;
     const request = pending && !this.selectedPaths.has(pending.path) ? [...selected, pending] : selected;
@@ -686,7 +752,137 @@ export class App {
     this.labels.selectedKey = info?.key ?? null;
     this.selMarker.show(info?.pos ?? null, this.renderer.getPixelRatio());
     this.info.show(info, this.nav.target);
+    this.highlightJumps();
     this.candidatesDirty = true;
+  }
+
+  // ------------------------------------------------------------------ jump network
+
+  /** How many links a place wants: by luminosity or by the position on an attribute's scale. */
+  private capacityRule(s: Settings): CapacityRule {
+    const info = s.jumpBy ? attributeInfo(s.jumpBy, this.attrs) : null;
+    const get = info?.type === 'number' ? valueGetter(s.jumpBy, this.attrs) : null;
+    if (get) {
+      const sc = numericScale(s.jumpBy, this.attrs);
+      return {
+        by: 'position',
+        position: (d, i) => {
+          const v = get(d, i);
+          return typeof v === 'number' ? scalePosition(v, sc) : undefined;
+        },
+        faint: s.jumpFaint,
+        bright: s.jumpBright,
+      };
+    }
+    return { by: 'luminosity', faint: s.jumpFaint, sun: s.jumpSun, bright: s.jumpBright };
+  }
+
+  /** Computes the network from the shown stars around the view centre. */
+  private recomputeJumps(): void {
+    this.jumpDirty = false;
+    const s = this.store.get();
+    const t0 = performance.now();
+    const centre = this.nav.target;
+    const region = s.radius + jumpMargin(s.jumpRange);
+    const sources = this.starfield.visibleNodes().filter((rn) => rn.node.box.distanceToPoint(centre) <= region);
+    const wasOverflow = !!this.jumpLines.network?.overflow;
+    const net = computeNetwork(sources, {
+      centre: { x: centre.x, y: centre.y, z: centre.z },
+      radius: region,
+      capacity: this.capacityRule(s),
+      nodeKey: (path) => this.nodeOrdinal.get(path) ?? 0,
+      maxPlaces: MAX_PLACES,
+      range: s.jumpRange,
+      hub: s.jumpHub,
+      kSun: s.jumpSun,
+      connect: s.jumpConnect,
+      maxCandidates: MAX_PAIRS,
+    });
+    // links with an end inside the sphere; the extra covers view moves until the next computation
+    this.jumpLines.set(net, s.radius * 1.06, s.jumpColor);
+    this.highlightJumps();
+    this.lastJump = performance.now();
+    this.jumpCost = this.lastJump - t0;
+    if (import.meta.env.DEV) {
+      const { places, links, overflow } = net;
+      console.debug(`jumps: ${places.count} places, ${links.candidates} pairs, ${links.count} links, ${overflow ?? 'ok'}, ${this.jumpCost.toFixed(1)} ms`);
+    }
+    if (wasOverflow !== !!net.overflow) this.updateLegend();
+    this.updateJumpStatus();
+    this.info.updateJumps();
+  }
+
+  private highlightJumps(): void {
+    const net = this.jumpLines.network;
+    if (!net || !this.selected) return this.jumpLines.highlight(-1);
+    const { path, i } = parseStarKey(this.selected.key);
+    this.jumpLines.highlight(placeOfStar(net.places, path, i));
+  }
+
+  private updateJumpStatus(): void {
+    const s = this.store.get();
+    const net = this.jumpLines.network;
+    if (!s.jumps || !net) return this.panel.setJumpStatus('');
+    if (net.overflow === 'places') return this.panel.setJumpStatus(t('jumpTooMany', { n: formatNumber(MAX_PLACES) }), true);
+    if (net.overflow === 'pairs') return this.panel.setJumpStatus(t('jumpTooManyPairs'), true);
+    // counted inside the visible sphere
+    const { places, links } = net;
+    const p = places.positions;
+    const { x: cx, y: cy, z: cz } = net.centre;
+    const r2 = s.radius * s.radius;
+    const inside = new Uint8Array(places.count);
+    let nPlaces = 0;
+    for (let k = 0; k < places.count; k++) {
+      const dx = p[3 * k] - cx;
+      const dy = p[3 * k + 1] - cy;
+      const dz = p[3 * k + 2] - cz;
+      if (dx * dx + dy * dy + dz * dz <= r2) {
+        inside[k] = 1;
+        nPlaces++;
+      }
+    }
+    let nLinks = 0;
+    for (let k = 0; k < links.count; k++) if (inside[links.a[k]] || inside[links.b[k]]) nLinks++;
+    this.panel.setJumpStatus(t('jumpStats', { links: formatNumber(nLinks), places: formatNumber(nPlaces) }));
+  }
+
+  /** Display name of star i of a node. */
+  private starName(d: NodeData, i: number): string {
+    if (d.flags[i] & Flag.SUN) return t('theSun');
+    const name = d.names.get(i);
+    return name ? localName(name.en, name.de) : designationOf(d, i);
+  }
+
+  /** The info card's list of the links of a star's place. */
+  private jumpListing(info: StarInfo): JumpListing | null {
+    const net = this.jumpLines.network;
+    if (!this.store.get().jumps || !net || net.overflow) return null;
+    const { path, i } = parseStarKey(info.key);
+    const found = linksOfStar(net, path, i);
+    if (!found) return null;
+    const { places } = net;
+    const rep = places.sources[places.repSource[found.place]].data;
+    const repIndex = places.repIndex[found.place];
+    let via: string | null = null;
+    if (rep.path !== path || repIndex !== i) {
+      via = info.system ? localName(info.system.nameEn, info.system.nameDe) : this.starName(rep, repIndex);
+    }
+    return {
+      via,
+      range: net.range,
+      links: found.links.map((l) => {
+        const d = places.sources[places.repSource[l.partner]].data;
+        const k = places.repIndex[l.partner];
+        return { name: this.starName(d, k), distance: l.length, kind: l.kind, pick: () => this.pickJump(d, k) };
+      }),
+    };
+  }
+
+  /** A star picked in the info card's jump list: select it and centre the view on it. */
+  private pickJump(d: NodeData, i: number): void {
+    const info = this.starInfo(d, i);
+    this.select(info);
+    this.nav.flyTo(info.pos);
   }
 
   private pickSearch(hit: SearchHit): void {
@@ -732,6 +928,10 @@ export class App {
       case 'g':
       case 'G':
         this.store.set({ grid: !this.store.get().grid });
+        break;
+      case 'j':
+      case 'J':
+        this.store.set({ jumps: !this.store.get().jumps });
         break;
       case '/':
         e.preventDefault();
@@ -877,12 +1077,21 @@ export class App {
       this.styleDirty = false;
       this.lastStyle = now;
       this.starfield.restyle();
+      this.jumpLines.recolor();
       this.candidatesDirty = true;
     }
     if (this.lodDirty && now - this.lastLod > 120) {
       this.lodDirty = false;
       this.lastLod = now;
       this.updateLod();
+    }
+    if (s.jumps && this.octree) {
+      const net = this.jumpLines.network;
+      const c = this.nav.target;
+      if (net && Math.hypot(c.x - net.centre.x, c.y - net.centre.y, c.z - net.centre.z) > 0.05 * s.radius) this.jumpDirty = true;
+      // after a pending restyle (shown stars), and spaced so that it takes at most ~20 % of the time
+      if (this.jumpDirty && !this.styleDirty && now - this.lastJump >= Math.max(250, 4 * this.jumpCost)) this.recomputeJumps();
+      this.jumpLines.update(c, s.radius, s.jumpOpacity);
     }
     if (this.candidatesDirty && now - this.lastCandidates > 200) {
       this.candidatesDirty = false;

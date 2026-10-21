@@ -1,6 +1,7 @@
 export type Lang = 'en' | 'de';
 export type Quality = 'low' | 'medium' | 'high' | 'ultra';
 export type MissingStyle = 'dim' | 'hide' | 'normal';
+export type JumpColor = 'stars' | 'uniform' | 'length';
 
 export interface Settings {
   lang: Lang;
@@ -28,6 +29,22 @@ export interface Settings {
   /** Stars without a value for colorBy / sizeBy. */
   missingStyle: MissingStyle;
   legend: boolean;
+  /** Jump network (docs/JUMP_NETWORK.md). */
+  jumps: boolean;
+  /** Longest link in light years. */
+  jumpRange: number;
+  /** Links wanted by faint stars (log L <= -4.5), Sun-like stars and bright stars (log L >= 1.5). */
+  jumpFaint: number;
+  jumpSun: number;
+  jumpBright: number;
+  /** Numeric attribute that sets the number of links ('' luminosity). */
+  jumpBy: string;
+  /** Hub preference: 0 pure distance, higher values serve big stars first. */
+  jumpHub: number;
+  /** Add the shortest links that join otherwise separate groups. */
+  jumpConnect: boolean;
+  jumpColor: JumpColor;
+  jumpOpacity: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -49,6 +66,34 @@ export const DEFAULT_SETTINGS: Settings = {
   sizeBy: '',
   missingStyle: 'dim',
   legend: true,
+  jumps: true,
+  jumpRange: 10,
+  jumpFaint: 3,
+  jumpSun: 7,
+  jumpBright: 12,
+  jumpBy: '',
+  jumpHub: 1,
+  jumpConnect: true,
+  jumpColor: 'stars',
+  jumpOpacity: 0.6,
+};
+
+/** Allowed values of the settings with a fixed set of choices. */
+const CHOICES: Partial<Record<keyof Settings, readonly unknown[]>> = {
+  lang: ['en', 'de'],
+  quality: ['low', 'medium', 'high', 'ultra'],
+  missingStyle: ['dim', 'hide', 'normal'],
+  jumpColor: ['stars', 'uniform', 'length'],
+};
+
+/** Range of numeric settings whose controls are sliders with fixed ends. */
+const RANGES: Partial<Record<keyof Settings, [number, number]>> = {
+  jumpRange: [2, 25],
+  jumpFaint: [0, 20],
+  jumpSun: [0, 20],
+  jumpBright: [0, 20],
+  jumpHub: [0, 2],
+  jumpOpacity: [0.05, 1],
 };
 
 export const QUALITY_BUDGET: Record<Quality, number> = {
@@ -136,7 +181,15 @@ export function parseStored(raw: string | null): Partial<Settings> {
   for (const k of Object.keys(DEFAULT_SETTINGS) as (keyof Settings)[]) {
     if (!(k in parsed) || typeof parsed[k] !== typeof DEFAULT_SETTINGS[k]) continue;
     if (legacy && k in LEGACY_DEFAULTS && parsed[k] === LEGACY_DEFAULTS[k]) continue;
-    (out as Record<string, unknown>)[k] = parsed[k];
+    const choices = CHOICES[k];
+    if (choices && !choices.includes(parsed[k])) continue;
+    let v = parsed[k];
+    const range = RANGES[k];
+    if (range && typeof v === 'number') {
+      if (!Number.isFinite(v)) continue;
+      v = Math.min(Math.max(v, range[0]), range[1]);
+    }
+    (out as Record<string, unknown>)[k] = v;
   }
   return out;
 }

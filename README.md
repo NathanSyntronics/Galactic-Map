@@ -38,6 +38,8 @@ An interactive 3-D map of the Sun's stellar neighbourhood, built from real star 
 * **Your own data on the map.** Give stars attributes of your own (a faction, an economy value,
   a colour …), edit them on the map or as a CSV file, and colour or size the stars by them or by
   catalogue data such as the number of known exoplanets or the spectral class.
+* **A jump network.** Stars up to a jump range apart (10 ly by default) are linked; bright stars
+  get more links than faint ones. Every rule is adjustable.
 * **English and German**, switchable in the settings.
 
 ## Using the map
@@ -50,7 +52,7 @@ An interactive 3-D map of the Sun's stellar neighbourhood, built from real star 
 | Details | click a star | tap | |
 | Centre on a star | double-click | double-tap | |
 | Back to the Sun | | | H |
-| Names / grid / search | | | L / G / / |
+| Names / grid / jump network / search | | | L / G / J / / |
 
 Hold Shift for faster keyboard movement.
 
@@ -62,6 +64,7 @@ The settings panel (☰) controls:
 * the galactic grid and the height lines;
 * the level of detail (how many stars may be loaded at once; it matters only for view radii of a few hundred light years and more);
 * the data layers (below);
+* the jump network (below);
 * the language.
 
 Star colours follow the effective temperature. Symbol sizes follow the luminosity; true
@@ -100,6 +103,41 @@ the dataset; attribute values are stored under it, so they survive rebuilds of t
 The attributes are stored in the browser (localStorage). A site can ship a dataset of its own
 as `public/user/attributes.csv`: visitors see it until they change something, and *Back to the
 site's dataset* returns to it.
+
+### Jump network
+
+The jump network links stars that are at most the *jump range* apart (10 ly by default). It is
+specified in [`docs/JUMP_NETWORK.md`](docs/JUMP_NETWORK.md):
+* **Places.** A multiple system counts as one place; its members are never linked to each other.
+  Only the stars that are shown take part, so hiding brown dwarfs or stars without a value
+  changes the network. A place is represented by its most luminous shown star.
+* **Capacity.** Each place wants a number of links. By default it follows the luminosity:
+  3 for brown dwarfs (log L ≤ −4.5), 7 for Sun-like stars, 12 for stars from 25 L☉ (Sirius) up,
+  linear in log L in between. It can instead follow a numeric attribute (yours or catalogue data)
+  on the attribute's colour scale.
+* **Which links.** All pairs within the range are candidates.
+  1. They are taken in order of the distance, weighted by `(kSun² / (k₁ · k₂))^h`, where `k₁` and
+     `k₂` are the two capacities and `h` is *prefer big stars*. A link is accepted while both
+     places still have free capacity. With `h > 0` big stars are served first.
+  2. A place that has a neighbour within range but no link gets one to its nearest neighbour.
+  3. *Connect everything in range* then adds the shortest links that join separate groups, so
+     that every star the range can connect is connected.
+
+  The selection is deterministic: the same stars and settings give the same links, whatever
+  the order in which the data arrived.
+* **Region.** The network is computed from the stars within the visible radius plus a margin of
+  three jump ranges around the view centre, so links inside the visible sphere do not change
+  when the view moves. More than 150,000 places or 1.5 million candidate pairs are not
+  computed (the settings then ask for a smaller radius), which keeps a computation below about
+  0.3 s on a desktop computer. The default view (20 ly) takes about 10 ms, 200 ly about 0.15 s.
+* **Display.** Lines in the stars' colours (or one blue, or coloured by length) fade out at the
+  edge of the visible sphere like the stars. The selected star's links are highlighted, and
+  its info card lists them with distances; a click on one goes there. **J** switches the
+  network on and off.
+
+Settings (section *Jump network*): jump range (2–25 ly), number of links by luminosity or by an
+attribute, links of faint, Sun-like and bright stars (0–20), prefer big stars (0–2), connect
+everything in range, line colour and opacity.
 
 ## Data sources
 

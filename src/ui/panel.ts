@@ -9,7 +9,15 @@ import {
   attributeInfo,
   builtin,
 } from '../render/style';
-import { RADIUS_MAX, RADIUS_MIN, type MissingStyle, type Quality, type Settings, type SettingsStore } from '../settings';
+import {
+  RADIUS_MAX,
+  RADIUS_MIN,
+  type JumpColor,
+  type MissingStyle,
+  type Quality,
+  type Settings,
+  type SettingsStore,
+} from '../settings';
 import { formatValue } from './legend';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -37,6 +45,10 @@ export class SettingsPanel {
   onManageAttributes: () => void = () => {};
   /** The data layer controls; rebuilt when the chosen attributes or the attribute list change. */
   private readonly layers = el('div', 'layers');
+  /** The jump network controls; rebuilt when the network is switched or its attribute changes. */
+  private readonly jumpBox = el('div', 'jumps');
+  /** Link count or the reason why there is no network (kept across rebuilds). */
+  private readonly jumpStatus = el('p', 'hint jump-status');
 
   constructor(
     parent: HTMLElement,
@@ -59,13 +71,22 @@ export class SettingsPanel {
     if (changed.includes('lang')) this.render();
     else {
       this.sync();
-      if (changed.some((k) => k === 'colorBy' || k === 'sizeBy')) this.renderLayers();
+      if (changed.some((k) => k === 'colorBy' || k === 'sizeBy' || k === 'jumps')) this.renderLayers();
+      if (changed.some((k) => k === 'jumps' || k === 'jumpBy' || k === 'colorBy' || k === 'sizeBy')) this.renderJumps();
     }
   }
 
   /** The attribute list changed (added, renamed, deleted). */
   attributesChanged(): void {
     this.renderLayers();
+    this.renderJumps();
+  }
+
+  /** Status line of the jump network; `warn` marks a reason why it is not shown. */
+  setJumpStatus(text: string, warn = false): void {
+    if (this.jumpStatus.textContent !== text) this.jumpStatus.textContent = text;
+    this.jumpStatus.classList.toggle('warn', warn);
+    this.jumpStatus.hidden = !text;
   }
 
   toggle(open?: boolean): void {
@@ -82,6 +103,7 @@ export class SettingsPanel {
   private sync(): void {
     for (const s of this.syncers) s();
     for (const s of this.layerSyncers) s();
+    for (const s of this.jumpSyncers) s();
   }
 
   private focusables(): HTMLElement[] {
@@ -142,6 +164,11 @@ export class SettingsPanel {
     b.appendChild(el('h3', '', t('dataLayers')));
     b.appendChild(this.layers);
     this.renderLayers();
+
+    // --- Jump network
+    b.appendChild(el('h3', '', t('jumpSection')));
+    b.appendChild(this.jumpBox);
+    this.renderJumps();
 
     // --- Labels
     b.appendChild(el('h3', '', t('labelsSection')));
@@ -259,12 +286,83 @@ export class SettingsPanel {
           (v) => this.store.set({ missingStyle: v }),
         ),
       );
+    }
+    if (color || size || s.jumps) {
       box.appendChild(this.checkbox('showLegend', () => this.store.get().legend, (v) => this.store.set({ legend: v })));
     }
     const manage = el('button', 'btn', t('manageAttributes'));
     manage.addEventListener('click', () => this.onManageAttributes());
     box.appendChild(manage);
     this.layerSyncers = this.syncers;
+    this.syncers = panelSyncers;
+    if (focusIndex >= 0) all()[focusIndex]?.focus();
+  }
+
+  private jumpSyncers: (() => void)[] = [];
+
+  private renderJumps(): void {
+    const box = this.jumpBox;
+    const active = document.activeElement;
+    const all = () => [...box.querySelectorAll<HTMLElement>('input, select, button')];
+    const focusIndex = active instanceof HTMLElement ? all().indexOf(active) : -1;
+    box.replaceChildren();
+    const panelSyncers = this.syncers;
+    this.syncers = [];
+    const s = () => this.store.get();
+    const set = (patch: Partial<Settings>) => this.store.set(patch);
+
+    box.appendChild(this.checkbox('jumps', () => s().jumps, (v) => set({ jumps: v })));
+    if (s().jumps) {
+      box.appendChild(el('p', 'hint', t('jumpIntro')));
+      const ly = (v: number) => `${formatNumber(v, Number.isInteger(v) ? 0 : 1)} ${t('ly')}`;
+      box.appendChild(this.slider('jumpRange', 2, 25, 0.5, () => s().jumpRange, (v) => set({ jumpRange: v }), () => ly(s().jumpRange)));
+
+      const defs = this.attrs.defs;
+      const groups: OptGroup[] = [
+        [t('builtinGroup'), BUILTIN_ATTRIBUTES.filter((a) => a.type === 'number' && a.id !== '@lum').map((a) => [a.id, t(a.label)] as Option)],
+        [t('userGroup'), defs.filter((d) => d.type === 'number').map((d) => [d.id, d.name] as Option)],
+      ];
+      box.appendChild(this.dynSelect(t('jumpBy'), [['', t('sizeLuminosity')]], groups, () => s().jumpBy, (v) => set({ jumpBy: v })));
+      const by = s().jumpBy ? attributeInfo(s().jumpBy, this.attrs) : null;
+      const byAttr = by?.type === 'number';
+      if (byAttr) {
+        // the scale controls are already in the data layers when the map is coloured or sized by it
+        const shown = [s().colorBy, s().sizeBy].some((id) => id === by.id);
+        if (!shown) box.appendChild(this.scaleControls(by.id, false));
+      }
+      const count = (v: number) => String(v);
+      box.appendChild(
+        this.slider(byAttr ? 'jumpLow' : 'jumpFaint', 0, 20, 1, () => s().jumpFaint, (v) => set({ jumpFaint: v }), () => count(s().jumpFaint)),
+      );
+      if (!byAttr) {
+        box.appendChild(this.slider('jumpSun', 0, 20, 1, () => s().jumpSun, (v) => set({ jumpSun: v }), () => count(s().jumpSun)));
+      }
+      box.appendChild(
+        this.slider(byAttr ? 'jumpHigh' : 'jumpBright', 0, 20, 1, () => s().jumpBright, (v) => set({ jumpBright: v }), () => count(s().jumpBright)),
+      );
+      box.appendChild(el('p', 'hint', t(byAttr ? 'jumpAttrHint' : 'jumpCapacityHint')));
+      box.appendChild(this.slider('jumpHub', 0, 2, 0.1, () => s().jumpHub, (v) => set({ jumpHub: v }), () => formatNumber(s().jumpHub, 1)));
+      box.appendChild(el('p', 'hint', t('jumpHubHint')));
+      box.appendChild(this.checkbox('jumpConnect', () => s().jumpConnect, (v) => set({ jumpConnect: v })));
+      box.appendChild(el('p', 'hint', t('jumpConnectHint')));
+      box.appendChild(
+        this.select<JumpColor>(
+          'jumpColor',
+          [
+            ['stars', 'jumpColorStars'],
+            ['uniform', 'jumpColorUniform'],
+            ['length', 'jumpColorLength'],
+          ],
+          () => s().jumpColor,
+          (v) => set({ jumpColor: v }),
+        ),
+      );
+      box.appendChild(
+        this.slider('jumpOpacity', 0.05, 1, 0.05, () => s().jumpOpacity, (v) => set({ jumpOpacity: v }), () => `${Math.round(s().jumpOpacity * 100)} %`),
+      );
+      box.appendChild(this.jumpStatus);
+    }
+    this.jumpSyncers = this.syncers;
     this.syncers = panelSyncers;
     if (focusIndex >= 0) all()[focusIndex]?.focus();
   }

@@ -86,10 +86,11 @@ const en = {
 <li><b>W A S D</b>: move horizontally · <b>R / F</b>: up / down</li>
 <li><b>Arrow keys</b>: rotate · <b>+ / −</b>: zoom</li>
 <li><b>Shift</b>: faster</li>
-<li><b>H</b>: back to the Sun · <b>L</b>: names · <b>G</b>: grid · <b>/</b>: search · <b>Esc</b>: deselect</li>
+<li><b>H</b>: back to the Sun · <b>L</b>: names · <b>G</b>: grid · <b>J</b>: jump network · <b>/</b>: search · <b>Esc</b>: deselect</li>
 </ul>
 <p>The view centre is the point the camera orbits around. Only stars inside the visible radius around it are shown; move the centre to explore further.</p>
-<p>The grid lies parallel to the galactic plane. 0° points towards the Galactic Centre, 90° in the direction of Galactic rotation.</p>`,
+<p>The grid lies parallel to the galactic plane. 0° points towards the Galactic Centre, 90° in the direction of Galactic rotation.</p>
+<p>The jump network links stars up to the jump range apart (10 ly by default); brighter stars get more links. A star's info card lists its links; click one to go there.</p>`,
   aboutText: `
 <p>Positions are computed from measured trigonometric parallaxes and sky coordinates and converted into a heliocentric galactic coordinate system (X towards the Galactic Centre, Z towards the North Galactic Pole). Stars are drawn with symbolic sizes; true stellar diameters would be invisibly small.</p>
 <p>Data sources:</p>`,
@@ -165,6 +166,38 @@ const en = {
   deleteMyData: 'Delete my attributes',
   resetToSite: 'Back to the site’s dataset',
   saveFailed: 'Your attributes could not be saved in this browser (storage full or blocked). Export them as CSV to keep them.',
+  jumpSection: 'Jump network',
+  jumps: 'Show jump links',
+  jumpIntro: 'Links connect stars and multiple systems up to the jump range apart. Brighter stars get more links.',
+  jumpRange: 'Jump range',
+  jumpBy: 'Number of links by',
+  jumpFaint: 'Faint stars (brown dwarfs)',
+  jumpSun: 'Sun-like stars',
+  jumpBright: 'Bright stars (from 25 L☉)',
+  jumpLow: 'Lowest value',
+  jumpHigh: 'Highest value',
+  jumpCapacityHint: 'Links a star wants; in between they follow the luminosity. Stars that are full can still be linked so that nobody is left alone.',
+  jumpAttrHint: 'Links grow with the value on the attribute’s scale (range, log and reverse as for the data layers). Stars without a value get the lowest number.',
+  jumpHub: 'Prefer big stars',
+  jumpHubHint: '0: nearest neighbours first. Higher: bright stars collect their links before small neighbours link up with each other.',
+  jumpConnect: 'Connect everything in range',
+  jumpConnectHint: 'Adds the shortest links that join otherwise separate groups.',
+  jumpColor: 'Line colour',
+  jumpColorStars: 'Star colours',
+  jumpColorUniform: 'Uniform blue',
+  jumpColorLength: 'By length',
+  jumpOpacity: 'Line opacity',
+  jumpStats: '{links} links between {places} stars and systems',
+  jumpTooMany: 'Too many stars in the region for the jump network (more than {n}). Reduce the visible radius.',
+  jumpTooManyPairs: 'Too many star pairs within the jump range. Reduce the jump range or the visible radius.',
+  jumpLinks: 'Jump links ({n})',
+  jumpVia: 'via {system}',
+  jumpNone: 'No other shown star within {range}.',
+  jumpKindCapacity: 'Link by capacity',
+  jumpKindAlone: 'Nearest neighbour (would be alone otherwise)',
+  jumpKindConnect: 'Joins separate groups',
+  legendJump: 'Jump link ≤ {range}',
+  legendJumpTooMany: 'Jump network: too many stars, reduce the radius',
   ly: 'ly',
   pc: 'pc',
 };
@@ -257,10 +290,11 @@ const de: Record<MessageKey, string> = {
 <li><b>W A S D</b>: horizontal bewegen · <b>R / F</b>: hoch / runter</li>
 <li><b>Pfeiltasten</b>: drehen · <b>+ / −</b>: zoomen</li>
 <li><b>Umschalt</b>: schneller</li>
-<li><b>H</b>: zurück zur Sonne · <b>L</b>: Namen · <b>G</b>: Gitter · <b>/</b>: Suche · <b>Esc</b>: Auswahl aufheben</li>
+<li><b>H</b>: zurück zur Sonne · <b>L</b>: Namen · <b>G</b>: Gitter · <b>J</b>: Sprungnetz · <b>/</b>: Suche · <b>Esc</b>: Auswahl aufheben</li>
 </ul>
 <p>Der Blickpunkt ist der Punkt, um den sich die Kamera dreht. Angezeigt werden nur Sterne innerhalb des sichtbaren Radius um ihn; verschiebe den Blickpunkt, um weiter zu erkunden.</p>
-<p>Das Gitter liegt parallel zur galaktischen Ebene. 0° zeigt zum Galaktischen Zentrum, 90° in Richtung der galaktischen Rotation.</p>`,
+<p>Das Gitter liegt parallel zur galaktischen Ebene. 0° zeigt zum Galaktischen Zentrum, 90° in Richtung der galaktischen Rotation.</p>
+<p>Das Sprungnetz verbindet Sterne bis zur Sprungweite (standardmäßig 10 Lj); hellere Sterne bekommen mehr Verbindungen. Die Infokarte eines Sterns listet seine Verbindungen auf; ein Klick darauf führt dorthin.</p>`,
   aboutText: `
 <p>Die Positionen werden aus gemessenen trigonometrischen Parallaxen und Himmelskoordinaten berechnet und in ein heliozentrisches galaktisches Koordinatensystem umgerechnet (X zum Galaktischen Zentrum, Z zum galaktischen Nordpol). Die Sterngrößen sind symbolisch; echte Sterndurchmesser wären unsichtbar klein.</p>
 <p>Datenquellen:</p>`,
@@ -336,6 +370,38 @@ const de: Record<MessageKey, string> = {
   deleteMyData: 'Meine Attribute löschen',
   resetToSite: 'Zurück zum Datensatz der Seite',
   saveFailed: 'Deine Attribute konnten in diesem Browser nicht gespeichert werden (Speicher voll oder gesperrt). Exportiere sie als CSV, um sie zu behalten.',
+  jumpSection: 'Sprungnetz',
+  jumps: 'Sprungverbindungen anzeigen',
+  jumpIntro: 'Verbindungen führen zu Sternen und Mehrfachsystemen bis zur Sprungweite. Hellere Sterne bekommen mehr Verbindungen.',
+  jumpRange: 'Sprungweite',
+  jumpBy: 'Anzahl der Verbindungen nach',
+  jumpFaint: 'Leuchtschwache Sterne (Braune Zwerge)',
+  jumpSun: 'Sonnenähnliche Sterne',
+  jumpBright: 'Helle Sterne (ab 25 L☉)',
+  jumpLow: 'Niedrigster Wert',
+  jumpHigh: 'Höchster Wert',
+  jumpCapacityHint: 'Gewünschte Verbindungen eines Sterns; dazwischen richten sie sich nach der Leuchtkraft. Auch volle Sterne werden noch verbunden, damit niemand allein bleibt.',
+  jumpAttrHint: 'Die Verbindungen wachsen mit dem Wert auf der Skala des Attributs (Bereich, logarithmisch und umgekehrt wie bei den Datenebenen). Sterne ohne Wert bekommen die niedrigste Anzahl.',
+  jumpHub: 'Große Sterne bevorzugen',
+  jumpHubHint: '0: nächste Nachbarn zuerst. Höher: Helle Sterne erhalten ihre Verbindungen, bevor sich kleine Nachbarn untereinander verbinden.',
+  jumpConnect: 'Alles in Reichweite verbinden',
+  jumpConnectHint: 'Ergänzt die kürzesten Verbindungen, die sonst getrennte Gruppen zusammenführen.',
+  jumpColor: 'Linienfarbe',
+  jumpColorStars: 'Sternfarben',
+  jumpColorUniform: 'Einheitlich blau',
+  jumpColorLength: 'Nach Länge',
+  jumpOpacity: 'Deckkraft der Linien',
+  jumpStats: '{links} Verbindungen zwischen {places} Sternen und Systemen',
+  jumpTooMany: 'Zu viele Sterne in der Umgebung für das Sprungnetz (mehr als {n}). Verkleinere den sichtbaren Radius.',
+  jumpTooManyPairs: 'Zu viele Sternpaare innerhalb der Sprungweite. Verkleinere die Sprungweite oder den sichtbaren Radius.',
+  jumpLinks: 'Sprungverbindungen ({n})',
+  jumpVia: 'über {system}',
+  jumpNone: 'Kein anderer angezeigter Stern innerhalb von {range}.',
+  jumpKindCapacity: 'Verbindung nach Kapazität',
+  jumpKindAlone: 'Nächster Nachbar (sonst ohne Verbindung)',
+  jumpKindConnect: 'Verbindet getrennte Gruppen',
+  legendJump: 'Sprungverbindung ≤ {range}',
+  legendJumpTooMany: 'Sprungnetz: zu viele Sterne, Radius verkleinern',
   ly: 'Lj',
   pc: 'pc',
 };

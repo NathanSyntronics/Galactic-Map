@@ -1,5 +1,6 @@
 import type { AttributeStore } from '../data/attributes';
 import { formatNumber, t, type MessageKey } from '../i18n';
+import { JUMP_LENGTH_PALETTE, JUMP_UNIFORM_RGB } from '../render/links';
 import {
   MISSING_COLOR,
   SIZE_LUMINOSITY,
@@ -35,6 +36,14 @@ export function attributeLabel(info: AttributeInfo): string {
 
 const MAX_CATEGORIES = 12;
 
+/** Background of the legend's line sample for the jump colour mode. */
+function jumpLineCss(s: Settings): string {
+  if (s.jumpColor === 'length') return paletteGradient(JUMP_LENGTH_PALETTE);
+  if (s.jumpColor === 'uniform') return `rgb(${JUMP_UNIFORM_RGB.join(', ')})`;
+  // star colours: a cool and a warm end
+  return 'linear-gradient(to right, #ffcf9a, #cfdcff)';
+}
+
 /** Legend of the data layers (bottom left), shown while the map is coloured or sized by an attribute. */
 export class Legend {
   readonly root: HTMLElement;
@@ -44,11 +53,13 @@ export class Legend {
     parent.appendChild(this.root);
   }
 
-  update(s: Settings, store: AttributeStore): void {
+  /** `jumpTooMany`: the jump network is on but not shown (too many stars). */
+  update(s: Settings, store: AttributeStore, jumpTooMany = false): void {
     this.root.replaceChildren();
     const color = s.colorBy ? attributeInfo(s.colorBy, store) : null;
     const size = s.sizeBy !== SIZE_LUMINOSITY && s.sizeBy !== SIZE_UNIFORM ? attributeInfo(s.sizeBy, store) : null;
-    const show = s.legend && (color || (size && size.type === 'number'));
+    const layers = !!color || size?.type === 'number';
+    const show = s.legend && (layers || s.jumps);
     this.root.classList.toggle('hidden', !show);
     if (!show) return;
 
@@ -87,10 +98,22 @@ export class Legend {
       );
       this.root.appendChild(row);
     }
-    if (s.missingStyle === 'dim') {
+    if (layers && s.missingStyle === 'dim') {
       const list = el('ul', 'legend-cats');
       list.appendChild(this.swatch(MISSING_COLOR, t('noValue')));
       this.root.appendChild(list);
+    }
+    if (s.jumps) {
+      const row = el('div', 'legend-jump');
+      if (jumpTooMany) {
+        row.classList.add('warn');
+        row.textContent = t('legendJumpTooMany');
+      } else {
+        const line = el('span', 'legend-line');
+        line.style.background = jumpLineCss(s);
+        row.append(line, el('span', '', t('legendJump', { range: `${formatNumber(s.jumpRange, Number.isInteger(s.jumpRange) ? 0 : 1)} ${t('ly')}` })));
+      }
+      this.root.appendChild(row);
     }
   }
 
