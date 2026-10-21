@@ -1,7 +1,9 @@
 import { Color, MathUtils, Matrix4, PerspectiveCamera, Scene, Vector3, WebGLRenderer } from 'three';
 import { Navigation } from './controls/navigation';
 import { TapDetector } from './controls/tap';
+import { AttributeStore } from './data/attributes';
 import { Flag, designationOf, type NodeData } from './data/format';
+import { exportCsv, importCsv, type ImportReport, type StarResolver } from './data/importer';
 import { galacticToWorld, worldToGalactic } from './data/galactic';
 import {
   HttpError,
@@ -16,8 +18,11 @@ import {
 import { formatLy, formatNumber, localName, setLang, t, type MessageKey } from './i18n';
 import { DropLines, Marker, PolarGrid } from './render/overlays';
 import { Starfield, apparentMag, starLogL } from './render/starfield';
+import { SIZE_LUMINOSITY, SIZE_UNIFORM, attributeInfo, buildPlan, type StylePlan } from './render/style';
 import { QUALITY_BUDGET, RADIUS_MAX, RADIUS_MIN, SettingsStore, type Settings } from './settings';
+import { AttributesDialog } from './ui/attributes-dialog';
 import { InfoPanel, displayName, type StarInfo } from './ui/info';
+import { Legend } from './ui/legend';
 import { LabelLayer, type LabelCandidate } from './ui/labels';
 import { SettingsPanel } from './ui/panel';
 import { SearchBox, SearchIndex, type SearchHit, type SearchTuple } from './ui/search';
@@ -31,6 +36,16 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: 
 
 export class App {
   private readonly store = new SettingsStore();
+  private readonly attrs = new AttributeStore();
+  private stylePlan: StylePlan;
+  private styleDirty = false;
+  private lastStyle = 0;
+  private readonly legend: Legend;
+  private attrDialog: AttributesDialog | null = null;
+  /** The site's own attribute dataset (public/user/attributes.csv), if it has one. */
+  private siteData: string | null = null;
+  private systemPrimaries: Promise<Map<number, string>> | null = null;
+  private saveWarned = false;
   private readonly renderer: WebGLRenderer;
   private readonly scene = new Scene();
   private readonly camera: PerspectiveCamera;
@@ -83,7 +98,13 @@ export class App {
 
     this.camera = new PerspectiveCamera(55, 1, 0.001, 1e6);
     this.nav = new Navigation(this.camera, this.renderer.domElement);
-    this.starfield = new Starfield(() => this.store.get());
+    const stored = AttributeStore.readStored();
+    if (stored) this.attrs.load(stored, false);
+    this.stylePlan = buildPlan(this.store.get(), this.attrs);
+    this.starfield = new Starfield(
+      () => this.store.get(),
+      () => this.stylePlan,
+    );
 
     this.scene.add(this.grid.group, this.dropLines.lines, this.starfield.group, this.selMarker.points);
 
@@ -106,14 +127,25 @@ export class App {
     this.helpBtn = helpBtn;
     top.appendChild(helpBtn);
 
-    this.panel = new SettingsPanel(container, this.store);
+    this.panel = new SettingsPanel(container, this.store, this.attrs);
+    this.panel.onManageAttributes = () => this.showAttributes();
     this.panel.onGoToSun = () => this.goToSun();
     this.panel.onHelp = () => this.showHelp();
     this.panel.onAbout = () => this.showAbout();
 
-    this.info = new InfoPanel(container);
+    this.info = new InfoPanel(container, this.attrs);
+    this.info.onManageAttributes = () => this.showAttributes();
     this.info.onClose = () => this.select(null);
     this.info.onFlyTo = (info) => this.nav.flyTo(info.pos);
+
+    this.legend = new Legend(container);
+    this.legend.update(this.store.get(), this.attrs);
+    this.attrs.subscribe((kind) => this.attributesChanged(kind));
+    this.attrs.onSaveError = () => {
+      if (this.saveWarned) return;
+      this.saveWarned = true;
+      window.alert(t('saveFailed'));
+    };
 
     this.status = el('div', 'status');
     container.appendChild(this.status);
@@ -157,6 +189,126 @@ export class App {
     this.loader.onFailed = (node) => this.nodeFailed(node);
     this.lodDirty = true;
     this.loop();
+    if (!AttributeStore.readStored()) void this.loadSiteData();
+  }
+
+  // ------------------------------------------------------------------ user attributes
+
+  /** Loads the site's attribute dataset for visitors without data of their own. */
+  private async loadSiteData(): Promise<void> {
+    try {
+      const res = await fetch(`${import.meta.env.BASE_URL}user/attributes.csv`);
+      if (!res.ok) return;
+      const text = await res.text();
+      // dev servers answer unknown paths with the app page
+      if (/^\s*</.test(text)) return;
+      this.siteData = text;
+      await this.applySiteData();
+    } catch (err) {
+      console.warn('site attributes unavailable', err);
+    }
+  }
+
+  private async applySiteData(): Promise<void> {
+    if (!this.siteData) return;
+    const resolver = await this.resolver();
+    // the site dataset is not saved as the visitor's own data: site updates keep reaching them
+    this.attrs.withoutSaving(() => {
+      this.attrs.load({ v: 1, defs: [], values: {} }, false);
+      importCsv(this.siteData!, this.attrs, resolver);
+    });
+  }
+
+  /** Name and designation lookup for CSV imports (loads the search index and systems.json). */
+  private async resolver(): Promise<StarResolver> {
+    await this.loadSearch();
+    if (!this.systemPrimaries) {
+      this.systemPrimaries = (async () => {
+        const m = new Map<number, string>();
+        try {
+          const res = await fetch(`${this.baseUrl}systems.json`);
+          if (res.ok) {
+            const sys = (await res.json()) as Record<string, unknown[]>;
+            for (const [k, v] of Object.entries(sys)) if (typeof v[6] === 'string') m.set(Number(k), v[6]);
+          }
+        } catch (err) {
+          console.warn('systems.json unavailable', err);
+        }
+        return m;
+      })();
+    }
+    const primaries = await this.systemPrimaries;
+    return {
+      star: (key) => {
+        const e = this.searchIndex.find(key);
+        return e && e[9] ? { designation: e[9], system: e[10] ?? -1 } : null;
+      },
+      systemPrimary: (sid) => primaries.get(sid) ?? null,
+    };
+  }
+
+  private attributesChanged(kind: 'defs' | 'values' | 'scales'): void {
+    const s = this.store.get();
+    if (kind === 'defs') {
+      // a deleted (or retyped) attribute no longer colours or sizes the map
+      const patch: Partial<Settings> = {};
+      if (s.colorBy && !attributeInfo(s.colorBy, this.attrs)) patch.colorBy = '';
+      const size = s.sizeBy !== SIZE_LUMINOSITY && s.sizeBy !== SIZE_UNIFORM ? attributeInfo(s.sizeBy, this.attrs) : undefined;
+      if (size === null || (size && size.type !== 'number')) patch.sizeBy = SIZE_LUMINOSITY;
+      if (Object.keys(patch).length) this.store.set(patch);
+      this.panel.attributesChanged();
+    }
+    this.stylePlan = buildPlan(this.store.get(), this.attrs);
+    this.styleDirty = true;
+    this.legend.update(this.store.get(), this.attrs);
+    if (!this.info.editing) this.info.rerender(this.nav.target);
+  }
+
+  private showAttributes(): void {
+    this.attrDialog = new AttributesDialog(this.attrs, {
+      importCsv: async (file, replace) => this.importFile(file, replace),
+      exportCsv: async () => this.exportFile(),
+      hasSiteData: () => this.siteData !== null,
+      resetToSite: async () => {
+        this.attrs.clearStored();
+        await this.applySiteData();
+      },
+      deleteAll: () => {
+        this.attrs.load({ v: 1, defs: [], values: {} });
+        this.attrs.saveNow();
+      },
+    });
+    this.panel.toggle(false);
+    this.openDialog(t('attributes'), this.attrDialog.body);
+  }
+
+  private async importFile(file: File, replace: boolean): Promise<ImportReport> {
+    const text = await file.text();
+    const resolver = await this.resolver();
+    return importCsv(text, this.attrs, resolver, replace);
+  }
+
+  private async exportFile(): Promise<void> {
+    await this.loadSearch();
+    const lang = this.store.get().lang;
+    const csv = exportCsv(
+      this.attrs,
+      {
+        name: (d) => {
+          const e = this.searchIndex.byPrimary(d);
+          return e ? localName(e[0], e[1]) : null;
+        },
+      },
+      lang,
+    );
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = lang === 'de' ? 'galaktische-karte-attribute.csv' : 'galactic-map-attributes.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
   }
 
   /** Loads the manifest, retrying transient failures a few times. */
@@ -211,7 +363,11 @@ export class App {
       this.info.rerender(this.nav.target);
       this.refreshChrome();
     }
-    if (has('showBrownDwarfs', 'showWhiteDwarfs', 'maxDistErr', 'saturation')) this.starfield.restyle();
+    if (has('colorBy', 'sizeBy', 'missingStyle')) this.stylePlan = buildPlan(s, this.attrs);
+    if (has('showBrownDwarfs', 'showWhiteDwarfs', 'maxDistErr', 'saturation', 'colorBy', 'sizeBy', 'missingStyle')) {
+      this.styleDirty = true;
+    }
+    if (has('colorBy', 'sizeBy', 'missingStyle', 'legend', 'lang')) this.legend.update(s, this.attrs);
     if (has('radius', 'quality')) this.lodDirty = true;
     this.candidatesDirty = true;
     this.applySettings(s);
@@ -489,6 +645,8 @@ export class App {
       distErr: d.distErr[i],
       spec: d.spec[i],
       specType: d.spectralTypes.get(i) ?? null,
+      planets: d.planets.get(i) ?? 0,
+      systemPrimary: sys?.primary ?? null,
       system:
         sysId !== undefined && sys
           ? { id: sysId, nameEn: sys.nameEn ?? designationOf(d, i), nameDe: sys.nameDe, members: sys.members }
@@ -690,6 +848,12 @@ export class App {
     u.uMinPx.value = 2.6 * this.renderer.getPixelRatio();
     u.uMaxPx.value = 64 * this.renderer.getPixelRatio();
 
+    if (this.styleDirty && now - this.lastStyle > 150) {
+      this.styleDirty = false;
+      this.lastStyle = now;
+      this.starfield.restyle();
+      this.candidatesDirty = true;
+    }
     if (this.lodDirty && now - this.lastLod > 120) {
       this.lodDirty = false;
       this.lastLod = now;

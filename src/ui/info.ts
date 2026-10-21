@@ -1,7 +1,9 @@
 import { Vector3 } from 'three';
+import { normalizeColor, type AttrValue, type AttributeDef, type AttributeStore } from '../data/attributes';
+import { parseNumber } from '../data/csv';
 import { Flag, UNKNOWN_I16, distErrPercent, spectralClassOf } from '../data/format';
 import { LY_PER_PC, galacticLB, worldToGalactic } from '../data/galactic';
-import { formatLy, formatNumber, localName, t } from '../i18n';
+import { formatLy, formatNumber, getLang, localName, t } from '../i18n';
 
 export interface StarInfo {
   key: string;
@@ -18,6 +20,24 @@ export interface StarInfo {
   spec: number;
   specType: string | null;
   system: { id: number; nameEn: string; nameDe: string | null; members: number } | null;
+  /** Primary designation of the system's primary star (key of whole-system attribute values). */
+  systemPrimary: string | null;
+  /** Known exoplanets. */
+  planets: number;
+}
+
+/** A user number as typed in the current language (no thousands separators). */
+export function numberText(v: number): string {
+  const s = String(v);
+  return getLang() === 'de' ? s.replace('.', ',') : s;
+}
+
+function valueText(def: AttributeDef, v: AttrValue): string {
+  if (def.type === 'number' && typeof v === 'number') {
+    const digits = Math.min((String(v).split('.')[1] ?? '').length, 8);
+    return /e/i.test(String(v)) ? numberText(v) : formatNumber(v, digits);
+  }
+  return String(v);
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -40,8 +60,14 @@ export class InfoPanel {
   private centreRow: { dt: HTMLElement; dd: HTMLElement } | null = null;
   onClose: () => void = () => {};
   onFlyTo: (info: StarInfo) => void = () => {};
+  onManageAttributes: () => void = () => {};
+  /** True while the attribute form is open (the card is then not rebuilt by data changes). */
+  editing = false;
 
-  constructor(parent: HTMLElement) {
+  constructor(
+    parent: HTMLElement,
+    private readonly attrs: AttributeStore,
+  ) {
     this.root = el('section', 'info-card hidden');
     this.root.setAttribute('aria-live', 'polite');
     parent.appendChild(this.root);
@@ -53,6 +79,7 @@ export class InfoPanel {
 
   /** Shows the card for a star (null hides it). Rebuilds the card. */
   show(info: StarInfo | null, target: Vector3): void {
+    if (info?.key !== this.info?.key) this.editing = false;
     this.info = info;
     this.render(target);
   }
@@ -141,6 +168,7 @@ export class InfoPanel {
       const digits = L >= 100 ? 0 : L >= 1 ? 2 : Math.min(6, Math.ceil(-Math.log10(L)) + 2);
       row(t('luminosity'), `${formatNumber(L, digits)} L☉`);
     }
+    if (info.planets > 0) row(t('knownPlanets'), String(info.planets));
     if (info.system) {
       row(
         t('system'),
@@ -150,6 +178,7 @@ export class InfoPanel {
     if (info.alt.length) row(t('otherNames'), info.alt.join(' · '));
     row(t('source'), sourceText(info.flags));
     this.root.appendChild(dl);
+    this.root.appendChild(this.editing ? this.attributeForm(info, target) : this.attributeList(info, target));
 
     const actions = el('div', 'info-actions');
     const fly = el('button', 'btn', t('flyTo'));
@@ -163,6 +192,165 @@ export class InfoPanel {
       actions.appendChild(a);
     }
     this.root.appendChild(actions);
+  }
+
+  /** Value of an attribute for the star: its own, or (whole-system attributes) its system's. */
+  private valueOf(info: StarInfo, def: AttributeDef): { v: AttrValue; inherited: boolean } | null {
+    const m = this.attrs.values(def.id);
+    const own = m.getText(info.designation);
+    if (own !== undefined) return { v: own, inherited: false };
+    if (def.system && info.systemPrimary && info.systemPrimary !== info.designation) {
+      const v = m.getExact(info.systemPrimary);
+      if (v !== undefined) return { v, inherited: true };
+    }
+    return null;
+  }
+
+  private attributeList(info: StarInfo, target: Vector3): HTMLElement {
+    const box = el('div', 'attr-box');
+    const head = el('div', 'attr-head');
+    head.appendChild(el('h3', '', t('attributes')));
+    const defs = this.attrs.defs;
+    const btn = el('button', 'btn small', defs.length ? t('editAttributes') : t('manageAttributes'));
+    btn.addEventListener('click', () => {
+      if (!defs.length) return this.onManageAttributes();
+      this.editing = true;
+      this.render(target);
+      this.root.querySelector<HTMLInputElement>('.attr-form input')?.focus();
+    });
+    head.appendChild(btn);
+    box.appendChild(head);
+    if (!defs.length) {
+      box.appendChild(el('p', 'hint', t('noAttributes')));
+      return box;
+    }
+    const dl = el('dl', 'attr-list');
+    for (const def of defs) {
+      const val = this.valueOf(info, def);
+      dl.appendChild(el('dt', '', def.name));
+      const dd = el('dd');
+      if (!val) {
+        dd.textContent = '–';
+        dd.classList.add('empty');
+      } else {
+        if (def.type === 'color') {
+          const sw = el('span', 'swatch');
+          sw.style.background = String(val.v);
+          dd.appendChild(sw);
+        }
+        dd.appendChild(document.createTextNode(valueText(def, val.v)));
+        if (val.inherited) dd.appendChild(el('span', 'inherited', ` (${t('fromSystem')})`));
+      }
+      dl.appendChild(dd);
+    }
+    box.appendChild(dl);
+    return box;
+  }
+
+  private attributeForm(info: StarInfo, target: Vector3): HTMLElement {
+    const form = el('form', 'attr-form attr-box');
+    form.noValidate = true;
+    form.appendChild(el('h3', '', t('attributes')));
+    const fields: { def: AttributeDef; input: HTMLInputElement }[] = [];
+    for (const def of this.attrs.defs) {
+      const val = this.valueOf(info, def);
+      const row = el('label', 'attr-field');
+      const name = el('span', 'attr-name', def.name);
+      if (def.system && info.system) name.appendChild(el('span', 'inherited', ` (${t('wholeSystem')})`));
+      row.appendChild(name);
+      const input = el('input');
+      input.type = 'text';
+      input.name = def.id;
+      const wrap = el('span', 'attr-input');
+      wrap.appendChild(input);
+      if (def.type === 'number') {
+        input.inputMode = 'decimal';
+        input.value = val && typeof val.v === 'number' ? numberText(val.v) : '';
+      } else if (def.type === 'color') {
+        input.value = val ? String(val.v) : '';
+        input.placeholder = '#rrggbb';
+        input.size = 8;
+        const pick = el('input');
+        pick.type = 'color';
+        pick.value = normalizeColor(input.value) ?? '#ffc861';
+        pick.setAttribute('aria-label', def.name);
+        pick.addEventListener('input', () => (input.value = pick.value));
+        input.addEventListener('input', () => {
+          const c = normalizeColor(input.value);
+          if (c) pick.value = c;
+        });
+        wrap.appendChild(pick);
+      } else {
+        input.value = val ? String(val.v) : '';
+        const options = this.attrs.distinct(def.id).slice(0, 300);
+        if (options.length) {
+          const list = el('datalist');
+          list.id = `attr-values-${def.id}`;
+          for (const o of options) {
+            const opt = el('option');
+            opt.value = o;
+            list.appendChild(opt);
+          }
+          wrap.appendChild(list);
+          input.setAttribute('list', list.id);
+        }
+      }
+      const clear = el('button', 'icon-btn small', '×');
+      clear.type = 'button';
+      clear.setAttribute('aria-label', t('removeValue'));
+      clear.addEventListener('click', () => {
+        input.value = '';
+        input.focus();
+      });
+      wrap.appendChild(clear);
+      row.appendChild(wrap);
+      form.appendChild(row);
+      fields.push({ def, input });
+    }
+    const actions = el('div', 'info-actions');
+    const save = el('button', 'btn', t('save'));
+    save.type = 'submit';
+    const cancel = el('button', 'btn subtle', t('cancel'));
+    cancel.type = 'button';
+    cancel.addEventListener('click', () => {
+      this.editing = false;
+      this.render(target);
+    });
+    actions.append(save, cancel);
+    form.appendChild(actions);
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      // check everything first, then write
+      const updates: { def: AttributeDef; value: AttrValue | null }[] = [];
+      let ok = true;
+      for (const { def, input } of fields) {
+        const raw = input.value.trim();
+        let value: AttrValue | null = raw;
+        if (raw && def.type === 'number') value = parseNumber(raw, true);
+        else if (raw && def.type === 'color') value = normalizeColor(raw);
+        const bad = !!raw && value === null;
+        input.classList.toggle('invalid', bad);
+        if (bad) ok = false;
+        updates.push({ def, value: raw ? value : null });
+      }
+      if (!ok) {
+        form.querySelector<HTMLInputElement>('input.invalid')?.focus();
+        return;
+      }
+      this.editing = false;
+      for (const { def, value } of updates) {
+        if (def.system && info.systemPrimary) {
+          // whole-system values live on the primary; a member's own value would hide them
+          if (info.systemPrimary !== info.designation) this.attrs.setValue(def.id, info.designation, null, false);
+          this.attrs.setValue(def.id, info.systemPrimary, value, false);
+        } else {
+          this.attrs.setValue(def.id, info.designation, value, false);
+        }
+      }
+      this.attrs.commit('values');
+      this.render(target);
+    });
+    return form;
   }
 }
 

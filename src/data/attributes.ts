@@ -12,7 +12,7 @@ export interface AttributeDef {
   system: boolean;
 }
 
-export type PaletteId = 'turbo' | 'plasma' | 'blueRed' | 'greens';
+export type PaletteId = 'turbo' | 'plasma' | 'viridis' | 'blueRed';
 
 /** How an attribute is drawn when the map is coloured or sized by it (user and built-in attributes). */
 export interface AttributeScale {
@@ -21,6 +21,8 @@ export interface AttributeScale {
   min?: number;
   max?: number;
   log?: boolean;
+  /** High values at the start of the palette. */
+  reverse?: boolean;
   /** Colours of text values chosen by the user ('#rrggbb'); the others get palette colours. */
   colors?: Record<string, string>;
 }
@@ -69,6 +71,7 @@ export class AttributeStore {
   private scaleMap: Record<string, AttributeScale> = {};
   private listeners: Listener[] = [];
   private saveTimer = 0;
+  private saving = true;
   /** Set when the last save failed (storage full or unavailable). */
   saveError: unknown = null;
   onSaveError: (err: unknown) => void = () => {};
@@ -182,6 +185,7 @@ export class AttributeStore {
     return true;
   }
 
+  /** Value of a star by designation (any spelling of it). */
   getValue(id: string, designation: string): AttrValue | undefined {
     return this.maps.get(id)?.getText(designation);
   }
@@ -274,8 +278,18 @@ export class AttributeStore {
     }
   }
 
+  /** Runs changes that are not saved (the site's dataset). */
+  withoutSaving(fn: () => void): void {
+    this.saving = false;
+    try {
+      fn();
+    } finally {
+      this.saving = true;
+    }
+  }
+
   private changed(kind: ChangeKind, save = true): void {
-    if (save && this.persist) this.scheduleSave();
+    if (save && this.persist && this.saving) this.scheduleSave();
     for (const l of this.listeners) l(kind);
   }
 

@@ -15,6 +15,10 @@ import { LY_PER_PC } from '../data/galactic';
 import type { OctreeNode } from '../data/octree';
 import type { Settings } from '../settings';
 import { temperatureColor } from './colors';
+import { MISSING_COLOR, hexToRgb, sizeForPosition, type StylePlan } from './style';
+
+const MISSING_RGB = hexToRgb(MISSING_COLOR);
+const DEFAULT_PLAN: StylePlan = { color: null, size: null, missing: 'dim' };
 
 // Each octree node is rendered relative to its own render origin (see renderOrigin): the position
 // attribute holds `position - origin` and the Points object sits at the origin. The origin is
@@ -225,25 +229,53 @@ export function isStarVisible(node: NodeData, i: number, s: Settings): boolean {
   return true;
 }
 
-function computeStyle(node: NodeData, s: Settings, colors: Uint8Array, sizes: Float32Array): void {
+function temperatureStyle(node: NodeData, i: number, s: Settings, colors: Uint8Array): void {
+  const f = node.flags[i];
+  const teff = node.teff[i];
+  if (teff > 0) {
+    temperatureColor(teff, s.saturation, colors, 3 * i);
+  } else if (f & Flag.BROWN_DWARF) {
+    temperatureColor(1200, s.saturation, colors, 3 * i);
+  } else if (f & Flag.WHITE_DWARF) {
+    temperatureColor(9000, s.saturation, colors, 3 * i);
+  } else {
+    colors[3 * i] = colors[3 * i + 1] = colors[3 * i + 2] = 215;
+  }
+}
+
+/** Colour and symbol size of every star of a node (size 0: hidden). */
+export function computeStyle(node: NodeData, s: Settings, plan: StylePlan, colors: Uint8Array, sizes: Float32Array): void {
   for (let i = 0; i < node.count; i++) {
-    const f = node.flags[i];
     if (!isStarVisible(node, i, s)) {
       sizes[i] = 0;
       colors[3 * i] = colors[3 * i + 1] = colors[3 * i + 2] = 0;
       continue;
     }
-    const teff = node.teff[i];
-    if (teff > 0) {
-      temperatureColor(teff, s.saturation, colors, 3 * i);
-    } else if (f & Flag.BROWN_DWARF) {
-      temperatureColor(1200, s.saturation, colors, 3 * i);
-    } else if (f & Flag.WHITE_DWARF) {
-      temperatureColor(9000, s.saturation, colors, 3 * i);
-    } else {
-      colors[3 * i] = colors[3 * i + 1] = colors[3 * i + 2] = 215;
+    const hasColor = plan.color ? plan.color(node, i, colors, 3 * i) : true;
+    let size = plan.size ? plan.size(node, i) : symbolRadius(starLogL(node, i));
+    const hasSize = size !== undefined;
+    if (hasColor && hasSize) {
+      if (!plan.color) temperatureStyle(node, i, s, colors);
+      sizes[i] = size!;
+      continue;
     }
-    sizes[i] = symbolRadius(starLogL(node, i));
+    // no value for the attribute the map is coloured or sized by
+    const sun = (node.flags[i] & Flag.SUN) !== 0;
+    if (plan.missing === 'hide' && !sun) {
+      sizes[i] = 0;
+      colors[3 * i] = colors[3 * i + 1] = colors[3 * i + 2] = 0;
+      continue;
+    }
+    if (plan.missing === 'normal' || sun) {
+      if (!hasColor || !plan.color) temperatureStyle(node, i, s, colors);
+      size ??= symbolRadius(starLogL(node, i));
+    } else {
+      colors[3 * i] = MISSING_RGB[0];
+      colors[3 * i + 1] = MISSING_RGB[1];
+      colors[3 * i + 2] = MISSING_RGB[2];
+      size = 0.6 * (size ?? sizeForPosition(0));
+    }
+    sizes[i] = size;
   }
 }
 
@@ -269,7 +301,10 @@ export class Starfield {
   /** View centre (world), for the fade-out at the view radius. */
   private readonly target = new Vector3();
 
-  constructor(private settings: () => Settings) {
+  constructor(
+    private settings: () => Settings,
+    private plan: () => StylePlan = () => DEFAULT_PLAN,
+  ) {
     this.group.name = 'starfield';
   }
 
@@ -291,7 +326,7 @@ export class Starfield {
     geometry.setAttribute('position', position);
     const colors = new Uint8Array(data.count * 3);
     const sizes = new Float32Array(data.count);
-    computeStyle(data, this.settings(), colors, sizes);
+    computeStyle(data, this.settings(), this.plan(), colors, sizes);
     geometry.setAttribute('aColor', new BufferAttribute(colors, 3, true));
     geometry.setAttribute('aSize', new BufferAttribute(sizes, 1));
     geometry.boundingSphere = new Sphere(node.worldCenter.clone().sub(origin), node.radius);
@@ -339,8 +374,9 @@ export class Starfield {
   /** Recompute colours/sizes of all nodes (after a style or filter change). */
   restyle(): void {
     const s = this.settings();
+    const plan = this.plan();
     for (const r of this.rendered.values()) {
-      computeStyle(r.data, s, r.colors, r.sizes);
+      computeStyle(r.data, s, plan, r.colors, r.sizes);
       (r.points.geometry.getAttribute('aColor') as BufferAttribute).needsUpdate = true;
       (r.points.geometry.getAttribute('aSize') as BufferAttribute).needsUpdate = true;
     }

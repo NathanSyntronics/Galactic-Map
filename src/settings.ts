@@ -1,5 +1,6 @@
 export type Lang = 'en' | 'de';
 export type Quality = 'low' | 'medium' | 'high' | 'ultra';
+export type MissingStyle = 'dim' | 'hide' | 'normal';
 
 export interface Settings {
   lang: Lang;
@@ -20,6 +21,13 @@ export interface Settings {
   grid: boolean;
   dropLines: boolean;
   quality: Quality;
+  /** Attribute that sets the star colours ('' natural temperature colour). */
+  colorBy: string;
+  /** Attribute that sets the symbol sizes ('' luminosity, 'uniform'). */
+  sizeBy: string;
+  /** Stars without a value for colorBy / sizeBy. */
+  missingStyle: MissingStyle;
+  legend: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -37,6 +45,10 @@ export const DEFAULT_SETTINGS: Settings = {
   grid: true,
   dropLines: true,
   quality: 'medium',
+  colorBy: '',
+  sizeBy: '',
+  missingStyle: 'dim',
+  legend: true,
 };
 
 export const QUALITY_BUDGET: Record<Quality, number> = {

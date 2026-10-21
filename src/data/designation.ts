@@ -119,6 +119,11 @@ export class DesignationMap<T> {
     return this.byText.get(canonicalDesignation(designation));
   }
 
+  /** Lookup by a designation that is already canonical (taken from the node data). */
+  getExact(designation: string): T | undefined {
+    return this.byText.get(designation);
+  }
+
   /** Value of star i of a node (by its primary designation). */
   get(node: NodeData, i: number): T | undefined {
     const cat = node.desigCat[i];

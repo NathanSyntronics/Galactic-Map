@@ -485,6 +485,350 @@ select {
   font-size: 12px;
 }
 
+/* ---------------------------------------------------------------- attributes */
+
+.btn.small {
+  min-height: 28px;
+  padding: 3px 10px;
+  font-size: 12px;
+}
+
+.icon-btn.small {
+  width: 28px;
+  height: 28px;
+  font-size: 15px;
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+input[type='text'],
+input[type='search'],
+select {
+  font: inherit;
+  color: var(--text);
+}
+
+input.invalid {
+  outline: 2px solid #ff6b6b;
+  outline-offset: 1px;
+}
+
+.layers .btn {
+  margin-top: 4px;
+}
+
+.scale-controls {
+  margin: -2px 0 8px;
+  padding: 6px 10px;
+  border-left: 2px solid var(--border);
+}
+
+.scale-controls .row {
+  margin: 6px 0;
+}
+
+.row.range,
+.row.flags {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+.row.range input,
+.attr-field input[type='text'],
+.attr-new input[type='text'],
+.attr-table input[type='text'] {
+  background: rgba(127, 178, 255, 0.08);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  min-width: 0;
+}
+
+.row.range input {
+  width: 6.5em;
+}
+
+label.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+label.check input {
+  accent-color: var(--accent);
+}
+
+.attr-box {
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+  padding-top: 8px;
+  margin-bottom: 10px;
+}
+
+.attr-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.attr-box h3 {
+  font-size: 13px;
+  margin: 0;
+  color: var(--accent);
+}
+
+.attr-form h3 {
+  margin-bottom: 6px;
+}
+
+.attr-list {
+  margin: 6px 0 0;
+}
+
+.attr-list dd {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.attr-list dd.empty,
+.inherited {
+  color: var(--text-dim);
+}
+
+.attr-field {
+  display: grid;
+  gap: 3px;
+  margin: 8px 0;
+  font-size: 13px;
+}
+
+.attr-input {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.attr-input input[type='text'] {
+  flex: 1;
+}
+
+.attr-input input[type='color'] {
+  width: 34px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+}
+
+.attr-dialog .hint-block {
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.attr-dialog .hint-block p {
+  margin: 6px 0;
+}
+
+.attr-dialog code {
+  background: rgba(127, 178, 255, 0.1);
+  padding: 0 4px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.table-scroll {
+  overflow-x: auto;
+  margin: 10px 0;
+}
+
+.attr-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+}
+
+.attr-table th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-dim);
+  padding: 4px 6px;
+}
+
+.attr-table td {
+  padding: 4px 6px;
+  border-top: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.attr-table input[type='text'] {
+  width: 100%;
+  min-width: 8em;
+}
+
+.attr-table select,
+.attr-new select {
+  background: rgba(127, 178, 255, 0.1);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 6px;
+}
+
+.attr-table option,
+.attr-new option {
+  background: #0d1426;
+}
+
+.attr-table .count {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+
+.attr-new {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.attr-new input[type='text'] {
+  flex: 1 1 10em;
+}
+
+.attr-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.attr-message {
+  min-height: 1em;
+  font-size: 13px;
+  margin: 6px 0;
+}
+
+.attr-message.error {
+  color: #ff9b9b;
+}
+
+.attr-report {
+  font-size: 13px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 12px;
+  margin: 8px 0;
+}
+
+/* ---------------------------------------------------------------- legend */
+
+.legend {
+  position: absolute;
+  left: 12px;
+  bottom: max(32px, calc(env(safe-area-inset-bottom) + 22px));
+  max-width: min(240px, calc(100vw - 24px));
+  padding: 8px 10px;
+  background: var(--surface);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 12px;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.legend-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+  overflow-wrap: anywhere;
+}
+
+.legend-bar {
+  height: 10px;
+  border-radius: 3px;
+}
+
+.legend-ends {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-dim);
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.legend-cats {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.legend-cats + .legend-cats,
+.legend-bar ~ .legend-cats,
+.legend-size + .legend-cats {
+  margin-top: 6px;
+}
+
+.legend-cats li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-wrap: anywhere;
+}
+
+.legend-cats li.more {
+  color: var(--text-dim);
+}
+
+.swatch {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.15);
+}
+
+.legend-size {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  margin-top: 6px;
+  color: var(--text-dim);
+}
+
+.legend-size-title {
+  flex-basis: 100%;
+  color: var(--text);
+}
+
+.legend-size .dot {
+  display: inline-block;
+  border-radius: 50%;
+  background: var(--text-dim);
+}
+
+.legend-size .dot.small {
+  width: 4px;
+  height: 4px;
+}
+
+.legend-size .dot.large {
+  width: 11px;
+  height: 11px;
+  margin-left: 6px;
+}
+
 /* ---------------------------------------------------------------- small screens */
 
 @media (max-width: 700px) {

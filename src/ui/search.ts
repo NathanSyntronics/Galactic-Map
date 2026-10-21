@@ -52,8 +52,13 @@ export function normalize(s: string): string {
 
 export class SearchIndex {
   private entries: Entry[] = [];
+  /** Exact-key lookup (normalised name or designation -> entry), built on first use. */
+  private exact: Map<string, SearchTuple> | null = null;
+  private byDesignation: Map<string, SearchTuple> | null = null;
 
   load(tuples: SearchTuple[]): void {
+    this.exact = null;
+    this.byDesignation = null;
     this.entries = tuples.map((tuple) => {
       const [en, de, , , x, y, z, , alt] = tuple;
       const keys = [en, ...(de ? [de] : []), ...(alt ?? [])].map(normalize);
@@ -63,6 +68,38 @@ export class SearchIndex {
 
   get size(): number {
     return this.entries.length;
+  }
+
+  /**
+   * The star that a name or designation names exactly (any spelling the search accepts), or
+   * null. Primary designations win over displayed names, displayed names over other designations.
+   */
+  find(key: string): SearchTuple | null {
+    if (!this.exact) {
+      const m = new Map<string, SearchTuple>();
+      const put = (k: string | null | undefined, tuple: SearchTuple) => {
+        if (!k) return;
+        const n = normalize(k);
+        if (n && !m.has(n)) m.set(n, tuple);
+      };
+      for (const { tuple } of this.entries) put(tuple[9], tuple);
+      for (const { tuple } of this.entries) {
+        put(tuple[0], tuple);
+        put(tuple[1], tuple);
+      }
+      for (const { tuple } of this.entries) for (const a of tuple[8] ?? []) put(a, tuple);
+      this.exact = m;
+    }
+    return this.exact.get(normalize(key)) ?? null;
+  }
+
+  /** The entry of a star by its primary designation (named stars only). */
+  byPrimary(designation: string): SearchTuple | null {
+    if (!this.byDesignation) {
+      this.byDesignation = new Map();
+      for (const { tuple } of this.entries) if (tuple[9]) this.byDesignation.set(tuple[9], tuple);
+    }
+    return this.byDesignation.get(designation) ?? null;
   }
 
   query(q: string, limit = 12): SearchHit[] {

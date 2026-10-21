@@ -1,5 +1,16 @@
+import type { AttributeStore, PaletteId } from '../data/attributes';
+import { parseNumber } from '../data/csv';
 import { t, formatNumber, type MessageKey } from '../i18n';
-import { RADIUS_MAX, RADIUS_MIN, type Quality, type Settings, type SettingsStore } from '../settings';
+import {
+  BUILTIN_ATTRIBUTES,
+  COLOR_TEMPERATURE,
+  SIZE_LUMINOSITY,
+  SIZE_UNIFORM,
+  attributeInfo,
+  builtin,
+} from '../render/style';
+import { RADIUS_MAX, RADIUS_MIN, type MissingStyle, type Quality, type Settings, type SettingsStore } from '../settings';
+import { formatValue } from './legend';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -23,10 +34,14 @@ export class SettingsPanel {
   onGoToSun: () => void = () => {};
   onHelp: () => void = () => {};
   onAbout: () => void = () => {};
+  onManageAttributes: () => void = () => {};
+  /** The data layer controls; rebuilt when the chosen attributes or the attribute list change. */
+  private readonly layers = el('div', 'layers');
 
   constructor(
     parent: HTMLElement,
     private readonly store: SettingsStore,
+    private readonly attrs: AttributeStore,
   ) {
     this.root = el('aside', 'panel');
     this.root.id = 'settings-panel';
@@ -42,7 +57,15 @@ export class SettingsPanel {
    */
   settingsChanged(changed: (keyof Settings)[]): void {
     if (changed.includes('lang')) this.render();
-    else this.sync();
+    else {
+      this.sync();
+      if (changed.some((k) => k === 'colorBy' || k === 'sizeBy')) this.renderLayers();
+    }
+  }
+
+  /** The attribute list changed (added, renamed, deleted). */
+  attributesChanged(): void {
+    this.renderLayers();
   }
 
   toggle(open?: boolean): void {
@@ -58,6 +81,7 @@ export class SettingsPanel {
 
   private sync(): void {
     for (const s of this.syncers) s();
+    for (const s of this.layerSyncers) s();
   }
 
   private focusables(): HTMLElement[] {
@@ -113,6 +137,11 @@ export class SettingsPanel {
         () => (s().maxDistErr >= 100 ? t('noLimit') : `${s().maxDistErr} %`),
       ),
     );
+
+    // --- Data layers
+    b.appendChild(el('h3', '', t('dataLayers')));
+    b.appendChild(this.layers);
+    this.renderLayers();
 
     // --- Labels
     b.appendChild(el('h3', '', t('labelsSection')));
@@ -174,6 +203,159 @@ export class SettingsPanel {
     footer.append(help, about, reset);
     b.appendChild(footer);
     if (focusIndex >= 0) this.focusables()[focusIndex]?.focus();
+  }
+
+  private layerSyncers: (() => void)[] = [];
+
+  private renderLayers(): void {
+    const box = this.layers;
+    const active = document.activeElement;
+    const all = () => [...box.querySelectorAll<HTMLElement>('input, select, button')];
+    const focusIndex = active instanceof HTMLElement ? all().indexOf(active) : -1;
+    box.replaceChildren();
+    // the control helpers register their syncers in this.syncers: collect the layer ones apart
+    const panelSyncers = this.syncers;
+    this.syncers = [];
+    const s = this.store.get();
+    const defs = this.attrs.defs;
+
+    // colour
+    const colorOpts: Option[] = [[COLOR_TEMPERATURE, t('colorTemperature')]];
+    const colorGroups: OptGroup[] = [
+      [t('builtinGroup'), BUILTIN_ATTRIBUTES.filter((a) => a.id !== '@teff').map((a) => [a.id, t(a.label)] as Option)],
+      [t('userGroup'), defs.map((d) => [d.id, d.name] as Option)],
+    ];
+    box.appendChild(
+      this.dynSelect(t('colorBy'), colorOpts, colorGroups, () => this.store.get().colorBy, (v) => this.store.set({ colorBy: v })),
+    );
+    const color = s.colorBy ? attributeInfo(s.colorBy, this.attrs) : null;
+    if (color?.type === 'number') box.appendChild(this.scaleControls(color.id));
+
+    // size
+    const sizeOpts: Option[] = [
+      [SIZE_LUMINOSITY, t('sizeLuminosity')],
+      [SIZE_UNIFORM, t('sizeUniform')],
+    ];
+    const sizeGroups: OptGroup[] = [
+      [t('builtinGroup'), BUILTIN_ATTRIBUTES.filter((a) => a.type === 'number' && a.id !== '@lum').map((a) => [a.id, t(a.label)] as Option)],
+      [t('userGroup'), defs.filter((d) => d.type === 'number').map((d) => [d.id, d.name] as Option)],
+    ];
+    box.appendChild(
+      this.dynSelect(t('sizeBy'), sizeOpts, sizeGroups, () => this.store.get().sizeBy, (v) => this.store.set({ sizeBy: v })),
+    );
+    const size = s.sizeBy && s.sizeBy !== SIZE_UNIFORM ? attributeInfo(s.sizeBy, this.attrs) : null;
+    if (size?.type === 'number' && size.id !== color?.id) box.appendChild(this.scaleControls(size.id, false));
+
+    if (color || size) {
+      box.appendChild(
+        this.select<MissingStyle>(
+          'missingStyle',
+          [
+            ['dim', 'missingDim'],
+            ['hide', 'missingHide'],
+            ['normal', 'missingNormal'],
+          ],
+          () => this.store.get().missingStyle,
+          (v) => this.store.set({ missingStyle: v }),
+        ),
+      );
+      box.appendChild(this.checkbox('showLegend', () => this.store.get().legend, (v) => this.store.set({ legend: v })));
+    }
+    const manage = el('button', 'btn', t('manageAttributes'));
+    manage.addEventListener('click', () => this.onManageAttributes());
+    box.appendChild(manage);
+    this.layerSyncers = this.syncers;
+    this.syncers = panelSyncers;
+    if (focusIndex >= 0) all()[focusIndex]?.focus();
+  }
+
+  /** Palette, range, log and reverse of a numeric attribute. */
+  private scaleControls(id: string, withPalette = true): HTMLElement {
+    const wrap = el('div', 'scale-controls');
+    const sc = this.attrs.scale(id);
+    const defaults = builtin(id)?.scale ?? {};
+    if (withPalette) {
+      const sel = el('select');
+      const palettes: [PaletteId, MessageKey][] = [
+        ['turbo', 'paletteTurbo'],
+        ['plasma', 'palettePlasma'],
+        ['viridis', 'paletteViridis'],
+        ['blueRed', 'paletteBlueRed'],
+      ];
+      for (const [v, k] of palettes) {
+        const o = el('option', '', t(k));
+        o.value = v;
+        sel.appendChild(o);
+      }
+      sel.value = sc.palette ?? defaults.palette ?? 'turbo';
+      sel.setAttribute('aria-label', t('palette'));
+      sel.addEventListener('change', () => this.attrs.setScale(id, { palette: sel.value as PaletteId }));
+      const row = el('label', 'row select');
+      row.append(el('span', '', t('palette')), sel);
+      wrap.appendChild(row);
+    }
+    const range = el('div', 'row range');
+    const num = (key: 'min' | 'max', label: MessageKey) => {
+      const input = el('input');
+      input.type = 'text';
+      input.inputMode = 'decimal';
+      input.size = 7;
+      const v = sc[key];
+      input.value = v === undefined ? '' : formatValue(v);
+      const auto = defaults[key];
+      input.placeholder = auto === undefined ? t('scaleAuto') : formatValue(auto);
+      input.setAttribute('aria-label', t(label));
+      input.addEventListener('change', () => {
+        const raw = input.value.trim();
+        const n = raw ? parseNumber(raw, true) : null;
+        input.classList.toggle('invalid', !!raw && n === null);
+        if (raw && n === null) return;
+        this.attrs.setScale(id, { [key]: n ?? undefined });
+      });
+      range.append(el('span', '', t(label)), input);
+    };
+    num('min', 'scaleFrom');
+    num('max', 'scaleTo');
+    wrap.appendChild(range);
+    const flags = el('div', 'row flags');
+    const flag = (key: 'log' | 'reverse', label: MessageKey) => {
+      const l = el('label', 'check');
+      const input = el('input');
+      input.type = 'checkbox';
+      input.checked = sc[key] ?? defaults[key] ?? false;
+      input.addEventListener('change', () => this.attrs.setScale(id, { [key]: input.checked }));
+      l.append(input, el('span', '', t(label)));
+      flags.appendChild(l);
+    };
+    flag('log', 'logScale');
+    flag('reverse', 'reverseScale');
+    wrap.appendChild(flags);
+    return wrap;
+  }
+
+  /** A select with plain options plus option groups (empty groups are left out). */
+  private dynSelect(label: string, options: Option[], groups: OptGroup[], get: () => string, set: (v: string) => void): HTMLElement {
+    const wrap = el('label', 'row select');
+    wrap.appendChild(el('span', '', label));
+    const sel = el('select');
+    const add = (parent: HTMLElement, [v, text]: Option) => {
+      const o = el('option', '', text);
+      o.value = v;
+      parent.appendChild(o);
+    };
+    for (const o of options) add(sel, o);
+    for (const [name, opts] of groups) {
+      if (!opts.length) continue;
+      const g = el('optgroup');
+      g.label = name;
+      for (const o of opts) add(g, o);
+      sel.appendChild(g);
+    }
+    sel.value = get();
+    if (sel.value !== get()) sel.selectedIndex = 0;
+    sel.addEventListener('change', () => set(sel.value));
+    wrap.appendChild(sel);
+    return wrap;
   }
 
   private checkbox(key: MessageKey, get: () => boolean, set: (v: boolean) => void): HTMLElement {
@@ -240,5 +422,8 @@ export class SettingsPanel {
     return wrap;
   }
 }
+
+type Option = [string, string];
+type OptGroup = [string, Option[]];
 
 export type { Settings };
