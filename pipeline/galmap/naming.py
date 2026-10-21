@@ -757,50 +757,66 @@ def unique_designations(s: pd.DataFrame, dc, dlo, dhi, dstr, name_en) -> None:
     the most luminous keeps it and the others take their next own designation (HIP, HD, Tycho-2,
     Gaia DR3, name); a star without any gets its name or a coordinate designation."""
     n = len(dc)
-    text = [designation_text(int(dc[i]), int(dlo[i]), int(dhi[i]), dstr[i]) for i in range(n)]
+    is_str = dc == Desig.STRING
+    key = pd.DataFrame({"c": dc, "lo": dlo, "hi": dhi, "st": pd.Series(np.where(is_str, dstr, None), dtype=object)})
+    empty = is_str & pd.isna(key["st"]).to_numpy()
+    todo = np.nonzero(key.duplicated(keep=False).to_numpy() | empty)[0]
+    if len(todo) == 0:
+        log.info("naming: every designation is unique")
+        return
     logl = s["logl"].to_numpy(float) if "logl" in s else np.zeros(n)
-    order = np.argsort(-np.nan_to_num(logl, nan=-99.0), kind="stable")
-    used: set[str] = set()
-    hip = s["hip"].to_numpy(dtype=object)
-    hd = s["hd"].to_numpy(dtype=object) if "hd" in s else np.full(n, pd.NA)
-    tyc = s["tyc"].to_numpy(dtype=object) if "tyc" in s else np.full(n, None)
-    gaia = s["gaia"].to_numpy(dtype=object)
+    todo = todo[np.argsort(-np.nan_to_num(logl[todo], nan=-99.0), kind="stable")]
+    strings = {v for v in dstr[is_str] if isinstance(v, str)}
+
+    def taken(c: int, lo: int, hi: int, st) -> bool:
+        if c == Desig.STRING:
+            return st in strings
+        return bool(np.any((dc == c) & (dlo == lo) & (dhi == hi)))
+
+    def take(i: int, c: int, lo: int, hi: int, st) -> None:
+        dc[i], dlo[i], dhi[i], dstr[i] = c, lo, hi, st
+        if c == Desig.STRING:
+            strings.add(st)
+
+    hip = s["hip"].array
+    hd = s["hd"].array if "hd" in s else None
+    tyc = s["tyc"].array if "tyc" in s else None
+    gaia = s["gaia"].array
     ra, dec = s["ra"].to_numpy(float), s["dec"].to_numpy(float)
-    census = s["census_name"].to_numpy(dtype=object) if "census_name" in s else np.full(n, None)
+    census = s["census_name"].array if "census_name" in s else None
+    kept: set[tuple] = set()
     changed = 0
-    for i in order:
-        if text[i] is not None and text[i] not in used:
-            used.add(text[i])
+    for i in todo:
+        k = (int(dc[i]), int(dlo[i]), int(dhi[i]), dstr[i] if dc[i] == Desig.STRING else None)
+        if not empty[i] and k not in kept:
+            kept.add(k)  # the most luminous star with this designation keeps it
             continue
         options: list[tuple[int, int, int, str | None]] = []
         if pd.notna(hip[i]):
             options.append((Desig.HIP, int(hip[i]), 0, None))
-        if pd.notna(hd[i]):
+        if hd is not None and pd.notna(hd[i]):
             options.append((Desig.HD, int(hd[i]), 0, None))
-        if isinstance(tyc[i], str) and re.fullmatch(r"\d+-\d+-\d+", tyc[i]):
+        if tyc is not None and isinstance(tyc[i], str) and re.fullmatch(r"\d+-\d+-\d+", tyc[i]):
             t1, t2, t3 = (int(v) for v in tyc[i].split("-"))
             options.append((Desig.TYC, t1 | (t2 << 16), t3, None))
         if pd.notna(gaia[i]):
             g = int(gaia[i])
             options.append((Desig.GAIA_DR3, g & 0xFFFFFFFF, g >> 32, None))
-        for v in (name_en[i], census[i]):
+        for v in (name_en[i], census[i] if census is not None else None):
             if isinstance(v, str) and v:
                 options.append((Desig.STRING, 0, 0, v))
         if np.isfinite(ra[i]) and np.isfinite(dec[i]):
             options.append((Desig.STRING, 0, 0, _coordinate_designation(ra[i], dec[i])))
         for c, lo, hi, st in options:
-            k = designation_text(c, lo, hi, st)
-            if k and k not in used:
-                dc[i], dlo[i], dhi[i], dstr[i] = c, lo, hi, st
-                used.add(k)
+            if not taken(c, lo, hi, st):
+                take(i, c, lo, hi, st)
                 changed += 1
                 break
         else:
             # every own designation is taken (two entries of one star at the same position)
-            base = text[i] or (designation_text(*options[0]) if options else None) or f"Star {i}"
-            k = next(f"{base} ({j})" for j in range(2, n + 2) if f"{base} ({j})" not in used)
-            dc[i], dlo[i], dhi[i], dstr[i] = Desig.STRING, 0, 0, k
-            used.add(k)
+            base = designation_text(*k) or (designation_text(*options[0]) if options else None) or f"Star {i}"
+            st = next(f"{base} ({j})" for j in range(2, n + 2) if f"{base} ({j})" not in strings)
+            take(i, Desig.STRING, 0, 0, st)
             changed += 1
     log.info("naming: %d stars moved to another designation so that every designation is unique", changed)
 
@@ -810,7 +826,7 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
 
     external: row index -> {"iau": ..., "wiki_en": ..., "wiki_de": ..., "simbad": [...]}.
     """
-    s = s.copy()
+    s = s.copy(deep=False)  # new columns only; the caller replaces its frame with the result
     n = len(s)
     name_rank = np.full(n, Rank.NONE, dtype=np.int64)
     name_en = np.full(n, None, dtype=object)
@@ -828,17 +844,24 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
     rows = np.nonzero(has_name_fields)[0]
     log.info("naming: %d stars with name candidates", len(rows))
     cols = list(s.columns)
-    values = s.to_numpy(dtype=object)
     ci = {c: k for k, c in enumerate(cols)}
+    # Rows as Python objects only for the stars the naming looks at (with name candidates or in a
+    # system): the whole table as objects would take ~10 GB with the 200 pc Gaia stars.
+    in_system = s["system_id"].to_numpy() >= 0 if "system_id" in s else np.zeros(n, bool)
+    cached = np.nonzero(has_name_fields | in_system)[0]
+    values = s.iloc[cached].to_numpy(dtype=object)
+    slot = np.full(n, -1, dtype=np.int64)
+    slot[cached] = np.arange(len(cached))
 
     class RowView(dict):
         pass
 
     def row_of(i):
         r = RowView()
-        v = values[i]
-        for c, k in ci.items():
-            r[c] = v[k]
+        k = slot[i]
+        v = values[k] if k >= 0 else s.iloc[[int(i)]].to_numpy(dtype=object)[0]
+        for c, j in ci.items():
+            r[c] = v[j]
         return r
 
     bayer_sys: dict[int, tuple[str, str | None]] = {}
