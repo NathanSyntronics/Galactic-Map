@@ -16,19 +16,23 @@ import type { OctreeNode } from '../data/octree';
 import type { Settings } from '../settings';
 import { temperatureColor } from './colors';
 
-// Positions are absolute heliocentric coordinates (float32, exactly as decoded, so CPU-side picking
-// and labels use the same values). Multiplying them by modelViewMatrix in float32 would cancel a
-// translation of up to tens of thousands of light years against the position and leave errors of
-// ~1e-3 ly: stars jitter and drift from their labels when the camera is close to a distant star.
-// Instead the shader first subtracts uOrigin, a float32-exact point at the camera: that difference
+// Each octree node is rendered relative to its own render origin (see renderOrigin): the position
+// attribute holds `position - origin` and the Points object sits at the origin. The origin is
+// chosen so that this subtraction is exact in float32, so origin + attribute is bit for bit the
+// decoded position that CPU-side picking and labels use.
+// Multiplying the node-relative positions by modelViewMatrix in float32 would still cancel the
+// camera-to-origin translation (up to tens of thousands of light years in the root node, which
+// holds distant luminous stars) against the position and leave errors of ~1e-3 ly: stars would
+// jitter and drift from their labels when the camera is close to them. So the shader first
+// subtracts uCamLocal, the camera position in node coordinates rounded to float32: that difference
 // is exact for stars near the camera (Sterbenz lemma), and the small rest of the camera offset
-// (uOriginView) is computed in double precision on the CPU. The Points objects must keep an
-// identity model matrix.
+// (uCamRest, in view space) is computed in double precision on the CPU. These uniforms are set per
+// node in onBeforeRender (see Starfield.add).
 const vertexShader = /* glsl */ `
 attribute vec3 aColor;
 attribute float aSize;
-uniform vec3 uOrigin;
-uniform vec3 uOriginView;
+uniform vec3 uCamLocal;
+uniform vec3 uCamRest;
 uniform vec3 uTargetRel;
 uniform float uRadius;
 uniform float uFade;
@@ -41,7 +45,7 @@ varying vec3 vColor;
 varying float vAlpha;
 varying float vPx;
 void main() {
-  vec3 rel = position - uOrigin;
+  vec3 rel = position - uCamLocal;
   float d = distance(rel, uTargetRel);
   float a = 1.0 - smoothstep(uRadius * uFade, uRadius, d);
   if (a <= 0.0 || aSize <= 0.0) {
@@ -52,7 +56,7 @@ void main() {
     vPx = 0.0;
     return;
   }
-  vec4 mv = vec4(mat3(modelViewMatrix) * rel + uOriginView, 1.0);
+  vec4 mv = vec4(mat3(modelViewMatrix) * rel + uCamRest, 1.0);
   float depth = max(-mv.z, 1e-5);
   float px = 2.0 * aSize * uSizeMul * uScale / depth;
   float intensity = 1.0;
@@ -100,8 +104,8 @@ export function createStarMaterial(): ShaderMaterial {
     vertexShader,
     fragmentShader,
     uniforms: {
-      uOrigin: { value: new Vector3() },
-      uOriginView: { value: new Vector3() },
+      uCamLocal: { value: new Vector3() },
+      uCamRest: { value: new Vector3() },
       uTargetRel: { value: new Vector3() },
       uRadius: { value: 50 },
       uFade: { value: 0.85 },
@@ -120,19 +124,63 @@ export function createStarMaterial(): ShaderMaterial {
   });
 }
 
+/**
+ * Render origin of an octree node: per axis, the node centre snapped to the float32 grid of the
+ * node's largest coordinates, or 0 when the node reaches close to 0 on that axis. For every star
+ * inside the node, `position - origin` is then exactly representable in float32 (the difference is
+ * a multiple of the position's own ulp and not larger than the position itself), and it stays
+ * within a few node half sizes.
+ */
+export function renderOrigin(center: Vector3, halfSize: number, out = new Vector3()): Vector3 {
+  const axis = (c: number): number => {
+    if (!(Math.abs(c) >= 3 * halfSize)) return 0;
+    const grid = 2 ** (Math.floor(Math.log2(Math.abs(c) + 2 * halfSize)) - 23);
+    return Math.round(c / grid) * grid;
+  };
+  return out.set(axis(center.x), axis(center.y), axis(center.z));
+}
+
+/**
+ * Positions relative to `origin` as float32. An axis on which a difference would not be exact (a
+ * star outside its node's cube) falls back to origin 0, so origin + result always equals the input
+ * exactly. Updates `origin` accordingly.
+ */
+export function relativePositions(positions: Float32Array, origin: Vector3): Float32Array {
+  const out = new Float32Array(positions.length);
+  const o = [origin.x, origin.y, origin.z];
+  for (let a = 0; a < 3; a++) {
+    let exact = true;
+    for (let i = a; i < positions.length; i += 3) {
+      const v = positions[i] - o[a];
+      out[i] = v;
+      if (out[i] !== v) exact = false;
+    }
+    if (!exact) {
+      o[a] = 0;
+      for (let i = a; i < positions.length; i += 3) out[i] = positions[i];
+    }
+  }
+  origin.set(o[0], o[1], o[2]);
+  return out;
+}
+
 const viewRotation = new Matrix3();
 
 /**
- * Sets the camera-relative uniforms of the star material (see the vertex shader). The camera's
- * world matrix must be up to date.
+ * Sets the camera-dependent uniforms of the star material for a node rendered relative to
+ * `origin` (see the vertex shader). The camera's world matrix must be up to date.
  */
-export function setStarView(material: ShaderMaterial, camera: Camera, target: Vector3): void {
+export function setNodeView(material: ShaderMaterial, camera: Camera, target: Vector3, origin: Vector3): void {
   const u = material.uniforms;
   const cam = camera.position;
-  const origin = (u.uOrigin.value as Vector3).set(Math.fround(cam.x), Math.fround(cam.y), Math.fround(cam.z));
+  const camLocal = (u.uCamLocal.value as Vector3).set(
+    Math.fround(cam.x - origin.x),
+    Math.fround(cam.y - origin.y),
+    Math.fround(cam.z - origin.z),
+  );
   viewRotation.setFromMatrix4(camera.matrixWorldInverse);
-  (u.uOriginView.value as Vector3).copy(origin).sub(cam).applyMatrix3(viewRotation);
-  (u.uTargetRel.value as Vector3).copy(target).sub(origin);
+  (u.uCamRest.value as Vector3).copy(origin).add(camLocal).sub(cam).applyMatrix3(viewRotation);
+  (u.uTargetRel.value as Vector3).copy(target).sub(origin).sub(camLocal);
 }
 
 /** Estimated log10(L/Lsun) for star i (falls back to absolute magnitude, then a dwarf default). */
@@ -203,6 +251,8 @@ export interface RenderedNode {
   node: OctreeNode;
   data: NodeData;
   points: Points;
+  /** Render origin of the node: the Points object's position (see renderOrigin). */
+  origin: Vector3;
   colors: Uint8Array;
   sizes: Float32Array;
 }
@@ -212,29 +262,45 @@ export class Starfield {
   readonly group = new Group();
   readonly material = createStarMaterial();
   private readonly rendered = new Map<string, RenderedNode>();
+  /** View centre (world), for the fade-out at the view radius. */
+  private readonly target = new Vector3();
 
   constructor(private settings: () => Settings) {
     this.group.name = 'starfield';
+  }
+
+  /** Sets the view centre used by the next render. */
+  setTarget(target: Vector3): void {
+    this.target.copy(target);
   }
 
   add(node: OctreeNode, data: NodeData): RenderedNode {
     const existing = this.rendered.get(node.path);
     if (existing) return existing;
     const geometry = new BufferGeometry();
-    geometry.setAttribute('position', new BufferAttribute(data.positions, 3));
+    // node-relative positions; origin + attribute == data.positions exactly (CPU picking and labels)
+    const origin = renderOrigin(node.worldCenter, node.halfSize);
+    geometry.setAttribute('position', new BufferAttribute(relativePositions(data.positions, origin), 3));
     const colors = new Uint8Array(data.count * 3);
     const sizes = new Float32Array(data.count);
     computeStyle(data, this.settings(), colors, sizes);
     geometry.setAttribute('aColor', new BufferAttribute(colors, 3, true));
     geometry.setAttribute('aSize', new BufferAttribute(sizes, 1));
-    geometry.boundingSphere = new Sphere(node.worldCenter.clone(), node.radius);
+    geometry.boundingSphere = new Sphere(node.worldCenter.clone().sub(origin), node.radius);
     const points = new Points(geometry, this.material);
-    points.frustumCulled = true;
+    points.position.copy(origin);
     points.matrixAutoUpdate = false;
+    points.updateMatrix();
+    points.frustumCulled = true;
     points.visible = false;
     points.renderOrder = node.level;
+    // the shared material's camera uniforms are relative to this node's origin
+    points.onBeforeRender = (_renderer, _scene, camera) => {
+      setNodeView(this.material, camera, this.target, origin);
+      this.material.uniformsNeedUpdate = true;
+    };
     this.group.add(points);
-    const r: RenderedNode = { node, data, points, colors, sizes };
+    const r: RenderedNode = { node, data, points, origin, colors, sizes };
     this.rendered.set(node.path, r);
     return r;
   }

@@ -15,7 +15,7 @@ import {
 } from './data/octree';
 import { formatLy, formatNumber, localName, setLang, t, type MessageKey } from './i18n';
 import { DropLines, Marker, PolarGrid } from './render/overlays';
-import { Starfield, apparentMag, setStarView, starLogL } from './render/starfield';
+import { Starfield, apparentMag, starLogL } from './render/starfield';
 import { QUALITY_BUDGET, RADIUS_MAX, RADIUS_MIN, SettingsStore, type Settings } from './settings';
 import { InfoPanel, displayName, type StarInfo } from './ui/info';
 import { LabelLayer, type LabelCandidate } from './ui/labels';
@@ -676,11 +676,11 @@ export class App {
     this.camera.near = Math.max(dist * 1e-4, 1e-4);
     this.camera.far = dist + s.radius * 4 + 1000;
     this.camera.updateProjectionMatrix();
-    // labels, picking and the star uniforms need this frame's camera matrix
+    // labels and picking need this frame's camera matrix
     this.camera.updateMatrixWorld();
 
     const u = this.starfield.material.uniforms;
-    setStarView(this.starfield.material, this.camera, this.nav.target);
+    this.starfield.setTarget(this.nav.target);
     const h = this.renderer.domElement.clientHeight || window.innerHeight;
     u.uScale.value = (h * this.renderer.getPixelRatio()) / (2 * Math.tan(MathUtils.degToRad(this.camera.fov) / 2));
     u.uPixelRatio.value = this.renderer.getPixelRatio();
