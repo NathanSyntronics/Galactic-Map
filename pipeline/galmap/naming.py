@@ -727,6 +727,36 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
                 first = [a for a in rest[:1] if ext_i.get("iau") == a]  # the IAU name stays first
                 alt[i] = (first + [old] + rest[len(first):])[:10]
 
+        refined: set[int] = set()
+
+        def refine_letters() -> int:
+            """A component whose name carries the letter of its parent pair gets its own, more
+            specific letter, also when the name is protected (the base is kept): "Castor A" on
+            alpha Gem Ab is "Castor Ab" (next to "Castor Aa"), "Alshain B" on beta Aql Ba is
+            "Alshain Ba"."""
+            done = 0
+            for i, c in comp_of.items():
+                cur = name_en[i]
+                if not cur:
+                    continue
+                b, lt = split_component(cur)
+                if not lt or lt == c or not c.startswith(lt):
+                    continue
+                k = int(sid_arr[i])
+                new_en = f"{b} {c}"
+                if taken[k][new_en] > 0:
+                    continue
+                de = name_de[i]
+                if de:
+                    bd, ld = split_component(de)
+                    de = f"{bd} {c}" if ld == lt else de
+                src = name_src[i]
+                rename(i, k, new_en, de, int(name_rank[i]))
+                name_src[i] = src  # a Wikipedia / IAU / SIMBAD name stays the star's own
+                refined.add(i)
+                done += 1
+            return done
+
         def iau_letter_neighbours() -> int:
             """'<IAU name> B' on a star next to the IAU-named star whose display name is another one
             ("Algieba B" 4.6" from Gamma Leonis, not linked into a system; "Alrakis A" in the system
@@ -878,6 +908,19 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
                             with_letter(i, nm, lt)
                             changed += 1
                         continue
+                if comp is not None and all(letters) and (same_sys or close) and all(
+                    letters_conflict(comp, lt) for lt in letters
+                ) and all(letters_conflict(a, b) for x, a in enumerate(letters) for b in letters[x + 1:]) and min(
+                    info[i][3] for i in idx
+                ) > 1:
+                    # the name of a pair on its resolved components, none of which has its letter
+                    # and none of which has it from Wikipedia, the IAU or the census: "Castor C"
+                    # (AT-HYG / SIMBAD) on YY Gem A and YY Gem B -> "YY Geminorum A" / "YY Geminorum B"
+                    for i in idx:
+                        rename_to(i, next_name(i, nm, info[i][2], info[i][4], None))
+                        alt[i] = ([a for a in (alt[i] or []) if a != nm] + [nm])[:10]
+                        changed += 1
+                    continue
                 rk = classify_name(nm)
                 strengths = {info[i][3] for i in idx}
                 if (
@@ -934,7 +977,7 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
                     aliases,
                     iau_name,
                 )
-        renamed = 0
+        renamed = refine_letters()
         for i in [j for m in members.values() for j in m]:
             c = comp_of.get(i)
             k = int(sid_arr[i])
@@ -981,7 +1024,9 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
             rename(i, k, new_en, f"{base_de} {new_comp}" if base_de else None, rank)
             renamed += 1
         # a census component without a name of its own follows its census sibling: "G 208-44 Ab"
-        # next to "GJ 1245 Aa" (the Wikipedia title of the pair) is "GJ 1245 Ab"
+        # next to "GJ 1245 Aa" (the Wikipedia title of the pair) is "GJ 1245 Ab"; so does one that
+        # was called by the name of its parent pair: "BD-22 2345 A" on HD 73752 Ab next to
+        # "Gliese 314 Aa" is "Gliese 314 Ab"
         for k, mem in members.items():
             census_fam = {}
             for i in mem:
@@ -989,17 +1034,25 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
             for i in mem:
                 fi = census_fam[i]
                 cname = row_of(i).get("census_name")
-                if fi is None or not (
-                    name_en[i] is None
-                    or (isinstance(cname, str) and name_en[i] == census_display(cname) and name_rank[i] >= Rank.SURVEY)
-                ):
+                unnamed = name_en[i] is None or (
+                    isinstance(cname, str) and name_en[i] == census_display(cname) and name_rank[i] >= Rank.SURVEY
+                )
+                if fi is None or not (unnamed or i in refined):
                     continue  # "QY Aurigae B" is a name of its own
                 for j in mem:
                     fj = census_fam[j]
                     if j == i or fj is None or fj[1] != fi[1] or not name_en[j] or name_rank[j] > Rank.GJ:
                         continue
+                    if not unnamed and name_rank[j] >= name_rank[i]:
+                        continue
                     bj, lj = split_component(name_en[j])
-                    if (lj and lj != fj[2]) or taken[k][f"{bj} {fi[2]}"] > 0 or taken[k][f"{bj} {fj[2]}"] > 0:
+                    if lj:
+                        # a lettered sibling only within the same pair: "Gliese 314 Aa" -> "Gliese 314 Ab"
+                        if lj != fj[2] or len(lj) < 2 or len(fi[2]) < 2 or lj[0] != fi[2][0]:
+                            continue
+                    elif taken[k][f"{bj} {fj[2]}"] > 0:
+                        continue
+                    if taken[k][f"{bj} {fi[2]}"] > 0:
                         continue
                     de_j = name_de[j]
                     rename(i, k, f"{bj} {fi[2]}", f"{split_component(de_j)[0]} {fi[2]}" if de_j else None, int(name_rank[j]))
@@ -1024,6 +1077,7 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
                 src = name_src[i]
                 rename(i, k, new_en, new_de, int(name_rank[i]))
                 name_src[i] = src
+        renamed += refine_letters()
         # one German name per system name: the German article title of one member ("Alrakis" for
         # Mu Draconis B) is also used for the others called "Mu Draconis A" / "Mu Draconis C"
         for k, mem in members.items():

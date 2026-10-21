@@ -286,3 +286,53 @@ def test_iau_names_by_designation():
     assert out[0]["iau"] == "Batsũ̀" and out[1]["iau"] == "Dìwö"
     assert out[2]["iau"] == "Maru" and "iau" not in out[3]
     assert out[4]["iau"] == "Rigil Kentaurus"
+
+
+def test_sub_components_keep_their_own_letter():
+    from galmap.naming import assign_names
+    from galmap.verify import nested_letters
+
+    s = _frame([
+        # Castor: SIMBAD's "NAME Castor A" is the A pair; the census star alpha Gem Ab is "Castor Ab"
+        {"census_name": "alpha Gem Aa", "system_size": 6, "system_row": 1, "flags": P_FLAGS, "system_id": 1, "hip": 36850,
+         "simbad_main_id": "* alf Gem"},
+        {"census_name": "alpha Gem Ab", "simbad_main_id": "* alf Gem A", "simbad_match": "pos", "system_size": 6,
+         "system_row": 1, "flags": C_FLAGS, "system_id": 1},
+        {"census_name": "alpha Gem Ba", "simbad_main_id": "* alf Gem B", "system_size": 6, "system_row": 1, "flags": C_FLAGS,
+         "system_id": 1},
+        {"census_name": "alpha Gem Bb", "system_size": 6, "system_row": 1, "flags": C_FLAGS, "system_id": 1},
+        # "Castor C" is the pair YY Gem A+B: neither component is shown under it
+        {"census_name": "YY Gem A (alpha Gem C)", "proper": "Castor C", "gj": "GJ 278 C", "system_size": 6, "system_row": 1,
+         "flags": C_FLAGS, "system_id": 1},
+        {"census_name": "YY Gem B (alpha Gem D)", "simbad_main_id": "V* YY Gem", "simbad_match": "pos", "system_size": 6,
+         "system_row": 1, "flags": C_FLAGS, "system_id": 1},
+        # beta Aql: "Alshain B" (IAU name + letter) on the census star Ba
+        {"census_name": "beta Aql A", "system_size": 3, "system_row": 2, "flags": P_FLAGS, "system_id": 2, "hip": 98036},
+        {"census_name": "beta Aql Ba", "proper": "Alshain B", "system_size": 3, "system_row": 2, "flags": C_FLAGS, "system_id": 2},
+        {"census_name": "beta Aql Bb", "system_size": 3, "system_row": 2, "flags": C_FLAGS, "system_id": 2},
+        # HD 73752 = GJ 314: "BD-22 2345A" is the A pair; its component Ab follows "Gliese 314 Aa"
+        {"census_name": "HD 73752 Aa", "gj": "GJ 314 A", "system_size": 3, "system_row": 3, "flags": P_FLAGS, "system_id": 3,
+         "hip": 42430},
+        {"census_name": "HD 73752 Ab", "simbad_main_id": "HD 73752A", "simbad_match": "pos", "system_size": 3, "system_row": 3,
+         "flags": C_FLAGS, "system_id": 3},
+        {"census_name": "HD 73752 B", "census_gj": "GJ 314 B", "system_size": 3, "system_row": 3, "flags": C_FLAGS, "system_id": 3},
+    ])
+    ext = {
+        0: {"iau": "Castor", "wiki_en": "Castor (star)", "simbad": ["* alf Gem", "NAME Castor"]},
+        1: {"simbad": ["* alf Gem A", "NAME Castor A", "GJ 278 A"]},
+        2: {"simbad": ["* alf Gem B", "NAME Castor B", "GJ 278 B"]},
+        5: {"simbad": ["V* YY Gem", "NAME Castor C", "GJ 278 C", "GJ 278 D"]},
+        6: {"iau": "Alshain", "wiki_en": "Beta Aquilae", "wiki_de": "Alschain"},
+        10: {"simbad": ["HD 73752A", "BD-22 2345A"]},
+    }
+    out = assign_names(s, ext)
+    names = list(out["name_en"])
+    assert names[:4] == ["Castor Aa", "Castor Ab", "Castor Ba", "Castor Bb"]
+    assert names[4:6] == ["YY Geminorum A", "YY Geminorum B"]
+    assert all("Castor C" in out["alt"].iloc[i] for i in (4, 5))
+    assert names[6:9] == ["Beta Aquilae A", "Beta Aquilae Ba", "Beta Aquilae Bb"]
+    assert out["name_de"].iloc[7] == "Alschain Ba"
+    assert names[9:] == ["Gliese 314 Aa", "Gliese 314 Ab", "Gliese 314 B"]
+    search = [[n, None, "r", k, 0.0, 0.0, float(k // 6), 1] for k, n in enumerate(names)]
+    assert nested_letters(search) == []
+    assert nested_letters([["Castor A", None, "r", 0, 0, 0, 0, 1], ["Castor Aa", None, "r", 1, 0, 0, 0.1, 1]]) == ["Castor A"]

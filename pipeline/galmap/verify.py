@@ -10,6 +10,7 @@ errors (wrong cross-matches, unit mistakes, wrong frame).
 from __future__ import annotations
 
 import json
+import re
 import struct
 import sys
 from pathlib import Path
@@ -51,6 +52,8 @@ DISPLAYED = {
     "AK Leporis": None,
     "Capella H": None,
     "Zeta Herculis B": None,
+    "Castor Ab": None,
+    "Beta Aquilae Ba": "Alschain Ba",
 }
 # ... and names that must not be (survey numbers promoted to names, raw SIMBAD codes, nebulae,
 # Wikipedia's capitalised Latin Bayer letters, the IAU name of a primary on its companion)
@@ -140,8 +143,9 @@ def verify(out: Path) -> list[str]:
 
 
 def check_names(search: list) -> list[str]:
-    """Display names: the expected names of a few stars, no raw catalogue codes, and no name shown
-    for two stars that are close together (the components of a pair)."""
+    """Display names: the expected names of a few stars, no raw catalogue codes, no name shown
+    for two stars that are close together (the components of a pair) and no component shown with
+    the letter of its parent pair."""
     problems = []
     shown = {e[0]: e for e in search}
     for name, de in DISPLAYED.items():
@@ -164,7 +168,26 @@ def check_names(search: list) -> list[str]:
     ) < 1.0]
     if close:
         problems.append(f"{len(close)} names displayed for two stars less than 1 ly apart, e.g. {close[:5]}")
+    nested = nested_letters(search)
+    if nested:
+        problems.append(f"{len(nested)} components shown with the letter of their parent pair, e.g. {nested[:5]}")
     return problems
+
+
+def nested_letters(search: list) -> list[str]:
+    """Names 'X A' next to (less than 1 ly from) 'X Aa' / 'X Ab': a component shown under the letter
+    of the pair it belongs to ("Castor A" for Castor Ab)."""
+    lettered: dict[str, list] = {}
+    for e in search:
+        m = re.fullmatch(r"(.+) ([A-H])([a-e]{0,2})", e[0])
+        if m:
+            lettered.setdefault(m.group(1), []).append((m.group(2), m.group(3), np.array(e[4:7], float), e[0]))
+    out = []
+    for lst in lettered.values():
+        for up, low, p, name in lst:
+            if not low and any(u == up and lo and float(np.linalg.norm(q - p)) < 1.0 for u, lo, q, _ in lst):
+                out.append(name)
+    return out
 
 
 def main() -> None:
