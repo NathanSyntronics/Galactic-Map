@@ -247,6 +247,10 @@ function computeStyle(node: NodeData, s: Settings, colors: Uint8Array, sizes: Fl
   }
 }
 
+function releaseArray(this: BufferAttribute): void {
+  this.array = new Float32Array(0);
+}
+
 export interface RenderedNode {
   node: OctreeNode;
   data: NodeData;
@@ -280,7 +284,11 @@ export class Starfield {
     const geometry = new BufferGeometry();
     // node-relative positions; origin + attribute == data.positions exactly (CPU picking and labels)
     const origin = renderOrigin(node.worldCenter, node.halfSize);
-    geometry.setAttribute('position', new BufferAttribute(relativePositions(data.positions, origin), 3));
+    const local = relativePositions(data.positions, origin);
+    const position = new BufferAttribute(local, 3);
+    // the CPU side keeps using data.positions: the node-relative copy is not needed after upload
+    position.onUpload(releaseArray);
+    geometry.setAttribute('position', position);
     const colors = new Uint8Array(data.count * 3);
     const sizes = new Float32Array(data.count);
     computeStyle(data, this.settings(), colors, sizes);
