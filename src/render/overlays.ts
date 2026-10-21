@@ -147,19 +147,26 @@ export class DropLines {
     this.lines.geometry = new BufferGeometry().setAttribute('position', attr);
   }
 
-  /** points: world positions; planeY: world y of the grid plane. */
-  set(points: Vector3[], planeY: number): void {
+  /**
+   * points: world positions; origin: the grid centre (its y is the grid plane). Vertices are stored
+   * relative to the origin (the object sits at the origin), which keeps them precise in float32
+   * far from the Sun.
+   */
+  set(points: Vector3[], origin: Vector3): void {
     this.ensure(points.length);
+    this.lines.position.copy(origin);
     const attr = this.lines.geometry.getAttribute('position') as BufferAttribute;
     const a = attr.array as Float32Array;
     for (let i = 0; i < points.length; i++) {
       const p = points[i];
-      a[6 * i] = p.x;
-      a[6 * i + 1] = p.y;
-      a[6 * i + 2] = p.z;
-      a[6 * i + 3] = p.x;
-      a[6 * i + 4] = planeY;
-      a[6 * i + 5] = p.z;
+      const x = p.x - origin.x;
+      const z = p.z - origin.z;
+      a[6 * i] = x;
+      a[6 * i + 1] = p.y - origin.y;
+      a[6 * i + 2] = z;
+      a[6 * i + 3] = x;
+      a[6 * i + 4] = 0;
+      a[6 * i + 5] = z;
     }
     attr.needsUpdate = true;
     this.lines.geometry.setDrawRange(0, points.length * 2);
@@ -215,9 +222,8 @@ export class Marker {
       this.points.visible = false;
       return;
     }
-    const attr = this.points.geometry.getAttribute('position') as BufferAttribute;
-    attr.setXYZ(0, p.x, p.y, p.z);
-    attr.needsUpdate = true;
+    // the single vertex stays at the object's origin; the object is moved (double precision on the CPU)
+    this.points.position.copy(p);
     this.material.uniforms.uPx.value = 30 * pixelRatio;
     this.points.visible = true;
   }

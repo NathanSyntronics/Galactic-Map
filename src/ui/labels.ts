@@ -13,13 +13,39 @@ export interface LabelCandidate {
   sun?: boolean;
   /** System id for members of multiple systems. */
   sys?: number;
+  /** Name of that system in the current language, if it has one. */
+  sysName?: string;
+  /** Apparent visual magnitude as seen from the Sun, if known. */
+  appMag?: number;
 }
 
-interface Placed {
+export interface Rect {
   x: number;
   y: number;
   w: number;
   h: number;
+}
+
+/** A candidate projected onto the screen (CSS pixels), with its priority. */
+export interface ScreenLabel {
+  c: LabelCandidate;
+  score: number;
+  x: number;
+  y: number;
+  fade: number;
+  /** Text to show (set by mergeSystems). */
+  text: string;
+  /** Own names of the components merged into this label, the label's own first. */
+  merged?: string[];
+}
+
+export interface PlacedLabel {
+  item: ScreenLabel;
+  /** Text start x and middle y. */
+  tx: number;
+  ty: number;
+  font: string;
+  rect: Rect;
 }
 
 // label priority bonus by name rank (see docs/DATA_FORMAT.md)
@@ -28,6 +54,11 @@ const RANK_BONUS = [4, 3.5, 3, 2.6, 2.3, 2.0, 1.6, 1.0];
 const MERGE_PX = 18;
 const SUB_COMPONENT = /(\s[A-H])[a-c]$/;
 const COMPONENT = /\s[A-H][a-c]?$/;
+const COMPONENT_PARTS = /^(.*\S)\s([A-H])[a-c]?$/;
+
+const FONT_SELECTED = '600 13px system-ui, sans-serif';
+const FONT_NAME = '12px system-ui, sans-serif';
+const FONT_DESIGNATION = '10.5px system-ui, sans-serif';
 
 /**
  * Common name of system components shown as one label: "Sirius A" + "Sirius B" -> "Sirius",
@@ -44,6 +75,184 @@ export function sharedName(names: string[], whole = true): string | null {
   return null;
 }
 
+/**
+ * Joint name of components that share a base name: "Alpha Centauri A" + "Alpha Centauri B" ->
+ * "Alpha Centauri AB", "Capella Aa" + "Capella Ab" + "Capella H" -> "Capella AH". Null if the names
+ * do not all consist of the same base and a component letter.
+ */
+export function jointName(names: string[]): string | null {
+  let base: string | null = null;
+  const letters = new Set<string>();
+  for (const n of names) {
+    const m = COMPONENT_PARTS.exec(n);
+    if (!m) return null;
+    if (base === null) base = m[1];
+    else if (m[1] !== base) return null;
+    letters.add(m[2]);
+  }
+  return base === null ? null : `${base} ${[...letters].sort().join('')}`;
+}
+
+/**
+ * Text of a label that stands for one or more components of a multiple system.
+ * `names`: the components' own names, the label's leader first. `whole`: no other member of the
+ * system has a label of its own, so the label stands for the whole system. `systemName`: the
+ * system's name in the current language.
+ *
+ * A whole-system label whose members share no base name is named after the system ("Alpha
+ * Centauri" for Alpha Centauri A, B and Proxima Centauri), unless the leader's own name is not a
+ * component name: "Fomalhaut" (with TW Piscis Austrini) is what the system is called, rather than
+ * its designation "Alpha Piscis Austrini".
+ */
+export function groupLabel(names: string[], whole: boolean, systemName?: string | null): string {
+  if (whole) {
+    const shared = sharedName(names, true);
+    if (shared !== null) return shared;
+    if (!COMPONENT.test(names[0])) return names[0];
+    return systemName ?? jointName(names) ?? names[0];
+  }
+  if (names.length === 1) return names[0];
+  return sharedName(names, false) ?? jointName(names) ?? names[0];
+}
+
+const clamp = (x: number, lo: number, hi: number) => Math.min(Math.max(x, lo), hi);
+
+/**
+ * Label priority bonus of a star that is prominent in the sky as seen from Earth: it grows for
+ * stars brighter than apparent magnitude 4.5, and more steeply for the ~20 brightest stars of the
+ * night sky (brighter than magnitude 1.5), so that around the Sun Sirius, Alpha Centauri and
+ * Procyon win against stars that are more luminous but much less known, such as Pollux. At most 4,
+ * as much as the bonus of an IAU name.
+ */
+export function skyBonus(appMag: number | undefined): number {
+  if (appMag === undefined || !Number.isFinite(appMag)) return 0;
+  return clamp(0.5 * (4.5 - appMag), 0, 2.5) + clamp(1.5 * (1.5 - appMag), 0, 1.5);
+}
+
+/** Label priority: luminosity, distance from the camera, name rank, brightness in Earth's sky. */
+export function labelScore(c: LabelCandidate, distToCamera: number): number {
+  let score = c.logL - 2 * Math.log10(Math.max(distToCamera, 1e-3));
+  score += c.rank < RANK_BONUS.length ? RANK_BONUS[c.rank] : 0;
+  score += skyBonus(c.appMag);
+  if (c.sun) score += 100;
+  return score;
+}
+
+/**
+ * Merges the labels of system components that coincide on screen and names the resulting labels.
+ * `items` must be sorted by descending score; the result keeps that order. The selected star
+ * leads its group and keeps its own name, and it counts as a separately labelled member of its
+ * system, so its siblings' labels never claim the whole system's name.
+ */
+export function mergeSystems(items: ScreenLabel[], selectedKey: string | null): ScreenLabel[] {
+  const leaders = new Map<number, ScreenLabel[]>();
+  const visible: ScreenLabel[] = [];
+  for (const it of items) {
+    const sys = it.c.sys;
+    const selected = it.c.key === selectedKey;
+    it.text = it.c.text;
+    it.merged = undefined;
+    if (sys === undefined || (it.c.rank >= 99 && !selected)) {
+      visible.push(it);
+      continue;
+    }
+    const group = leaders.get(sys) ?? [];
+    const leader = group.find((l) => Math.abs(l.x - it.x) < MERGE_PX && Math.abs(l.y - it.y) < MERGE_PX);
+    if (leader && !selected) {
+      (leader.merged ??= [leader.c.text]).push(it.c.text);
+      continue;
+    }
+    group.push(it);
+    leaders.set(sys, group);
+    visible.push(it);
+  }
+  // A label that stands for its whole system drops the component letter ("Alpha Centauri"),
+  // one that stands for some of the components joins their letters ("Alpha Centauri AB").
+  for (const it of visible) {
+    const sys = it.c.sys;
+    if (sys === undefined || it.c.rank >= 99 || it.c.key === selectedKey) continue;
+    const whole = leaders.get(sys)!.length === 1;
+    it.text = groupLabel(it.merged ?? [it.c.text], whole, it.c.sysName);
+  }
+  return visible;
+}
+
+const overlapsAny = (r: Rect, placed: Rect[]) => {
+  for (const p of placed) {
+    if (r.x < p.x + p.w && r.x + r.w > p.x && r.y < p.y + p.h && r.y + r.h > p.y) return true;
+  }
+  return false;
+};
+
+/**
+ * Candidate positions of a star label, in order of preference (text start x, text middle y, box):
+ * right of the star, left, above, below, the four diagonals, then the four diagonals a little
+ * further out (for crowded regions such as the Sun's neighbourhood seen from afar).
+ */
+export function anchors(x: number, y: number, tw: number): { tx: number; ty: number; r: Rect }[] {
+  const at = (tx: number, ty: number) => ({ tx, ty, r: { x: tx - 1, y: ty - 8, w: tw + 4, h: 15 } });
+  return [
+    at(x + 7, y),
+    at(x - 10 - tw, y),
+    at(x - tw / 2 - 1, y - 13),
+    at(x - tw / 2 - 1, y + 13),
+    at(x + 4, y - 11),
+    at(x + 4, y + 11),
+    at(x - 7 - tw, y - 11),
+    at(x - 7 - tw, y + 11),
+    at(x + 6, y - 17),
+    at(x + 6, y + 17),
+    at(x - 9 - tw, y - 17),
+    at(x - 9 - tw, y + 17),
+  ];
+}
+
+const inside = (r: Rect, b: { w: number; h: number }) => r.x >= 0 && r.y >= 0 && r.x + r.w <= b.w && r.y + r.h <= b.h;
+
+/**
+ * Places labels in the given (priority) order, each at the first of its anchors that does not
+ * overlap a box in `placed` and lies within `bounds` (the viewport, if given); labels without a
+ * free anchor are dropped (the selected star's label is always shown). At most `maxLabels`
+ * labels, a third of them catalogue designations. Adds the boxes of the placed labels to `placed`.
+ */
+export function placeLabels(
+  items: ScreenLabel[],
+  opts: {
+    maxLabels: number;
+    selectedKey: string | null;
+    measure: (font: string, text: string) => number;
+    placed: Rect[];
+    bounds?: { w: number; h: number };
+  },
+): PlacedLabel[] {
+  const out: PlacedLabel[] = [];
+  let count = 0;
+  let designationCount = 0;
+  const maxDesignations = Math.max(3, Math.floor(opts.maxLabels / 3));
+  for (const it of items) {
+    const named = it.c.rank < 99;
+    const selected = it.c.key === opts.selectedKey;
+    if (!selected) {
+      if (count >= opts.maxLabels) continue;
+      if (!named && designationCount >= maxDesignations) continue;
+    }
+    const font = selected ? FONT_SELECTED : named ? FONT_NAME : FONT_DESIGNATION;
+    const tw = opts.measure(font, it.text);
+    const options = anchors(it.x, it.y, tw);
+    const bounds = opts.bounds;
+    let a = options.find((o) => (!bounds || inside(o.r, bounds)) && !overlapsAny(o.r, opts.placed));
+    if (!a) {
+      if (!selected) continue;
+      a = options[0];
+    }
+    opts.placed.push(a.r);
+    count++;
+    if (!named) designationCount++;
+    out.push({ item: it, tx: a.tx, ty: a.ty, font, rect: a.r });
+  }
+  return out;
+}
+
 /** 2-D canvas overlay that places non-overlapping star names. */
 export class LabelLayer {
   readonly canvas: HTMLCanvasElement;
@@ -51,7 +260,6 @@ export class LabelLayer {
   private widthCache = new Map<string, number>();
   private dpr = 1;
   private readonly v = new Vector3();
-  private readonly camPos = new Vector3();
   candidates: LabelCandidate[] = [];
   selectedKey: string | null = null;
   /** World positions of the stars that received a label in the last draw. */
@@ -73,7 +281,7 @@ export class LabelLayer {
     this.widthCache.clear();
   }
 
-  private measure(font: string, text: string): number {
+  private measure = (font: string, text: string): number => {
     const k = font + '|' + text;
     let w = this.widthCache.get(k);
     if (w === undefined) {
@@ -83,7 +291,7 @@ export class LabelLayer {
       this.widthCache.set(k, w);
     }
     return w;
-  }
+  };
 
   /** Projects p to CSS pixels; returns null if behind the camera or far off-screen. */
   private project(p: Vector3, camera: PerspectiveCamera, w: number, h: number): [number, number] | null {
@@ -111,15 +319,33 @@ export class LabelLayer {
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
     this.labelledPositions.length = 0;
-    const placed: Placed[] = [];
-    const overlaps = (r: Placed) => {
-      for (const p of placed) {
-        if (r.x < p.x + p.w && r.x + r.w > p.x && r.y < p.y + p.h && r.y + r.h > p.y) return true;
-      }
-      return false;
-    };
+    const placed: Rect[] = [];
 
-    // Grid labels first (dim, do not count towards the label limit).
+    // Star labels are placed first; grid labels only take the space that is left.
+    let stars: PlacedLabel[] = [];
+    if (opts.enabled || this.selectedKey !== null) {
+      const scored: ScreenLabel[] = [];
+      for (const c of this.candidates) {
+        const selected = c.key === this.selectedKey;
+        if (!opts.enabled && !selected) continue;
+        const fade = c.sun || selected ? 1 : 1 - smoothstep(radius * 0.85, radius, c.pos.distanceTo(target));
+        if (fade <= 0.02) continue;
+        const s = this.project(c.pos, camera, w, h);
+        if (!s) continue;
+        const score = labelScore(c, c.pos.distanceTo(camera.position)) + (selected ? 1000 : 0);
+        scored.push({ c, score, x: s[0], y: s[1], fade, text: c.text });
+      }
+      scored.sort((a, b) => b.score - a.score);
+      const visible = mergeSystems(scored, this.selectedKey);
+      stars = placeLabels(visible, {
+        maxLabels: opts.maxLabels,
+        selectedKey: this.selectedKey,
+        measure: this.measure,
+        placed,
+        bounds: { w, h },
+      });
+    }
+
     if (opts.grid) {
       ctx.font = '11px system-ui, sans-serif';
       ctx.textBaseline = 'middle';
@@ -129,94 +355,34 @@ export class LabelLayer {
         const text = gl.text;
         const tw = this.measure(ctx.font, text);
         const r = { x: s[0] - tw / 2 - 2, y: s[1] - 8, w: tw + 4, h: 16 };
-        if (overlaps(r)) continue;
+        if (overlapsAny(r, placed)) continue;
         placed.push(r);
         ctx.fillStyle = gl.highlight ? opts.gridHighlight : 'rgba(140, 170, 220, 0.6)';
         ctx.fillText(text, s[0] - tw / 2, s[1]);
       }
     }
 
-    if (!opts.enabled && this.selectedKey === null) return;
-
-    this.camPos.copy(camera.position);
-    const scored: { c: LabelCandidate; score: number; x: number; y: number; fade: number; text: string; merged?: string[] }[] = [];
-    for (const c of this.candidates) {
-      const selected = c.key === this.selectedKey;
-      if (!opts.enabled && !selected) continue;
-      const dT = c.pos.distanceTo(target);
-      const fade = c.sun || selected ? 1 : 1 - smoothstep(radius * 0.85, radius, dT);
-      if (fade <= 0.02) continue;
-      const s = this.project(c.pos, camera, w, h);
-      if (!s) continue;
-      const dC = Math.max(c.pos.distanceTo(this.camPos), 1e-3);
-      let score = c.logL - 2 * Math.log10(dC);
-      score += c.rank < RANK_BONUS.length ? RANK_BONUS[c.rank] : 0;
-      if (c.sun) score += 100;
-      if (selected) score += 1000;
-      scored.push({ c, score, x: s[0], y: s[1], fade, text: c.text });
-    }
-    scored.sort((a, b) => b.score - a.score);
-
-    // Merge the labels of system components that coincide on screen.
-    const leaders = new Map<number, (typeof scored)[number][]>();
-    const visible: typeof scored = [];
-    for (const it of scored) {
-      const sys = it.c.sys;
-      if (sys === undefined || it.c.rank >= 99 || it.c.key === this.selectedKey) {
-        visible.push(it);
-        continue;
-      }
-      const group = leaders.get(sys) ?? [];
-      const leader = group.find((l) => Math.abs(l.x - it.x) < MERGE_PX && Math.abs(l.y - it.y) < MERGE_PX);
-      if (leader) {
-        (leader.merged ??= [leader.c.text]).push(it.c.text);
-        continue;
-      }
-      group.push(it);
-      leaders.set(sys, group);
-      visible.push(it);
-    }
-    // A label that stands for its whole system drops the component letter ("Alpha Centauri").
-    for (const it of visible) {
-      const sys = it.c.sys;
-      if (sys === undefined || it.c.rank >= 99 || it.c.key === this.selectedKey) continue;
-      const whole = leaders.get(sys)!.length === 1;
-      it.text = sharedName(it.merged ?? [it.c.text], whole) ?? it.c.text;
-    }
-
-    let count = 0;
-    let designationCount = 0;
-    // catalogue designations get at most a third of the label budget
-    const maxDesignations = Math.max(3, Math.floor(opts.maxLabels / 3));
-    for (const it of visible) {
+    ctx.textBaseline = 'middle';
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(2, 4, 12, 0.85)';
+    for (const l of stars) {
+      const it = l.item;
       const named = it.c.rank < 99;
-      if (it.c.key !== this.selectedKey) {
-        if (count >= opts.maxLabels) continue;
-        if (!named && designationCount >= maxDesignations) continue;
-      }
       const selected = it.c.key === this.selectedKey;
-      const font = selected
-        ? '600 13px system-ui, sans-serif'
-        : named
-          ? '12px system-ui, sans-serif'
-          : '10.5px system-ui, sans-serif';
-      const tw = this.measure(font, it.text);
-      const r = { x: it.x + 6, y: it.y - 8, w: tw + 4, h: 15 };
-      if (!selected && overlaps(r)) continue;
-      placed.push(r);
-      count++;
-      if (!named) designationCount++;
-      ctx.font = font;
-      ctx.textBaseline = 'middle';
+      ctx.font = l.font;
       ctx.globalAlpha = it.fade;
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = 'rgba(2, 4, 12, 0.85)';
-      ctx.strokeText(it.text, it.x + 7, it.y);
-      ctx.fillStyle = selected ? '#ffd27a' : it.c.sun ? '#fff1b8' : named ? 'rgba(232, 238, 250, 0.95)' : 'rgba(160, 178, 205, 0.85)';
-      ctx.fillText(it.text, it.x + 7, it.y);
-      ctx.globalAlpha = 1;
+      ctx.strokeText(it.text, l.tx, l.ty);
+      ctx.fillStyle = selected
+        ? '#ffd27a'
+        : it.c.sun
+          ? '#fff1b8'
+          : named
+            ? 'rgba(232, 238, 250, 0.95)'
+            : 'rgba(160, 178, 205, 0.85)';
+      ctx.fillText(it.text, l.tx, l.ty);
       if (!it.c.sun && named) this.labelledPositions.push(it.c.pos);
     }
+    ctx.globalAlpha = 1;
   }
 }
 

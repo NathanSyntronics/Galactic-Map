@@ -1,5 +1,5 @@
 import { Box3, Vector3 } from 'three';
-import { decodeNode, type NodeData } from './format';
+import { FormatError, decodeNode, type NodeData } from './format';
 
 export interface SourceInfo {
   key: string;
@@ -169,26 +169,194 @@ export function selectNodes(octree: Octree, p: SelectionParams): OctreeNode[] {
   return selected;
 }
 
-/** Fetches and decodes node files with limited concurrency and a priority queue. */
-export class NodeLoader {
-  private readonly loaded = new Map<string, NodeData>();
-  private readonly inflight = new Set<string>();
-  private readonly failed = new Set<string>();
-  private queue: OctreeNode[] = [];
-  private lastUse = new Map<string, number>();
-  private frame = 0;
+type FetchFn = (url: string, init?: RequestInit) => Promise<Response>;
 
-  onLoaded: (node: OctreeNode, data: NodeData) => void = () => {};
-  onEvicted: (path: string) => void = () => {};
+/** An HTTP error response. */
+export class HttpError extends Error {
+  constructor(
+    readonly status: number,
+    url: string,
+  ) {
+    super(`HTTP ${status} for ${url}`);
+  }
+}
 
-  private rangeSupported: boolean | null = null;
-  private readonly packCache = new Map<number, Promise<ArrayBuffer>>();
+/**
+ * Errors a retry cannot fix: missing files and other client errors (except timeouts and rate
+ * limits), and malformed data. Network errors, server errors and truncated transfers are transient.
+ */
+export function isPermanentError(err: unknown): boolean {
+  if (err instanceof FormatError) return true;
+  if (err instanceof HttpError) return err.status >= 400 && err.status < 500 && ![408, 425, 429].includes(err.status);
+  return false;
+}
+
+/** Number of attempts to load a node before giving up on transient errors (and reporting it). */
+export const MAX_ATTEMPTS = 6;
+
+/** After giving up on transient errors, a node that is still wanted is tried again this rarely. */
+export const GIVE_UP_RETRY_MS = 120_000;
+
+/** Delay before the retry after the `failures`-th failed attempt: 1 s, 2 s, 4 s, … at most 30 s. */
+export function retryDelay(failures: number): number {
+  return Math.min(1000 * 2 ** Math.max(failures - 1, 0), 30_000);
+}
+
+/** Map with least-recently-used eviction. */
+export class LruCache<K, V> {
+  private readonly map = new Map<K, V>();
+
+  constructor(readonly maxEntries: number) {}
+
+  get(key: K): V | undefined {
+    const v = this.map.get(key);
+    if (v !== undefined) {
+      this.map.delete(key);
+      this.map.set(key, v);
+    }
+    return v;
+  }
+
+  set(key: K, value: V): void {
+    this.map.delete(key);
+    this.map.set(key, value);
+    while (this.map.size > this.maxEntries) this.map.delete(this.map.keys().next().value as K);
+  }
+
+  /** Removes the entry if it still holds `value`. */
+  deleteIf(key: K, value: V): void {
+    if (this.map.get(key) === value) this.map.delete(key);
+  }
+
+  get size(): number {
+    return this.map.size;
+  }
+}
+
+/**
+ * Reads node blobs from pack files with HTTP Range requests. Whether the server honours a range is
+ * decided per response: a `206` carries just the blob; a `200` carries the whole pack, which is
+ * then kept in a small LRU cache and serves the pack's other nodes. Until the first `206` has been
+ * seen, only one request per pack is in flight, so a server that ignores ranges sends each pack
+ * once instead of once per concurrent request.
+ */
+export class PackFetcher {
+  private readonly packs: LruCache<number, Promise<ArrayBuffer>>;
+  /** Outstanding first request per pack while range support is unknown; resolves on its headers. */
+  private readonly probes = new Map<number, Promise<void>>();
+  private rangeSeen = false;
+  /** Number of responses that carried a whole pack (statistics). */
+  fullDownloads = 0;
 
   constructor(
     private readonly baseUrl: string,
-    private readonly packs: string[],
-    private readonly maxConcurrent = 6,
-  ) {}
+    private readonly packNames: string[],
+    private readonly fetchFn: FetchFn = (url, init) => fetch(url, init),
+    /** Whole packs kept in memory (each about 4 MB). */
+    maxPacks = 8,
+  ) {
+    this.packs = new LruCache(maxPacks);
+  }
+
+  get cachedPacks(): number {
+    return this.packs.size;
+  }
+
+  async fetch(pack: number, offset: number, bytes: number): Promise<ArrayBuffer> {
+    const url = `${this.baseUrl}${this.packNames[pack]}`;
+    for (;;) {
+      const cached = this.packs.get(pack);
+      if (cached) return this.slice(pack, cached, offset, bytes);
+      const probe = this.probes.get(pack);
+      if (!probe || this.rangeSeen) break;
+      await probe;
+    }
+
+    let release = () => {};
+    const gate = this.rangeSeen ? null : new Promise<void>((resolve) => (release = resolve));
+    if (gate) this.probes.set(pack, gate);
+    const open = () => {
+      if (gate && this.probes.get(pack) === gate) this.probes.delete(pack);
+      release();
+    };
+    try {
+      const res = await this.fetchFn(url, { headers: { Range: `bytes=${offset}-${offset + bytes - 1}` } });
+      if (res.status === 206) {
+        this.rangeSeen = true;
+        open();
+        const buf = await res.arrayBuffer();
+        if (buf.byteLength !== bytes) throw new Error(`short range read ${buf.byteLength}/${bytes} from ${url}`);
+        return buf;
+      }
+      if (!res.ok) throw new HttpError(res.status, url);
+      // The server ignored the range and sends the whole pack: cache it before reading the body,
+      // so that requests for the pack's other nodes wait for this download instead of starting one.
+      this.fullDownloads++;
+      const whole = res.arrayBuffer();
+      this.packs.set(pack, whole);
+      whole.catch(() => this.packs.deleteIf(pack, whole));
+      open();
+      return await this.slice(pack, whole, offset, bytes);
+    } finally {
+      open();
+    }
+  }
+
+  private async slice(pack: number, whole: Promise<ArrayBuffer>, offset: number, bytes: number): Promise<ArrayBuffer> {
+    const buf = await whole;
+    if (buf.byteLength < offset + bytes) {
+      this.packs.deleteIf(pack, whole);
+      throw new Error(`pack ${this.packNames[pack]} truncated: ${buf.byteLength} < ${offset + bytes}`);
+    }
+    return buf.slice(offset, offset + bytes);
+  }
+}
+
+interface Failure {
+  attempts: number;
+  /** Time (see NodeLoader `now`) after which the node may be fetched again. */
+  retryAt: number;
+  /** Never fetched again (missing file, malformed data). */
+  permanent: boolean;
+  /** Given up and reported through onFailed: a permanent error or MAX_ATTEMPTS failures. */
+  gaveUp: boolean;
+}
+
+/**
+ * Fetches and decodes node files with limited concurrency and a priority queue. Failed loads are
+ * retried with exponential backoff. Permanent errors (missing file, malformed data) and nodes that
+ * failed MAX_ATTEMPTS times are given up and reported through onFailed; after transient errors a
+ * node that is still wanted is nevertheless tried again every GIVE_UP_RETRY_MS (the connection may
+ * come back), and loads normally if that succeeds.
+ */
+export class NodeLoader {
+  private readonly loaded = new Map<string, NodeData>();
+  private readonly inflight = new Set<string>();
+  private readonly failures = new Map<string, Failure>();
+  private wanted: OctreeNode[] = [];
+  private queue: OctreeNode[] = [];
+  private lastUse = new Map<string, number>();
+  private frame = 0;
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  private retryTimerAt = Infinity;
+  readonly packs: PackFetcher;
+  private readonly maxConcurrent: number;
+  private readonly now: () => number;
+
+  onLoaded: (node: OctreeNode, data: NodeData) => void = () => {};
+  onEvicted: (path: string) => void = () => {};
+  /** A node could not be loaded (reported once; see the class comment for later retries). */
+  onFailed: (node: OctreeNode, err: unknown) => void = () => {};
+
+  constructor(
+    baseUrl: string,
+    packs: string[],
+    opts: { maxConcurrent?: number; fetch?: FetchFn; maxPacks?: number; now?: () => number } = {},
+  ) {
+    this.packs = new PackFetcher(baseUrl, packs, opts.fetch, opts.maxPacks);
+    this.maxConcurrent = opts.maxConcurrent ?? 6;
+    this.now = opts.now ?? (() => performance.now());
+  }
 
   get(path: string): NodeData | undefined {
     return this.loaded.get(path);
@@ -198,8 +366,24 @@ export class NodeLoader {
     return this.loaded.size;
   }
 
+  /** Requested nodes that are not loaded yet (queued, in flight or waiting for a retry). */
   get pendingCount(): number {
-    return this.queue.length + this.inflight.size;
+    let n = this.inflight.size;
+    for (const node of this.wanted) {
+      if (this.loaded.has(node.path) || this.inflight.has(node.path)) continue;
+      if (this.failures.get(node.path)?.gaveUp) continue;
+      n++;
+    }
+    return n;
+  }
+
+  /** Paths of the nodes that were given up. */
+  get failedPaths(): string[] {
+    return [...this.failures].filter(([, f]) => f.gaveUp).map(([p]) => p);
+  }
+
+  hasFailed(path: string): boolean {
+    return this.failures.get(path)?.gaveUp === true;
   }
 
   loadedPoints(): number {
@@ -212,9 +396,19 @@ export class NodeLoader {
   request(nodes: OctreeNode[], cacheBudgetPoints: number): void {
     this.frame++;
     for (const n of nodes) this.lastUse.set(n.path, this.frame);
-    this.queue = nodes.filter((n) => !this.loaded.has(n.path) && !this.inflight.has(n.path) && !this.failed.has(n.path));
-    this.pump();
+    this.wanted = nodes;
+    this.refill();
     this.evict(cacheBudgetPoints);
+  }
+
+  private refill(): void {
+    const now = this.now();
+    this.queue = this.wanted.filter((n) => {
+      if (this.loaded.has(n.path) || this.inflight.has(n.path)) return false;
+      const f = this.failures.get(n.path);
+      return !f || (!f.permanent && now >= f.retryAt);
+    });
+    this.pump();
   }
 
   private pump(): void {
@@ -223,14 +417,12 @@ export class NodeLoader {
       this.inflight.add(node.path);
       this.fetchNode(node)
         .then((data) => {
+          this.failures.delete(node.path);
           this.loaded.set(node.path, data);
           this.lastUse.set(node.path, this.frame);
           this.onLoaded(node, data);
         })
-        .catch((err) => {
-          console.error(`failed to load node ${node.path}`, err);
-          this.failed.add(node.path);
-        })
+        .catch((err) => this.failed(node, err))
         .finally(() => {
           this.inflight.delete(node.path);
           this.pump();
@@ -238,44 +430,56 @@ export class NodeLoader {
     }
   }
 
-  private async fetchNode(node: OctreeNode): Promise<NodeData> {
-    const buf = await this.fetchBlob(node);
-    return decodeNode(buf, node.path);
+  private failed(node: OctreeNode, err: unknown): void {
+    const f = this.failures.get(node.path) ?? { attempts: 0, retryAt: 0, permanent: false, gaveUp: false };
+    f.attempts++;
+    f.permanent = isPermanentError(err);
+    this.failures.set(node.path, f);
+    if (f.permanent || f.attempts >= MAX_ATTEMPTS) {
+      if (!f.gaveUp) {
+        f.gaveUp = true;
+        console.error(`failed to load node ${node.path} (attempt ${f.attempts}), giving up`, err);
+        this.onFailed(node, err);
+      }
+      if (f.permanent) return;
+      f.retryAt = this.now() + GIVE_UP_RETRY_MS;
+      this.scheduleRetry(f.retryAt);
+      return;
+    }
+    const delay = retryDelay(f.attempts);
+    f.retryAt = this.now() + delay;
+    console.warn(`failed to load node ${node.path} (attempt ${f.attempts}), retrying in ${delay / 1000} s`, err);
+    this.scheduleRetry(f.retryAt);
   }
 
-  /**
-   * Fetch the node's byte range from its pack file. If the server does not honour Range
-   * requests, the whole pack is downloaded once and kept in memory.
-   */
-  private async fetchBlob(node: OctreeNode): Promise<ArrayBuffer> {
-    const url = `${this.baseUrl}${this.packs[node.pack]}`;
-    const end = node.offset + node.bytes;
-    if (this.rangeSupported !== false) {
-      const res = await fetch(url, { headers: { Range: `bytes=${node.offset}-${end - 1}` } });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      if (res.status === 206) {
-        this.rangeSupported = true;
-        const buf = await res.arrayBuffer();
-        if (buf.byteLength !== node.bytes) throw new Error(`short range read ${buf.byteLength}/${node.bytes}`);
-        return buf;
-      }
-      // Server ignored the range: it sent the whole pack.
-      this.rangeSupported = false;
-      const whole = await res.arrayBuffer();
-      this.packCache.set(node.pack, Promise.resolve(whole));
-      return whole.slice(node.offset, end);
+  /** Re-checks the queue when the earliest pending retry is due, without waiting for a view change. */
+  private scheduleRetry(at: number): void {
+    if (this.retryTimer !== null && this.retryTimerAt <= at) return;
+    if (this.retryTimer !== null) clearTimeout(this.retryTimer);
+    this.retryTimerAt = at;
+    this.retryTimer = setTimeout(
+      () => {
+        this.retryTimer = null;
+        this.retryTimerAt = Infinity;
+        this.refill();
+        // later retries
+        const now = this.now();
+        let next = Infinity;
+        for (const f of this.failures.values()) if (!f.permanent && f.retryAt > now) next = Math.min(next, f.retryAt);
+        if (next < Infinity) this.scheduleRetry(next);
+      },
+      Math.max(at - this.now(), 0),
+    );
+  }
+
+  private async fetchNode(node: OctreeNode): Promise<NodeData> {
+    const buf = await this.packs.fetch(node.pack, node.offset, node.bytes);
+    try {
+      return decodeNode(buf, node.path);
+    } catch (err) {
+      // the blob has the expected size, so a decoding error means malformed data
+      throw err instanceof FormatError ? err : new FormatError(`node ${node.path}: ${(err as Error).message}`);
     }
-    let pack = this.packCache.get(node.pack);
-    if (!pack) {
-      pack = fetch(url).then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.arrayBuffer();
-      });
-      this.packCache.set(node.pack, pack);
-      pack.catch(() => this.packCache.delete(node.pack));
-    }
-    const whole = await pack;
-    return whole.slice(node.offset, end);
   }
 
   private evict(cacheBudgetPoints: number): void {

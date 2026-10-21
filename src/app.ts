@@ -1,11 +1,21 @@
 import { Color, MathUtils, Matrix4, PerspectiveCamera, Scene, Vector3, WebGLRenderer } from 'three';
 import { Navigation } from './controls/navigation';
+import { TapDetector } from './controls/tap';
 import { Flag, designationOf, type NodeData } from './data/format';
 import { galacticToWorld, worldToGalactic } from './data/galactic';
-import { NodeLoader, Octree, selectNodes, type Manifest, type OctreeNode } from './data/octree';
-import { formatLy, localName, setLang, t } from './i18n';
+import {
+  HttpError,
+  NodeLoader,
+  Octree,
+  isPermanentError,
+  retryDelay,
+  selectNodes,
+  type Manifest,
+  type OctreeNode,
+} from './data/octree';
+import { formatLy, formatNumber, localName, setLang, t, type MessageKey } from './i18n';
 import { DropLines, Marker, PolarGrid } from './render/overlays';
-import { Starfield, starLogL } from './render/starfield';
+import { Starfield, apparentMag, starLogL } from './render/starfield';
 import { QUALITY_BUDGET, RADIUS_MAX, RADIUS_MIN, SettingsStore, type Settings } from './settings';
 import { InfoPanel, displayName, type StarInfo } from './ui/info';
 import { LabelLayer, type LabelCandidate } from './ui/labels';
@@ -36,6 +46,10 @@ export class App {
   private readonly search: SearchBox;
   private readonly status: HTMLElement;
   private readonly loadingEl: HTMLElement;
+  /** Message shown in the loading box (kept so a language switch shows the same message). */
+  private loadingKey: MessageKey = 'loading';
+  private readonly menuBtn: HTMLButtonElement;
+  private readonly helpBtn: HTMLButtonElement;
   private readonly dialog: HTMLDialogElement;
   private readonly baseUrl: string;
 
@@ -59,6 +73,7 @@ export class App {
   constructor(private readonly container: HTMLElement) {
     this.baseUrl = `${import.meta.env.BASE_URL}data/`;
     setLang(this.store.get().lang);
+    document.title = t('appTitle');
 
     this.renderer = new WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -74,11 +89,13 @@ export class App {
 
     this.labels = new LabelLayer(container);
 
-    // --- UI chrome
+    // --- UI chrome. The settings panel does not subscribe to the store itself: settingsChanged()
+    // switches the language first and then lets the panel re-render.
     const top = el('header', 'topbar');
     const menuBtn = el('button', 'icon-btn menu-btn', '☰');
     menuBtn.setAttribute('aria-label', t('settings'));
     menuBtn.addEventListener('click', () => this.panel.toggle());
+    this.menuBtn = menuBtn;
     const title = el('div', 'app-title', t('appTitle'));
     top.append(menuBtn, title);
     container.appendChild(top);
@@ -86,6 +103,7 @@ export class App {
     const helpBtn = el('button', 'icon-btn help-btn', '?');
     helpBtn.setAttribute('aria-label', t('help'));
     helpBtn.addEventListener('click', () => this.showHelp());
+    this.helpBtn = helpBtn;
     top.appendChild(helpBtn);
 
     this.panel = new SettingsPanel(container, this.store);
@@ -125,13 +143,10 @@ export class App {
 
   async start(): Promise<void> {
     try {
-      const res = await fetch(`${this.baseUrl}manifest.json`);
-      if (!res.ok) throw new Error(res.status === 404 ? 'nodata' : `HTTP ${res.status}`);
-      this.manifest = (await res.json()) as Manifest;
+      this.manifest = await this.fetchManifest();
     } catch (err) {
       console.error(err);
-      this.loadingEl.textContent = (err as Error).message === 'nodata' ? t('noData') : t('loadError');
-      this.loadingEl.classList.add('error');
+      this.showLoadError(err instanceof HttpError && err.status === 404 ? 'noData' : 'loadError');
       this.loop();
       return;
     }
@@ -139,9 +154,32 @@ export class App {
     this.loader = new NodeLoader(this.baseUrl, this.manifest.packs);
     this.loader.onLoaded = (node, data) => this.nodeLoaded(node, data);
     this.loader.onEvicted = (path) => this.starfield.remove(path);
+    this.loader.onFailed = (node) => this.nodeFailed(node);
     this.lodDirty = true;
     this.loop();
+  }
 
+  /** Loads the manifest, retrying transient failures a few times. */
+  private async fetchManifest(): Promise<Manifest> {
+    const url = `${this.baseUrl}manifest.json`;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        const res = await fetch(url);
+        if (!res.ok) throw new HttpError(res.status, url);
+        return (await res.json()) as Manifest;
+      } catch (err) {
+        if (isPermanentError(err) || err instanceof SyntaxError || attempt >= 4) throw err;
+        console.warn(`manifest: attempt ${attempt} failed, retrying`, err);
+        await new Promise((r) => setTimeout(r, retryDelay(attempt)));
+      }
+    }
+  }
+
+  private showLoadError(key: MessageKey): void {
+    this.loadingKey = key;
+    this.loadingEl.textContent = t(key);
+    this.loadingEl.classList.add('error');
+    this.loadingEl.classList.remove('hidden');
   }
 
   /** The search index is loaded on first use of the search box. */
@@ -165,10 +203,12 @@ export class App {
 
   private settingsChanged(s: Settings, changed: (keyof Settings)[]): void {
     const has = (...k: (keyof Settings)[]) => k.some((x) => changed.includes(x));
+    // switch the language before anything re-renders
+    if (has('lang')) setLang(s.lang);
+    this.panel.settingsChanged(changed);
     if (has('lang')) {
-      setLang(s.lang);
       this.search.updateTexts();
-      this.info.refresh(this.nav.target);
+      this.info.rerender(this.nav.target);
       this.refreshChrome();
     }
     if (has('showBrownDwarfs', 'showWhiteDwarfs', 'maxDistErr', 'saturation')) this.starfield.restyle();
@@ -190,9 +230,11 @@ export class App {
   private refreshChrome(): void {
     const title = this.container.querySelector('.app-title');
     if (title) title.textContent = t('appTitle');
-    if (this.loadingEl.classList.contains('error')) this.loadingEl.textContent = t('noData');
-    else this.loadingEl.textContent = t('loading');
+    this.menuBtn.setAttribute('aria-label', t('settings'));
+    this.helpBtn.setAttribute('aria-label', t('help'));
+    this.loadingEl.textContent = t(this.loadingKey);
     document.title = t('appTitle');
+    this.updateStatus();
   }
 
   // ------------------------------------------------------------------ data
@@ -201,12 +243,21 @@ export class App {
     const r = this.starfield.add(node, data);
     r.points.visible = this.selectedPaths.has(node.path);
     this.candidatesDirty = true;
-    if (node.path === 'r') this.loadingEl.classList.add('hidden');
-    if (this.pendingSelect && this.pendingSelect.path === node.path) {
-      const hit = this.pendingSelect;
-      this.pendingSelect = null;
-      this.select(this.starInfo(data, hit.index));
+    if (node.path === 'r') {
+      this.loadingKey = 'loading';
+      this.loadingEl.classList.remove('error');
+      this.loadingEl.classList.add('hidden');
     }
+    if (this.pendingSelect && this.pendingSelect.path === node.path) {
+      this.select(this.starInfo(data, this.pendingSelect.index));
+    }
+  }
+
+  /** A node could not be loaded even after retries. */
+  private nodeFailed(node: OctreeNode): void {
+    this.candidatesDirty = true; // status line
+    if (node.path === 'r') this.showLoadError('loadError');
+    if (this.pendingSelect?.path === node.path) this.pendingSelect = null;
   }
 
   private updateLod(): void {
@@ -223,7 +274,10 @@ export class App {
       pixelsPerUnitAtUnitDistance: pxPerUnit,
     });
     this.selectedPaths = new Set(selected.map((n) => n.path));
-    this.loader.request(selected, budget * 2);
+    // keep loading the node of a star picked in the search even if the LOD does not choose it
+    const pending = this.pendingSelect ? this.octree.nodes.get(this.pendingSelect.path) : undefined;
+    const request = pending && !this.selectedPaths.has(pending.path) ? [...selected, pending] : selected;
+    this.loader.request(request, budget * 2);
     this.starfield.setVisible(this.selectedPaths);
   }
 
@@ -289,6 +343,8 @@ export class App {
         const name = d.names.get(i);
         const f = d.flags[i];
         if (name || f & Flag.SUN) {
+          const sys = d.systems.get(i);
+          const sysInfo = sys !== undefined ? d.systemInfo.get(sys) : undefined;
           cands.push({
             key: `${d.path}:${i}`,
             pos: new Vector3(x, y, z),
@@ -296,7 +352,9 @@ export class App {
             rank: f & Flag.SUN ? 0 : name!.rank,
             logL: starLogL(d, i),
             sun: (f & Flag.SUN) !== 0,
-            sys: d.systems.get(i),
+            sys,
+            sysName: sysInfo?.nameEn ? localName(sysInfo.nameEn, sysInfo.nameDe) : undefined,
+            appMag: apparentMag(d, i),
           });
         } else if (K > 0) {
           const ex = x - cx;
@@ -326,22 +384,24 @@ export class App {
         text: displayName(this.selected),
         rank: 0,
         logL: 0,
+        sys: this.selected.system?.id,
       });
     }
     this.labels.candidates = cands;
     this.inView = inView;
-    if (this.selected) this.info.refresh(this.nav.target);
+    // only the view-dependent values: rebuilding the card here would swallow clicks on its buttons
+    if (this.selected) this.info.updateView(this.nav.target);
   }
 
   private updateStatus(): void {
     if (!this.loader) return;
     const loaded = this.starfield.visiblePointCount();
     let text = t('stats', {
-      loaded: loaded.toLocaleString(),
-      visible: this.inView.toLocaleString(),
+      loaded: formatNumber(loaded),
+      visible: formatNumber(this.inView),
     });
     const pending = this.loader.pendingCount;
-    if (pending > 0) text += ` · ${t('statsLoading', { pending })}`;
+    if (pending > 0) text += ` · ${pending === 1 ? t('statsLoadingOne') : t('statsLoading', { pending: formatNumber(pending) })}`;
     this.status.textContent = text;
   }
 
@@ -349,16 +409,14 @@ export class App {
 
   private setupPointer(): void {
     const dom = this.renderer.domElement;
-    let down: { x: number; y: number; time: number; id: number } | null = null;
+    // a tap is a single pointer that went down and up without moving; pinches never count
+    const taps = new TapDetector(6, 600);
     dom.addEventListener('pointerdown', (e) => {
-      down = { x: e.clientX, y: e.clientY, time: performance.now(), id: e.pointerId };
+      taps.down(e.pointerId, e.clientX, e.clientY, performance.now(), e.isPrimary);
     });
+    dom.addEventListener('pointercancel', (e) => taps.cancel(e.pointerId));
     dom.addEventListener('pointerup', (e) => {
-      if (!down || down.id !== e.pointerId) return;
-      const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y);
-      const dt = performance.now() - down.time;
-      down = null;
-      if (moved > 6 || dt > 600) return;
+      if (!taps.up(e.pointerId, e.clientX, e.clientY, performance.now())) return;
       const hit = this.pickAt(e.clientX, e.clientY, e.pointerType === 'touch' ? 22 : 14);
       const now = performance.now();
       const isDouble =
@@ -438,7 +496,9 @@ export class App {
     };
   }
 
+  /** Any selection change (by the user or a completed search pick) ends a pending search pick. */
   private select(info: StarInfo | null): void {
+    this.pendingSelect = null;
     this.selected = info;
     this.labels.selectedKey = info?.key ?? null;
     this.selMarker.show(info?.pos ?? null, this.renderer.getPixelRatio());
@@ -453,7 +513,7 @@ export class App {
     const data = this.loader?.get(hit.path);
     if (data) {
       this.select(this.starInfo(data, hit.index));
-    } else {
+    } else if (this.loader && !this.loader.hasFailed(hit.path)) {
       this.pendingSelect = hit;
       const node = this.octree?.nodes.get(hit.path);
       // make sure the node gets loaded even if the LOD would not choose it yet
@@ -532,7 +592,7 @@ export class App {
       const li = el('li');
       const name = el('b', '', src.title);
       li.appendChild(name);
-      if (src.used !== undefined) li.appendChild(document.createTextNode(` — ${src.used.toLocaleString()}`));
+      if (src.used !== undefined) li.appendChild(document.createTextNode(` — ${formatNumber(src.used)}`));
       if (src.citation) li.appendChild(el('div', 'cite', src.citation));
       if (src.license) li.appendChild(el('div', 'cite', src.license));
       if (src.url && /^https?:\/\//.test(src.url)) {
@@ -547,7 +607,7 @@ export class App {
     body.appendChild(ul);
     if (this.manifest) {
       body.appendChild(
-        el('p', 'cite', `${this.manifest.starCount.toLocaleString()} ${t('stars')} · ${this.manifest.generated}`),
+        el('p', 'cite', `${formatNumber(this.manifest.starCount)} ${t('stars')} · ${this.manifest.generated}`),
       );
     }
     this.openDialog(t('about'), body);
@@ -617,9 +677,11 @@ export class App {
     this.camera.near = Math.max(dist * 1e-4, 1e-4);
     this.camera.far = dist + s.radius * 4 + 1000;
     this.camera.updateProjectionMatrix();
+    // labels and picking need this frame's camera matrix
+    this.camera.updateMatrixWorld();
 
     const u = this.starfield.material.uniforms;
-    u.uTarget.value.copy(this.nav.target);
+    this.starfield.setTarget(this.nav.target);
     const h = this.renderer.domElement.clientHeight || window.innerHeight;
     u.uScale.value = (h * this.renderer.getPixelRatio()) / (2 * Math.tan(MathUtils.degToRad(this.camera.fov) / 2));
     u.uPixelRatio.value = this.renderer.getPixelRatio();
@@ -651,7 +713,7 @@ export class App {
       grid: s.grid ? this.grid.labels : null,
       gridHighlight: 'rgba(255, 200, 120, 0.85)',
     });
-    if (s.dropLines && s.labels) this.dropLines.set(this.labels.labelledPositions, this.nav.target.y);
+    if (s.dropLines && s.labels) this.dropLines.set(this.labels.labelledPositions, this.nav.target);
     this.dropLines.lines.visible = s.dropLines && s.labels && s.grid;
 
     this.renderer.render(this.scene, this.camera);

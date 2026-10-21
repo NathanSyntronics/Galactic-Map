@@ -34,10 +34,15 @@ export class SettingsPanel {
     this.root.appendChild(this.body);
     parent.appendChild(this.root);
     this.render();
-    store.subscribe((_s, changed) => {
-      if (changed.includes('lang')) this.render();
-      else this.sync();
-    });
+  }
+
+  /**
+   * Called by the app after a settings change, once the new language is active (the panel does
+   * not subscribe to the store itself, so it never renders before the language has switched).
+   */
+  settingsChanged(changed: (keyof Settings)[]): void {
+    if (changed.includes('lang')) this.render();
+    else this.sync();
   }
 
   toggle(open?: boolean): void {
@@ -55,7 +60,14 @@ export class SettingsPanel {
     for (const s of this.syncers) s();
   }
 
+  private focusables(): HTMLElement[] {
+    return [...this.body.querySelectorAll<HTMLElement>('input, select, button')];
+  }
+
   private render(): void {
+    // a re-render (language switch) keeps keyboard focus on the same control
+    const active = document.activeElement;
+    const focusIndex = active instanceof HTMLElement ? this.focusables().indexOf(active) : -1;
     this.body.replaceChildren();
     this.syncers = [];
     const s = () => this.store.get();
@@ -160,6 +172,7 @@ export class SettingsPanel {
     reset.addEventListener('click', () => this.store.reset());
     footer.append(help, about, reset);
     b.appendChild(footer);
+    if (focusIndex >= 0) this.focusables()[focusIndex]?.focus();
   }
 
   private checkbox(key: MessageKey, get: () => boolean, set: (v: boolean) => void): HTMLElement {
