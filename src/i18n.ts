@@ -63,6 +63,7 @@ const en = {
   unknown: 'unknown',
   stats: '{loaded} stars loaded · {visible} in view',
   statsLoading: 'loading {pending} tiles…',
+  statsLoadingOne: 'loading 1 tile…',
   centreLabel: 'View centre',
   galacticCentre: 'Galactic Centre',
   helpText: `
@@ -160,6 +161,7 @@ const de: Record<MessageKey, string> = {
   unknown: 'unbekannt',
   stats: '{loaded} Sterne geladen · {visible} sichtbar',
   statsLoading: 'lade {pending} Kacheln…',
+  statsLoadingOne: 'lade 1 Kachel…',
   centreLabel: 'Blickpunkt',
   galacticCentre: 'Galaktisches Zentrum',
   helpText: `

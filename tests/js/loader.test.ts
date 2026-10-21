@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   HttpError,
   LruCache,
+  GIVE_UP_RETRY_MS,
   MAX_ATTEMPTS,
   NodeLoader,
   Octree,
@@ -209,7 +210,7 @@ describe('NodeLoader', () => {
     const net = flaky(100, () => 503);
     const { loader, loaded, failed } = makeLoader(net.fetchFn);
     loader.request([octree.root], 1e6);
-    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    await vi.advanceTimersByTimeAsync(45_000); // 1 + 2 + 4 + 8 + 16 s of backoff
     expect(net.count()).toBe(MAX_ATTEMPTS);
     expect(loaded).toEqual([]);
     expect(failed).toEqual(['r']);
@@ -219,6 +220,24 @@ describe('NodeLoader', () => {
     await vi.advanceTimersByTimeAsync(60_000);
     expect(net.count()).toBe(MAX_ATTEMPTS);
     expect(loader.pendingCount).toBe(0);
+    // only one more attempt per GIVE_UP_RETRY_MS while the node is wanted, reported only once
+    await vi.advanceTimersByTimeAsync(3 * GIVE_UP_RETRY_MS);
+    expect(net.count()).toBeLessThanOrEqual(MAX_ATTEMPTS + 3);
+    expect(failed).toEqual(['r']);
+  });
+
+  it('tries a given-up node again much later, if it is still wanted, and then loads it', async () => {
+    const net = flaky(MAX_ATTEMPTS, () => new TypeError('offline'));
+    const { loader, loaded, failed } = makeLoader(net.fetchFn);
+    loader.request([octree.root], 1e6);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(failed).toEqual(['r']);
+    expect(net.count()).toBe(MAX_ATTEMPTS);
+    await vi.advanceTimersByTimeAsync(GIVE_UP_RETRY_MS);
+    expect(net.count()).toBe(MAX_ATTEMPTS + 1);
+    expect(loaded).toEqual(['r']);
+    expect(loader.hasFailed('r')).toBe(false);
+    expect(failed).toEqual(['r']); // reported once
   });
 
   it('does not retry permanent errors', async () => {

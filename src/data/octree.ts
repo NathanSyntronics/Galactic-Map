@@ -191,8 +191,11 @@ export function isPermanentError(err: unknown): boolean {
   return false;
 }
 
-/** Number of attempts to load a node before giving up on transient errors. */
+/** Number of attempts to load a node before giving up on transient errors (and reporting it). */
 export const MAX_ATTEMPTS = 6;
+
+/** After giving up on transient errors, a node that is still wanted is tried again this rarely. */
+export const GIVE_UP_RETRY_MS = 120_000;
 
 /** Delay before the retry after the `failures`-th failed attempt: 1 s, 2 s, 4 s, … at most 30 s. */
 export function retryDelay(failures: number): number {
@@ -313,13 +316,18 @@ interface Failure {
   attempts: number;
   /** Time (see NodeLoader `now`) after which the node may be fetched again. */
   retryAt: number;
+  /** Never fetched again (missing file, malformed data). */
   permanent: boolean;
+  /** Given up and reported through onFailed: a permanent error or MAX_ATTEMPTS failures. */
+  gaveUp: boolean;
 }
 
 /**
  * Fetches and decodes node files with limited concurrency and a priority queue. Failed loads are
- * retried with exponential backoff; permanent errors (missing file, malformed data) and nodes that
- * failed MAX_ATTEMPTS times are given up and reported through onFailed.
+ * retried with exponential backoff. Permanent errors (missing file, malformed data) and nodes that
+ * failed MAX_ATTEMPTS times are given up and reported through onFailed; after transient errors a
+ * node that is still wanted is nevertheless tried again every GIVE_UP_RETRY_MS (the connection may
+ * come back), and loads normally if that succeeds.
  */
 export class NodeLoader {
   private readonly loaded = new Map<string, NodeData>();
@@ -337,7 +345,7 @@ export class NodeLoader {
 
   onLoaded: (node: OctreeNode, data: NodeData) => void = () => {};
   onEvicted: (path: string) => void = () => {};
-  /** A node could not be loaded and will not be tried again. */
+  /** A node could not be loaded (reported once; see the class comment for later retries). */
   onFailed: (node: OctreeNode, err: unknown) => void = () => {};
 
   constructor(
@@ -363,7 +371,7 @@ export class NodeLoader {
     let n = this.inflight.size;
     for (const node of this.wanted) {
       if (this.loaded.has(node.path) || this.inflight.has(node.path)) continue;
-      if (this.failures.get(node.path)?.permanent) continue;
+      if (this.failures.get(node.path)?.gaveUp) continue;
       n++;
     }
     return n;
@@ -371,11 +379,11 @@ export class NodeLoader {
 
   /** Paths of the nodes that were given up. */
   get failedPaths(): string[] {
-    return [...this.failures].filter(([, f]) => f.permanent).map(([p]) => p);
+    return [...this.failures].filter(([, f]) => f.gaveUp).map(([p]) => p);
   }
 
   hasFailed(path: string): boolean {
-    return this.failures.get(path)?.permanent === true;
+    return this.failures.get(path)?.gaveUp === true;
   }
 
   loadedPoints(): number {
@@ -423,13 +431,19 @@ export class NodeLoader {
   }
 
   private failed(node: OctreeNode, err: unknown): void {
-    const f = this.failures.get(node.path) ?? { attempts: 0, retryAt: 0, permanent: false };
+    const f = this.failures.get(node.path) ?? { attempts: 0, retryAt: 0, permanent: false, gaveUp: false };
     f.attempts++;
-    f.permanent = isPermanentError(err) || f.attempts >= MAX_ATTEMPTS;
+    f.permanent = isPermanentError(err);
     this.failures.set(node.path, f);
-    if (f.permanent) {
-      console.error(`failed to load node ${node.path} (attempt ${f.attempts}), giving up`, err);
-      this.onFailed(node, err);
+    if (f.permanent || f.attempts >= MAX_ATTEMPTS) {
+      if (!f.gaveUp) {
+        f.gaveUp = true;
+        console.error(`failed to load node ${node.path} (attempt ${f.attempts}), giving up`, err);
+        this.onFailed(node, err);
+      }
+      if (f.permanent) return;
+      f.retryAt = this.now() + GIVE_UP_RETRY_MS;
+      this.scheduleRetry(f.retryAt);
       return;
     }
     const delay = retryDelay(f.attempts);

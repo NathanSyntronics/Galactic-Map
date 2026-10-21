@@ -255,6 +255,7 @@ export class App {
 
   /** A node could not be loaded even after retries. */
   private nodeFailed(node: OctreeNode): void {
+    this.candidatesDirty = true; // status line
     if (node.path === 'r') this.showLoadError('loadError');
     if (this.pendingSelect?.path === node.path) this.pendingSelect = null;
   }
@@ -400,7 +401,7 @@ export class App {
       visible: formatNumber(this.inView),
     });
     const pending = this.loader.pendingCount;
-    if (pending > 0) text += ` · ${t('statsLoading', { pending })}`;
+    if (pending > 0) text += ` · ${pending === 1 ? t('statsLoadingOne') : t('statsLoading', { pending: formatNumber(pending) })}`;
     this.status.textContent = text;
   }
 
