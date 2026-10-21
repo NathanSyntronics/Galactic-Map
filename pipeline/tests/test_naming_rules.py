@@ -44,6 +44,9 @@ def test_component_letters_attached_to_numbers():
     assert split_component_loose("Sirius B") == ("Sirius", "B")
     assert split_component_loose("LSPM J0016+1951E") == ("LSPM J0016+1951E", None)  # E = east
     assert split_component_loose("LHS 5139a") == ("LHS 5139a", None)
+    # a lower-case letter after a number is no name ("GJ 810 a" in SIMBAD, planets)
+    assert classify_name("GJ 810 a") == Rank.OTHER and classify_name("Gliese 876 b") == Rank.OTHER
+    assert classify_title("HN Pegasi b") == Rank.SURVEY  # only a Wikipedia title makes it a name (a brown dwarf)
 
 
 def _frame(rows):
@@ -412,3 +415,18 @@ def test_system_article_of_an_unresolved_pair():
     assert list(out["name_en"])[:2] == ["BL Ceti", "UV Ceti"]  # the title names the system, not a star
     assert out["system_name_en"].iloc[0] == "Gliese 65"
     assert "Gliese 65" in out["alt"].iloc[0]
+
+
+def test_no_letter_after_a_lower_case_letter():
+    from galmap.naming import assign_names
+
+    s = _frame([
+        # LP 756-19 = GJ 810 A: SIMBAD's alias "GJ 810 a" is not a name ("GJ 810 a Aa")
+        {"census_name": "LP 756-19 Aa", "gj": "GJ 810 A", "simbad_main_id": "LP 756-19", "simbad_match": "pos",
+         "system_size": 3, "system_row": 1, "flags": P_FLAGS, "system_id": 1},
+        {"census_name": "LP 756-19 Ab", "system_size": 3, "system_row": 1, "flags": C_FLAGS, "system_id": 1},
+        {"census_name": "LP 756-18", "census_gj": "GJ 810 B", "system_size": 3, "system_row": 1, "flags": C_FLAGS, "system_id": 1},
+    ])
+    ext = {0: {"simbad": ["GJ 810 A", "GJ 810 a", "LP 756-19", "LHS 501"]}}
+    names = list(assign_names(s, ext)["name_en"])
+    assert names == ["Gliese 810 Aa", "Gliese 810 Ab", "Gliese 810 B"]

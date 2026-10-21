@@ -74,6 +74,8 @@ P_IAU, P_WIKI, P_CENSUS, P_SIMBAD, P_LABEL, P_ATHYG, P_GENERATED, P_ID = range(8
 PROTECTED_SOURCES = {"iau", "wiki", "simbad_name"}
 
 _COMP_RE = re.compile(rf"\s({COMPONENT})$")
+# a name that ends in a letter that is not a component letter ("GJ 810 a"): no letter is appended
+_LETTER_END = re.compile(r"\s[a-z]$")
 _SUP_RE = re.compile(r"[⁰¹²³⁴⁵⁶⁷⁸⁹]+")
 
 
@@ -887,6 +889,8 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
                 alt[i] = rest[:10] or None
 
             def with_letter(i: int, name: str, letter: str) -> None:
+                if _LETTER_END.search(name):
+                    return  # "GJ 810 a" + "Aa"
                 de = name_de[i]
                 put(i, f"{name} {letter}", f"{de} {letter}" if de and not _COMP_RE.search(de) else de, int(name_rank[i]), name_src[i])
 
@@ -1126,7 +1130,7 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
                     bases.setdefault(int(sid_arr[i]), set()).add(b_)
         for i, c in comp_of.items():
             k = int(sid_arr[i])
-            if name_en[i] and name_en[i] in bases.get(k, ()):
+            if name_en[i] and name_en[i] in bases.get(k, ()) and not _LETTER_END.search(name_en[i]):
                 new_en = f"{name_en[i]} {c}"
                 if taken[k][new_en] > 0:
                     continue

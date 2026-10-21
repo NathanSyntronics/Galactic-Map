@@ -340,6 +340,8 @@ def classify_name(name: str) -> int:
     s = name.strip()
     if not s or _RAW.match(s) or re.search(r"[()\[\]\"*]", s):
         return Rank.OTHER  # raw SIMBAD identifiers, notes and odd catalogue codes
+    if re.search(r"\d\s[a-z]$", s):
+        return Rank.OTHER  # a lower-case letter after a number: SIMBAD's "GJ 810 a", planets ("Gliese 876 b")
     words = s.split()
     if len(words) >= 2:
         first = words[0]
@@ -388,8 +390,8 @@ def classify_name(name: str) -> int:
 def classify_title(title: str) -> int:
     """Rank of a Wikipedia article title. Like classify_name, but a designation from any catalogue
     ('Gaia BH1', 'PSR B1257+12', 'Cygnus X-1') counts as a survey designation, because the title
-    shows that it is the name the star is known by. Full-precision coordinate designations and
-    long running numbers stay OTHER."""
+    shows that it is the name the star is known by ("HN Pegasi b", a brown dwarf). Full-precision
+    coordinate designations and long running numbers stay OTHER."""
     r = classify_name(title)
     if r == Rank.OTHER and not _RAW.match(title) and not re.search(r"[()\[\]\"*]", title):
         if not re.search(r"J\d{4,}", title) and not re.search(r"\d{6,}", title):
