@@ -430,3 +430,33 @@ def test_no_letter_after_a_lower_case_letter():
     ext = {0: {"simbad": ["GJ 810 A", "GJ 810 a", "LP 756-19", "LHS 501"]}}
     names = list(assign_names(s, ext)["name_en"])
     assert names == ["Gliese 810 Aa", "Gliese 810 Ab", "Gliese 810 B"]
+
+
+def test_census_objects_keep_a_name():
+    from galmap.flags import Desig
+    from galmap.naming import assign_names
+
+    s = _frame([
+        # alpha Tri: SIMBAD calls the census star 2MASS J01530103+2937044 "* alf Tri B", the census
+        # has its own alpha Tri B -> the 2MASS star keeps its census designation as its name, and its
+        # designation is not the other star's name
+        {"census_name": "alpha Tri A", "simbad_main_id": "* alf Tri", "system_size": 3, "system_row": 1, "flags": P_FLAGS,
+         "system_id": 1, "hip": 8796},
+        {"census_name": "alpha Tri B", "system_size": 3, "system_row": 1, "flags": C_FLAGS, "system_id": 1},
+        {"census_name": "2MASS J01530103+2937044", "simbad_main_id": "* alf Tri B", "simbad_match": "gaia",
+         "system_size": 3, "system_row": 1, "flags": C_FLAGS, "system_id": 1, "gaia": 299467939039225728},
+        # a raw census code is no name, but another designation of the object is
+        {"census_name": "[BHR2005] 832-2", "catalog_names": ["2MASS J03111547+0106307"], "gaia": 3266937637860051840},
+        # a system without any name: its label is the census designation without the primary's letter
+        {"census_name": "[MFL2000] J210104.18+030705.1 A", "system_size": 2, "system_row": 2, "flags": P_FLAGS, "system_id": 2},
+        {"census_name": "[MFL2000] J210104.18+030705.1 B", "system_size": 2, "system_row": 2, "flags": C_FLAGS, "system_id": 2},
+    ])
+    ext = {0: {"wiki_en": "Alpha Trianguli", "iau": "Mothallah"}, 2: {"simbad": ["* alf Tri B", "2MASS J01530103+2937044"]}}
+    out = assign_names(s, ext)
+    names = list(out["name_en"])
+    assert names[1] == "Alpha Trianguli B"
+    assert names[2] == "2MASS J01530103+2937044" and "Alpha Trianguli B" in out["alt"].iloc[2]
+    assert out["desig_cat"].iloc[2] == Desig.GAIA_DR3  # not "Alpha Trianguli B"
+    assert names[3] == "2MASS J03111547+0106307" and "[BHR2005] 832-2" in out["alt"].iloc[3]
+    assert not isinstance(names[4], str) and not isinstance(names[5], str)
+    assert out["system_name_en"].iloc[4] == "[MFL2000] J210104.18+030705.1"

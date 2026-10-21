@@ -318,6 +318,33 @@ def census_display(cname: str) -> str:
     return prettify_simbad(t) or expand_abbreviated(t) or t
 
 
+_RAW_TEXT = re.compile(r"[\[\]()*\"]")
+_SURVEY_PREFIXES = ("2MASS", "WISE", "CWISE", "DENIS", "SDSS", "ULAS", "UGPS", "PSO", "VHS", "LSPM", "SCR", "APMPM")
+
+
+def census_fallback(row, ext: dict | None = None) -> Cand | None:
+    """The name under which an object of the 20 pc census without a name is listed (and
+    searchable): its census designation ("LP 816-60"), or, when that is a raw catalogue code
+    ("[BHR2005] 832-2", "GR* 50 B"), the first of its other designations that is not
+    ("2MASS J03111547+0106307"); None for other stars."""
+    cname = row.get("census_name")
+    if not isinstance(cname, str) or not cname.strip() or cname == "Sun":
+        return None
+    disp = census_display(cname)
+    if not _RAW_TEXT.search(disp):
+        return Cand(disp, None, Rank.SURVEY, P_CENSUS, src="census")
+    cat = row.get("catalog_names")
+    others = [x for x in cat if isinstance(x, str)] if isinstance(cat, (list, tuple, np.ndarray)) else []
+    others += [x for x in (ext or {}).get("simbad") or [] if isinstance(x, str)]
+    for x in others:
+        t = re.sub(r"\s+", " ", x.strip())
+        if not t or _RAW_TEXT.search(t) or t.startswith(("V*", "NAME", "HIDDEN NAME", "Gaia")):
+            continue
+        if classify_title(t) <= Rank.SURVEY or t.startswith(_SURVEY_PREFIXES):
+            return Cand(t, None, Rank.SURVEY, P_CENSUS, src="census")
+    return None
+
+
 def latin_letters(row, ext: dict) -> set[tuple[str, str]]:
     """Latin-letter Bayer designations of a star (lowercase 'f Eridani' vs. capital 'P Cygni')."""
     idents = list(ext.get("simbad") or [])
@@ -718,12 +745,15 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
         best, alts = choose(cands)
         desigs = [d for _, d in catalogue_designations(r)]
         cname = r.get("census_name")
-        if (best is None or best.rank > Rank.NAMED_MAX) and isinstance(cname, str) and cname != "Sun":
-            # objects of the 20 pc census are listed (and searchable) under their census designation,
-            # unless it is a raw catalogue code ("[BHR2005] 832-2", "GR* 50 B")
-            disp = census_display(cname)
-            if not re.search(r"[\[\]()*\"]", disp):
-                best = Cand(disp, None, Rank.SURVEY, P_CENSUS, src="census")
+        if best is None or best.rank > Rank.NAMED_MAX:
+            # objects of the 20 pc census are listed (and searchable) under their census designation
+            # (or another one, if that is a raw catalogue code), which then stays an alternative
+            fb = census_fallback(r, ext)
+            if fb is not None:
+                best = fb
+                core = _census_core(cname)
+                if core and core != fb.en and core not in alts:
+                    alts = alts + [core]
         if best is not None and best.rank <= Rank.NAMED_MAX:
             name_rank[i] = best.rank
             name_en[i] = best.en
@@ -909,10 +939,9 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
                     if cl and not letter and comp and not letters_conflict(cl, comp):
                         continue  # "Struve 1110 C" next to the shared "Castor C": the same component
                     return c
-                cname = row_of(i).get("census_name")
-                disp = census_display(cname) if isinstance(cname, str) else None
-                if disp and used[disp] == 0 and classify_name(disp) != Rank.OTHER:
-                    return Cand(disp, None, Rank.SURVEY, P_CENSUS, src="census")
+                fb = census_fallback(row_of(i), external.get(int(s.index[i]), {}))
+                if fb is not None and fb.en != nm and used[fb.en] == 0:
+                    return fb
                 return None
 
             def rename_to(i: int, nxt: Cand | None) -> None:
@@ -1201,7 +1230,7 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
                 sys_de[i] = split_component(de)[0] if de else None
             else:
                 d = primary_designation(row_of(i))
-                sys_en[i] = d[3] if d[3] else None
+                sys_en[i] = split_component(d[3])[0] if d[3] else None  # without the primary's letter
             if k in sys_title:
                 # the title of the Wikipedia article about the system ("Epsilon Lyrae", "40 Eridani")
                 sys_en[i], sys_de[i] = sys_title[k]
@@ -1241,10 +1270,13 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
     if "simbad_main_id" in s:
         mid = s["simbad_main_id"].to_numpy(dtype=object)
         swapped = 0
+        # not when it is another star's display name: the census star "2MASS J01530103+2937044",
+        # which SIMBAD calls "* alf Tri B", next to the census star alpha Tri B
+        shown = {v for v in name_en[name_rank <= Rank.NAMED_MAX] if v}
         for i in np.nonzero((dc == Desig.GAIA_DR3) & pd.notna(mid))[0]:
             m = str(mid[i]).strip()
             m = prettify_simbad(m) or re.sub(r"\s+", " ", m)
-            if m and not m.startswith("Gaia") and classify_title(m) <= Rank.SURVEY:
+            if m and not m.startswith("Gaia") and classify_title(m) <= Rank.SURVEY and (m not in shown or name_en[i] == m):
                 dc[i], dlo[i], dhi[i], dstr[i] = Desig.STRING, 0, 0, m
                 swapped += 1
         log.info("naming: %d Gaia-only stars designated by their SIMBAD identifier", swapped)
