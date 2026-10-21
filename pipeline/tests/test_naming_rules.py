@@ -121,7 +121,7 @@ def test_wikidata_codes_pass():
     wd = pd.DataFrame(
         {
             "qid": ["Q1"], "simbad": [[]], "en": ["40 Eridani"], "de": [None], "en_label": [None], "de_label": [None],
-            "hip": [[]], "gaia": [[]], "stellar": [True], "codes": [["GJ 166", "40 Eri", "ADS 3093 ABC"]],
+            "hip": [[]], "gaia": [[]], "stellar": [True], "codes": [["GJ 166", "40 Eri", "ADS 3093 ABC"]], "system": [True],
         }
     )
     stars = pd.DataFrame(
@@ -134,7 +134,7 @@ def test_wikidata_codes_pass():
         }
     )
     out = attach(stars, wd, {1: ["* 40 Eri", "* omi02 Eri"]})
-    assert out == {1: {"wiki_en": "40 Eridani", "wiki_de": None, "label_en": None, "label_de": None}}
+    assert out == {1: {"wiki_en": "40 Eridani", "wiki_de": None, "label_en": None, "label_de": None, "wiki_system": True}}
 
 
 P_FLAGS = 12  # IN_SYSTEM | SYSTEM_PRIMARY
@@ -336,3 +336,45 @@ def test_sub_components_keep_their_own_letter():
     search = [[n, None, "r", k, 0.0, 0.0, float(k // 6), 1] for k, n in enumerate(names)]
     assert nested_letters(search) == []
     assert nested_letters([["Castor A", None, "r", 0, 0, 0, 0, 1], ["Castor Aa", None, "r", 1, 0, 0, 0.1, 1]]) == ["Castor A"]
+
+
+def test_system_article_titles_name_the_system():
+    from galmap.naming import assign_names
+
+    s = _frame([
+        # 40 Eridani: the article is about the system; the primary is "40 Eridani A" (German "Keid A")
+        {"census_name": "omicron02 Eri A", "simbad_main_id": "* omi02 Eri", "system_size": 3, "system_row": 1,
+         "flags": P_FLAGS, "system_id": 1, "hip": 19849},
+        {"census_name": "omicron02 Eri B", "simbad_main_id": "* omi02 Eri B", "system_size": 3, "system_row": 1,
+         "flags": C_FLAGS, "system_id": 1},
+        # Epsilon Lyrae (the Double Double): a member keeps its own name, the title names the system
+        {"simbad_main_id": "* eps01 Lyr A", "flags": P_FLAGS, "system_id": 2},
+        {"simbad_main_id": "* eps02 Lyr A", "flags": C_FLAGS, "system_id": 2, "hip": 91926},
+        {"simbad_main_id": "* eps02 Lyr B", "flags": C_FLAGS, "system_id": 2},
+        # 30 Arietis: the star is "30 Arietis A" in SIMBAD
+        {"simbad_main_id": "* 30 Ari A", "flags": P_FLAGS, "system_id": 3, "hip": 12189},
+        {"simbad_main_id": "* 30 Ari B", "flags": C_FLAGS, "system_id": 3, "hip": 12184},
+        # 81 Cancri is not resolved into components in our data: it is the system
+        {"simbad_main_id": "* pi.01 Cnc", "gj": "GJ 337 A", "hip": 45170},
+    ])
+    ext = {
+        0: {"iau": "Keid", "wiki_en": "40 Eridani", "wiki_de": "Keid", "wiki_system": True},
+        1: {"simbad": ["* omi02 Eri B", "* 40 Eri B"]},
+        2: {"simbad": ["* eps01 Lyr A"]},
+        3: {"wiki_en": "Epsilon Lyrae", "wiki_de": "Epsilon Lyrae", "wiki_system": True, "simbad": ["* eps02 Lyr A"]},
+        4: {"simbad": ["* eps02 Lyr B"]},
+        5: {"wiki_en": "30 Arietis", "wiki_system": True, "simbad": ["* 30 Ari A"]},
+        6: {"simbad": ["* 30 Ari B"]},
+        7: {"wiki_en": "81 Cancri", "wiki_system": True, "simbad": ["* pi.01 Cnc", "* 81 Cnc"]},
+    }
+    out = assign_names(s, ext)
+    names = list(out["name_en"])
+    assert names[0] == "40 Eridani A" and out["name_de"].iloc[0] == "Keid A"
+    assert names[1] == "40 Eridani B"
+    assert out["system_name_en"].iloc[0] == "40 Eridani" and out["system_name_de"].iloc[0] == "Keid"
+    assert names[2:5] == ["Epsilon¹ Lyrae A", "Epsilon² Lyrae A", "Epsilon² Lyrae B"]
+    assert not isinstance(out["name_de"].iloc[3], str)  # not the German title of the system
+    assert "Epsilon Lyrae" in out["alt"].iloc[3]
+    assert out["system_name_en"].iloc[2] == "Epsilon Lyrae"
+    assert names[5:7] == ["30 Arietis A", "30 Arietis B"] and out["system_name_en"].iloc[5] == "30 Arietis"
+    assert names[7] == "81 Cancri"

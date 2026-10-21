@@ -386,8 +386,9 @@ def candidates(row, ext: dict) -> list[Cand]:
 
     if ext.get("iau"):
         add(ext["iau"], P_IAU, src="iau", rank=Rank.IAU)
-    if isinstance(ext.get("wiki_en"), str):
-        add(clean_title(ext["wiki_en"]), P_WIKI, src="wiki", title=True)
+    wiki_en = ext["wiki_en"] if isinstance(ext.get("wiki_en"), str) and ext["wiki_en"].strip() else None
+    if wiki_en and not ext.get("wiki_system"):
+        add(clean_title(wiki_en), P_WIKI, src="wiki", title=True)
     cn = row.get("common_name")
     if isinstance(cn, str):
         for part in cn.split("|"):
@@ -484,6 +485,29 @@ def candidates(row, ext: dict) -> list[Cand]:
         add(gliese_display(cgj), P_CENSUS, src="census", rank=Rank.GJ)
     elif isinstance(row.get("gj"), str):
         add(gliese_display(row.get("gj")), P_GENERATED, src="generated", rank=Rank.GJ)
+    if wiki_en and ext.get("wiki_system"):
+        # an article about the star system ("40 Eridani", "Epsilon Lyrae", "30 Arietis"): its title
+        # names the system (see system_title), and a member of a system only together with the
+        # member's letter ("40 Eridani A"); a member that has a name of its own within the system
+        # keeps it ("Epsilon² Lyrae A", "Zeta² Coronae Borealis", "30 Arietis A", "CU Cancri Aa" in
+        # GJ 2069), with the title as an alternative. A star that is not resolved into components in
+        # our data is the system ("81 Cancri").
+        t = normalize_bayer(clean_title(wiki_en), latin)
+        own = choose(out)[0]
+        letter = comp or expect
+        member = (int(row.get("flags", 0)) & Flag.IN_SYSTEM) != 0
+        keep = False
+        if member and own is not None and own.rank <= Rank.SURVEY:
+            own_base, own_letter = split_component(own.en)
+            keep = _fold(t) in (_fold(own_base), _fold(_strip_index(own_base))) or (
+                own_letter is not None and own_letter == letter and own.rank < classify_title(t)
+            )
+        if keep:
+            add(t, P_LABEL, src="label", title=True)
+        elif member and letter:
+            add(f"{t} {letter}", P_WIKI, src="wiki", title=True)
+        else:
+            add(t, P_WIKI, src="wiki", title=True)
     return out
 
 
@@ -529,6 +553,8 @@ def german_name(best: Cand, ext: dict, latin: set | frozenset = frozenset()) -> 
     for "Nu Scorpii"); otherwise the German form of the English name. The component letter
     follows the English name."""
     title = ext.get("wiki_de")
+    if ext.get("wiki_system") and best.src != "wiki":
+        title = None  # the German article is about the system ("Epsilon Lyrae" for Epsilon² Lyrae A)
     if isinstance(title, str) and title.strip():
         t = normalize_bayer(clean_title(title), latin)
         t_base, _ = split_component(t)
@@ -538,6 +564,23 @@ def german_name(best: Cand, ext: dict, latin: set | frozenset = frozenset()) -> 
             out = t_base + (f" {en_comp}" if en_comp else "")
             return out if out != best.en else None
     return best.de if best.de and best.de != best.en else None
+
+
+def system_title(ext: dict, latin: set | frozenset = frozenset()) -> tuple[str, str | None] | None:
+    """(English, German) system name from the title of a Wikipedia article about a star system
+    (ext["wiki_system"]), if it is a name or a designation up to the survey rank."""
+    en = ext.get("wiki_en")
+    if not isinstance(en, str) or not en.strip():
+        return None
+    en = normalize_bayer(clean_title(en), latin)
+    if classify_title(en) > Rank.SURVEY:
+        return None  # "HD 142022": the primary's name is the better system name
+    de = ext.get("wiki_de")
+    de = normalize_bayer(clean_title(de), latin) if isinstance(de, str) and de.strip() else None
+    if de is not None and not (classify_title(de) <= max(classify_title(en), int(Rank.COMMON)) or _same_designation(de, en)):
+        de = None
+    de = de or german_of(en)
+    return en, (de if de and de != en else None)
 
 
 def catalogue_designations(row) -> list[tuple[int, str]]:
@@ -657,6 +700,7 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
         return r
 
     bayer_sys: dict[int, tuple[str, str | None]] = {}
+    sys_title: dict[int, tuple[str, str | None]] = {}
     for i in rows:
         r = row_of(i)
         ext = external.get(int(s.index[i]), {})
@@ -682,6 +726,10 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
             alt[i] = alts2[:10] or None
         # system naming material: Bayer / Flamsteed without component
         sid = int(r.get("system_id", -1)) if pd.notna(r.get("system_id", -1)) else -1
+        if sid >= 0 and ext.get("wiki_system") and sid not in sys_title:
+            t = system_title(ext, latin_letters(r, ext))
+            if t:
+                sys_title[sid] = t
         if sid >= 0:
             for c in cands:
                 if c.rank in (Rank.BAYER, Rank.FLAMSTEED):
@@ -1141,6 +1189,9 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
             else:
                 d = primary_designation(row_of(i))
                 sys_en[i] = d[3] if d[3] else None
+            if k in sys_title:
+                # the title of the Wikipedia article about the system ("Epsilon Lyrae", "40 Eridani")
+                sys_en[i], sys_de[i] = sys_title[k]
         s["system_name_en"] = sys_en
         s["system_name_de"] = sys_de
 

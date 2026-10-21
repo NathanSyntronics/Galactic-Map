@@ -27,8 +27,11 @@ An interactive 3-D map of the Sun's stellar neighbourhood, built from real star 
   Pfeilstern"). Components of a system are named after the primary ("Sirius B") unless they have
   a name of their own (Wikipedia, IAU, SIMBAD common name); the IAU name of a primary plus a
   letter becomes the primary's display name plus the letter ("Zeta Herculis B", not "Tianji B");
-  no two stars carry the same display name (a resolved pair gets "CT Ceti A" / "CT Ceti B").
-  The system label follows the primary's name.
+  no two stars carry the same display name (a resolved pair gets "CT Ceti A" / "CT Ceti B"), and
+  a sub-component keeps its own letter ("Castor Ab", not "Castor A" next to "Castor Aa").
+  The system label follows the primary's name, or the title of a Wikipedia article about the
+  whole system ("Epsilon Lyrae"; its members keep their own names, "Epsilon² Lyrae A", or take
+  the title with their letter, "40 Eridani A").
 * **Explore by mouse, touch or keyboard.** Only stars within an adjustable radius around the
   view centre are shown (50 ly by default). Move the view centre and new stars stream in.
 * **English and German**, switchable in the settings.

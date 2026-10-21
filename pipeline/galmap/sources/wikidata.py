@@ -193,12 +193,14 @@ def load(refresh: bool = False) -> pd.DataFrame:
     """One row per Wikidata item: qid, simbad (list), en / de (article titles or None),
     en_label / de_label (labels of items without an article in that language), hip (list of int),
     gaia (list of int), stellar (False for items of a non-stellar class: nebulae, clusters,
-    galaxies, planets). Titles and labels that name a nebula, cluster or galaxy are removed, and
-    items left without any are dropped."""
+    galaxies, planets), codes (catalogue codes) and system (True for the items of the second query:
+    their article is about a star system, "40 Eridani", "Epsilon Lyrae"). Titles and labels that
+    name a nebula, cluster or galaxy are removed, and items left without any are dropped."""
     df = _fetch(refresh)
     df["codes"] = ""
+    df["system"] = False
     try:
-        df = pd.concat([df, _fetch_systems(refresh)], ignore_index=True)
+        df = pd.concat([df, _fetch_systems(refresh).assign(system=True)], ignore_index=True)
     except Exception as err:  # the second query only adds a few hundred multiple stars
         log.warning("Wikidata: star systems without SIMBAD id unavailable: %s", err)
     classes = df["classes"].map(lambda v: [c.rsplit("/", 1)[-1] for c in v.split("|") if c]) if "classes" in df else pd.Series([[]] * len(df))
@@ -222,6 +224,7 @@ def load(refresh: bool = False) -> pd.DataFrame:
             "gaia": df["gaias"].map(lambda v: [int(m) for m in re.findall(r"Gaia DR3\s*(\d+)", v)]),
             "stellar": [is_stellar(c) for c in classes],
             "codes": df["codes"].map(lambda v: [x.strip() for x in v.split("|") if x.strip()]),
+            "system": df["system"].astype(bool),
         }
     )
     named = out[["en", "de", "en_label", "de_label"]].notna().any(axis=1)
@@ -279,7 +282,9 @@ def _row_strings(stars: pd.DataFrame, idents: dict[int, list[str]] | None):
 
 
 def attach(stars: pd.DataFrame, wd: pd.DataFrame, idents: dict[int, list[str]] | None = None) -> dict[int, dict]:
-    """Row index -> {"wiki_en", "wiki_de", "label_en", "label_de"} (None where missing).
+    """Row index -> {"wiki_en", "wiki_de", "label_en", "label_de"} (None where missing), plus
+    "wiki_system": True when the article is about a star system (an item of the second query), so
+    that its title names the system rather than the star it is attached to.
 
     Each item names one star and each star gets one item. Matches are made in passes, so that an
     exact SIMBAD main-identifier match is never taken away by a looser one: first by SIMBAD main
@@ -331,9 +336,12 @@ def attach(stars: pd.DataFrame, wd: pd.DataFrame, idents: dict[int, list[str]] |
     out: dict[int, dict] = {}
     cols = ("en", "de", "en_label", "de_label")
     keys = ("wiki_en", "wiki_de", "label_en", "label_de")
+    system = wd["system"].to_numpy(dtype=bool) if "system" in wd else np.zeros(len(wd), bool)
     for i, k in item_of.items():
         r = wd.iloc[k]
         out[i] = {key: (r[c] if isinstance(r[c], str) and r[c] else None) for key, c in zip(keys, cols)}
+        if system[k] and (out[i]["wiki_en"] or out[i]["wiki_de"]):
+            out[i]["wiki_system"] = True
     log.info("Wikidata: %d stars matched (%d by SIMBAD id, %d by Gaia DR3, %d by HIP, %d by catalogue code)", len(out), *counts)
     return out
 
