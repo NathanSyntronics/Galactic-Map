@@ -1,6 +1,6 @@
 import type { AttributeStore, PaletteId } from '../data/attributes';
 import { parseNumber } from '../data/csv';
-import { t, formatNumber, type MessageKey } from '../i18n';
+import { t, formatNumber, numberText, type MessageKey } from '../i18n';
 import {
   BUILTIN_ATTRIBUTES,
   COLOR_TEMPERATURE,
@@ -301,7 +301,7 @@ export class SettingsPanel {
       input.inputMode = 'decimal';
       input.size = 7;
       const v = sc[key];
-      input.value = v === undefined ? '' : formatValue(v);
+      input.value = v === undefined ? '' : numberText(v);
       const auto = defaults[key];
       input.placeholder = auto === undefined ? t('scaleAuto') : formatValue(auto);
       input.setAttribute('aria-label', t(label));

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { AttributeStore } from '../../src/data/attributes';
-import { csvLayout, inferType, parseColumnHeader, parseCsv, parseNumber } from '../../src/data/csv';
+import { csvLayout, decodeCsv, inferType, parseColumnHeader, parseCsv, parseNumber } from '../../src/data/csv';
 import { DesignationMap, canonicalDesignation, parseDesignation } from '../../src/data/designation';
 import { DesigCat, type NodeData } from '../../src/data/format';
 import { exportCsv, importCsv, type StarResolver } from '../../src/data/importer';
@@ -88,10 +88,17 @@ describe('CSV', () => {
     expect(inferType(['red', '3'], false)).toBe('text');
   });
 
+  it('reads files saved as Windows-1252 as well as UTF-8', () => {
+    const latin1 = new Uint8Array([0x46, 0xfc, 0x72, 0x3b, 0xdf]).buffer; // "Für;ß"
+    expect(decodeCsv(latin1)).toBe('Für;ß');
+    expect(decodeCsv(new TextEncoder().encode('Für;ß').buffer as ArrayBuffer)).toBe('Für;ß');
+  });
+
   it('finds the key column and skips the informational name column', () => {
     expect(csvLayout(['designation', 'name', 'A', 'B'])).toEqual({ keyColumn: 0, valueColumns: [2, 3] });
     expect(csvLayout(['A', 'Name', 'B'])).toEqual({ keyColumn: 1, valueColumns: [0, 2] });
     expect(csvLayout(['Stern', 'B'])).toEqual({ keyColumn: 0, valueColumns: [1] });
+    expect(csvLayout(['designation', 'System'])).toEqual({ keyColumn: 0, valueColumns: [1] });
   });
 });
 
@@ -142,6 +149,15 @@ describe('import and export', () => {
       expect(b.toJSON().defs).toEqual(a.toJSON().defs);
       expect(b.toJSON().values).toEqual(a.toJSON().values);
     }
+  });
+
+  it('tells listeners about an import once', () => {
+    const store = new AttributeStore(false);
+    const events: string[] = [];
+    store.subscribe((k) => events.push(k));
+    importCsv('designation,A,B,C\nHR 1,1,x,#fff', store, resolver);
+    expect(events).toEqual(['defs']);
+    expect(store.defs.map((d) => d.name)).toEqual(['A', 'B', 'C']);
   });
 
   it('replaces old values only when asked to', () => {

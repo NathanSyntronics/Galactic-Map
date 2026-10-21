@@ -3,6 +3,7 @@ import { Navigation } from './controls/navigation';
 import { TapDetector } from './controls/tap';
 import { AttributeStore } from './data/attributes';
 import { Flag, designationOf, type NodeData } from './data/format';
+import { decodeCsv } from './data/csv';
 import { exportCsv, importCsv, type ImportReport, type StarResolver } from './data/importer';
 import { galacticToWorld, worldToGalactic } from './data/galactic';
 import {
@@ -283,7 +284,7 @@ export class App {
   }
 
   private async importFile(file: File, replace: boolean): Promise<ImportReport> {
-    const text = await file.text();
+    const text = decodeCsv(await file.arrayBuffer());
     const resolver = await this.resolver();
     return importCsv(text, this.attrs, resolver, replace);
   }

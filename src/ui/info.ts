@@ -3,7 +3,7 @@ import { normalizeColor, type AttrValue, type AttributeDef, type AttributeStore 
 import { parseNumber } from '../data/csv';
 import { Flag, UNKNOWN_I16, distErrPercent, spectralClassOf } from '../data/format';
 import { LY_PER_PC, galacticLB, worldToGalactic } from '../data/galactic';
-import { formatLy, formatNumber, getLang, localName, t } from '../i18n';
+import { formatLy, formatNumber, localName, numberText, t } from '../i18n';
 
 export interface StarInfo {
   key: string;
@@ -24,12 +24,6 @@ export interface StarInfo {
   systemPrimary: string | null;
   /** Known exoplanets. */
   planets: number;
-}
-
-/** A user number as typed in the current language (no thousands separators). */
-export function numberText(v: number): string {
-  const s = String(v);
-  return getLang() === 'de' ? s.replace('.', ',') : s;
 }
 
 function valueText(def: AttributeDef, v: AttrValue): string {

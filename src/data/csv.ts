@@ -6,6 +6,18 @@ export interface CsvTable {
   delimiter: string;
 }
 
+/**
+ * Text of a CSV file: UTF-8, or Windows-1252 for files that are not valid UTF-8 (what spreadsheet
+ * programs on Windows write by default, e.g. German umlauts).
+ */
+export function decodeCsv(bytes: ArrayBuffer): string {
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    return new TextDecoder('windows-1252').decode(bytes);
+  }
+}
+
 /** Splits CSV text into rows (RFC 4180 quoting, any line ending); detects ',', ';' or tab. */
 export function parseCsv(text: string): CsvTable {
   if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
@@ -146,8 +158,8 @@ export function cellValue(raw: string, type: AttrType, decimalComma: boolean): A
 
 /** Names of the header that hold the star key, best first. */
 const KEY_HEADERS = ['designation', 'bezeichnung', 'key', 'schlüssel', 'id', 'star', 'stern', 'name'];
-/** Informational columns written by the export next to the designation. */
-const INFO_HEADERS = ['name', 'name (de)', 'system'];
+/** Informational column written by the export next to the designation. */
+const INFO_HEADERS = ['name'];
 
 export interface CsvLayout {
   keyColumn: number;

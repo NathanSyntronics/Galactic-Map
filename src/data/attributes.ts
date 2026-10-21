@@ -117,7 +117,7 @@ export class AttributeStore {
     this.changed('scales');
   }
 
-  addDef(name: string, type: AttrType, system = false): AttributeDef {
+  addDef(name: string, type: AttrType, system = false, notify = true): AttributeDef {
     const clean = name.trim();
     if (!clean) throw new Error('empty attribute name');
     if (this.defByName(clean)) throw new Error(`attribute '${clean}' exists`);
@@ -126,7 +126,7 @@ export class AttributeStore {
     for (let k = 2; this.def(id) || id.startsWith('@'); k++) id = `${base}-${k}`;
     const def: AttributeDef = { id, name: clean, type, system };
     this.defsList = [...this.defsList, def];
-    this.changed('defs');
+    if (notify) this.changed('defs');
     return def;
   }
 
@@ -134,7 +134,7 @@ export class AttributeStore {
    * Changes name, type or the system flag. A type change converts the values; values that do not
    * fit the new type are dropped and their number is returned.
    */
-  updateDef(id: string, patch: Partial<Omit<AttributeDef, 'id'>>): number {
+  updateDef(id: string, patch: Partial<Omit<AttributeDef, 'id'>>, notify = true): number {
     const def = this.def(id);
     if (!def) return 0;
     if (patch.name !== undefined) {
@@ -158,7 +158,7 @@ export class AttributeStore {
       this.scaleMap[id] = sc;
     }
     this.defsList = this.defsList.map((d) => (d.id === id ? { ...d, ...patch } : d));
-    this.changed('defs');
+    if (notify) this.changed('defs');
     return dropped;
   }
 

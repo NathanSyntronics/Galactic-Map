@@ -367,6 +367,12 @@ export function formatNumber(x: number, digits = 0): string {
   });
 }
 
+/** A number as typed in the current language: decimal comma in German, no thousands separators. */
+export function numberText(v: number): string {
+  const s = String(v);
+  return current === 'de' ? s.replace('.', ',') : s;
+}
+
 /** Distance in light years with sensible precision. */
 export function formatLy(ly: number): string {
   const digits = ly < 10 ? 2 : ly < 100 ? 1 : 0;

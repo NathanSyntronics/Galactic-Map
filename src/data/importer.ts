@@ -51,7 +51,7 @@ export function importCsv(text: string, store: AttributeStore, resolver: StarRes
 
   const columns: { col: number; def: AttributeDef; info: ImportedAttribute }[] = [];
   const byDef = new Map<string, ImportedAttribute>();
-  let createdAny = false;
+  let defsChanged = false;
   for (const col of valueColumns) {
     const spec = parseColumnHeader(table.header[col]);
     if (!spec.name) continue;
@@ -59,11 +59,12 @@ export function importCsv(text: string, store: AttributeStore, resolver: StarRes
     let created = false;
     if (!def) {
       const type = spec.type ?? inferType(table.rows.map((r) => r[col] ?? ''), decimalComma);
-      def = store.addDef(spec.name, type, spec.system ?? false);
-      created = createdAny = true;
+      def = store.addDef(spec.name, type, spec.system ?? false, false);
+      created = defsChanged = true;
     } else if (spec.system !== null && spec.system !== def.system) {
-      store.updateDef(def.id, { system: spec.system });
+      store.updateDef(def.id, { system: spec.system }, false);
       def = store.def(def.id)!;
+      defsChanged = true;
     }
     let info = byDef.get(def.id);
     if (!info) {
@@ -100,7 +101,8 @@ export function importCsv(text: string, store: AttributeStore, resolver: StarRes
       info.values++;
     }
   }
-  store.commit(createdAny ? 'defs' : 'values');
+  // listeners hear of the new attributes and values together, once
+  store.commit(defsChanged ? 'defs' : 'values');
   return report;
 }
 
