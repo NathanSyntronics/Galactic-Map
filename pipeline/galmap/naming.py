@@ -586,6 +586,22 @@ def choose(cands: list[Cand]) -> tuple[Cand | None, list[str]]:
     return best, alts
 
 
+_DM_RE = re.compile(r"^(?:BD|CD|CPD|SD)\s?[+-]\d")
+
+
+def prefer_hd_over_durchmusterung(best: Cand | None, alts: list[str], row) -> tuple[Cand | None, list[str]]:
+    """A star whose best name is a Durchmusterung number (BD, CD, CPD) but that has an HD number is
+    known by the HD number ("HD 24357", not "BD+16 523"); the DM number becomes an alternative."""
+    if best is None or best.rank != Rank.SURVEY or best.src == "wiki" or not _DM_RE.match(best.en):
+        return best, alts
+    hd = row.get("hd")
+    if hd is None or pd.isna(hd):
+        return best, alts
+    hd_name = f"HD {int(hd)}"
+    alts = [best.en] + [a for a in alts if a not in (best.en, hd_name)]
+    return Cand(hd_name, None, Rank.SURVEY, P_GENERATED, src="generated"), alts
+
+
 def _same_designation(a: str, b: str) -> bool:
     """'Ny¹ Columbae' / 'Nu¹ Columbae', 'Krüger 60' / 'Kruger 60': the same designation in another
     language or spelling."""
@@ -753,6 +769,7 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
         ext = external.get(int(s.index[i]), {})
         cands = candidates(r, ext)
         best, alts = choose(cands)
+        best, alts = prefer_hd_over_durchmusterung(best, alts, r)
         desigs = [d for _, d in catalogue_designations(r)]
         cname = r.get("census_name")
         if best is None or best.rank > Rank.NAMED_MAX:
@@ -769,7 +786,7 @@ def assign_names(s: pd.DataFrame, external: dict[int, dict]) -> pd.DataFrame:
             name_en[i] = best.en
             name_de[i] = german_name(best, ext, latin_letters(r, ext))
             name_src[i] = best.src
-            more = [a for a in alts if a != best.en] + [d for d in desigs if d not in alts]
+            more = [a for a in alts if a != best.en] + [d for d in desigs if d not in alts and d != best.en]
             alt[i] = more[:10] or None
         else:
             alts2 = [a for a in alts] + desigs

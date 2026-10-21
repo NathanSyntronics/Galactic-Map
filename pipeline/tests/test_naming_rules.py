@@ -483,3 +483,16 @@ def test_census_designations_without_notes():
     ])
     names = list(assign_names(s, {})["name_en"])
     assert names == ["DENIS J063001.4-184014 A", "DENIS J063001.4-184014 B", "DENIS J063001.4-184014 C"]
+
+
+def test_hd_number_beats_durchmusterung_number():
+    from galmap.flags import Rank
+    from galmap.naming import P_SIMBAD, Cand, prefer_hd_over_durchmusterung
+
+    best = Cand("BD+16 523", None, Rank.SURVEY, P_SIMBAD, src="simbad")
+    out, alts = prefer_hd_over_durchmusterung(best, ["HR 1201"], {"hd": 24357})
+    assert out.en == "HD 24357" and alts[0] == "BD+16 523"
+    # without an HD number, or for real survey names, nothing changes
+    assert prefer_hd_over_durchmusterung(best, [], {"hd": None})[0].en == "BD+16 523"
+    lhs = Cand("LHS 288", None, Rank.SURVEY, P_SIMBAD, src="simbad")
+    assert prefer_hd_over_durchmusterung(lhs, [], {"hd": 123})[0].en == "LHS 288"
