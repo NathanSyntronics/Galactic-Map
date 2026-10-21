@@ -42,6 +42,16 @@ describe('SearchIndex', () => {
     expect(first('lsr1610')).toBe('LSR 1610−0040');
   });
 
+  it('prefers a match on the displayed name over one on another designation', () => {
+    const idx = new SearchIndex();
+    idx.load([
+      ['Proxima Centauri', null, 'r', 1, 0, 0, 0, 1, ['Alpha Centauri C', 'Gliese 551']],
+      ['Alpha Centauri A', null, 'r', 2, 0, 0, 0, 2, ['Rigil Kentaurus', 'Gliese 559 A']],
+    ]);
+    expect(idx.query('alpha centauri')[0].nameEn).toBe('Alpha Centauri A');
+    expect(idx.query('rigil kentaurus')[0].nameEn).toBe('Alpha Centauri A');
+  });
+
   it('still finds German names and alternative designations', () => {
     expect(first('wega')).toBe('Vega');
     expect(first('55 Cnc'.replace('Cnc', 'Cancri'))).toBe('Rho¹ Cancri');

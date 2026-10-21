@@ -55,6 +55,8 @@ export class SearchIndex {
     if (!nq) return [];
     const hits: { e: Entry; score: number; key: number }[] = [];
     for (const e of this.entries) {
+      // the displayed names (English, German) come first in keys, then the other designations
+      const shown = e.tuple[1] ? 2 : 1;
       let best = -1;
       let bestKey = 0;
       for (let k = 0; k < e.keys.length; k++) {
@@ -68,7 +70,11 @@ export class SearchIndex {
           bestKey = k;
         }
       }
-      if (best >= 0) hits.push({ e, score: best * 100 - e.tuple[7] * 5 - e.keys[0].length * 0.1, key: bestKey });
+      if (best < 0) continue;
+      // a match on the displayed name beats an equally good match on another designation
+      // ('alpha centauri': Alpha Centauri A before Proxima Centauri, alias 'Alpha Centauri C')
+      const shownBonus = bestKey < shown ? 40 : 0;
+      hits.push({ e, score: best * 100 + shownBonus - e.tuple[7] * 5 - e.keys[0].length * 0.1, key: bestKey });
     }
     hits.sort((a, b) => b.score - a.score);
     return hits.slice(0, limit).map(({ e, key }) => {
