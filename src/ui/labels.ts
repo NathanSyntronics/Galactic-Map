@@ -98,9 +98,19 @@ export function jointName(names: string[]): string | null {
  * `names`: the components' own names, the label's leader first. `whole`: no other member of the
  * system has a label of its own, so the label stands for the whole system. `systemName`: the
  * system's name in the current language.
+ *
+ * A whole-system label whose members share no base name is named after the system ("Alpha
+ * Centauri" for Alpha Centauri A, B and Proxima Centauri), unless the leader's own name is not a
+ * component name: "Fomalhaut" (with TW Piscis Austrini) is what the system is called, rather than
+ * its designation "Alpha Piscis Austrini".
  */
 export function groupLabel(names: string[], whole: boolean, systemName?: string | null): string {
-  if (whole) return sharedName(names, true) ?? systemName ?? jointName(names) ?? names[0];
+  if (whole) {
+    const shared = sharedName(names, true);
+    if (shared !== null) return shared;
+    if (!COMPONENT.test(names[0])) return names[0];
+    return systemName ?? jointName(names) ?? names[0];
+  }
   if (names.length === 1) return names[0];
   return sharedName(names, false) ?? jointName(names) ?? names[0];
 }

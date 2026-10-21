@@ -53,6 +53,11 @@ describe('groupLabel', () => {
     expect(groupLabel(['GJ 1245 Ab', 'V1581 Cygni'], true, 'GJ 1245')).toBe('GJ 1245');
     // a lone companion with a name of its own keeps it
     expect(groupLabel(['Proxima Centauri'], true, 'Alpha Centauri')).toBe('Proxima Centauri');
+    // a leader with a name of its own (not a component name) is what the system is called
+    expect(groupLabel(['Fomalhaut', 'TW Piscis Austrini', 'Fomalhaut C'], true, 'Alpha Piscis Austrini')).toBe(
+      'Fomalhaut',
+    );
+    expect(groupLabel(['VV Lyncis Aa', 'Ross 989', 'VV Lyncis Ab'], true, 'VV Lyncis')).toBe('VV Lyncis');
     // no system name: the leader's name
     expect(groupLabel(['GJ 1245 Ab', 'V1581 Cygni'], true, undefined)).toBe('GJ 1245 Ab');
   });
