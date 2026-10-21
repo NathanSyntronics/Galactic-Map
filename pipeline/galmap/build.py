@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import gc
 import logging
+import re
 import time
 from pathlib import Path
 
@@ -19,6 +20,7 @@ import pandas as pd
 from . import derive, merge, naming, systems
 from .download import CACHE_DIR, fetch
 from .flags import Desig, Flag, Rank
+from .names import GREEK, designation_key, letters_conflict, split_component
 from .octree import write_dataset
 from .photometry import MAMAJEK_URL, Photometry, load_mamajek
 from .sources import athyg, census20, gaia, gcns, hyg, iau, simbad, wikidata
@@ -74,36 +76,122 @@ def sun_row() -> pd.DataFrame:
     )
 
 
-def external_names(s: pd.DataFrame, iau_names: pd.DataFrame) -> dict[int, dict]:
-    ext: dict[int, dict] = {}
-    by_hip = dict(zip(iau_names["hip"].dropna().astype(int), iau_names.loc[iau_names["hip"].notna(), "name"]))
-    hip = s["hip"].to_numpy(dtype=object)
-    for i, h in enumerate(hip):
-        if pd.notna(h) and int(h) in by_hip:
-            ext.setdefault(i, {})["iau"] = by_hip[int(h)]
-    # IAU names of stars without HIP number: match the WGSN designation against HR / HD / GJ
-    no_hip = iau_names[iau_names["hip"].isna()]
-    hr = pd.Series(np.arange(len(s)), index=s["hr"].astype("Int64")).loc[lambda x: x.index.notna()]
-    hd = pd.Series(np.arange(len(s)), index=s["hd"].astype("Int64")).loc[lambda x: x.index.notna()]
-    gj_key = s["gj"].fillna(s.get("census_gj")).astype(object)
-    gj = pd.Series(np.arange(len(s)), index=gj_key.where(gj_key.notna(), None)).loc[lambda x: x.index.notna()]
-    found = 0
-    for name, d in zip(no_hip["name"], no_hip["designation"]):
-        d = str(d).strip()
-        idx = None
-        for prefix, table in (("HR ", hr), ("HD ", hd)):
-            if d.startswith(prefix) and d[len(prefix):].strip().isdigit():
-                k = int(d[len(prefix):])
-                if k in table.index:
-                    idx = table.loc[k]
-        if d.startswith("GJ ") and d in gj.index:
-            idx = gj.loc[d]
-        if idx is not None:
-            if isinstance(idx, pd.Series):
-                idx = idx.iloc[0]
-            ext.setdefault(int(idx), {})["iau"] = name
-            found += 1
-    log.info("IAU names attached: %d by HIP, %d by designation", sum(1 for v in ext.values() if "iau" in v) - found, found)
+def _designation_strings(s: pd.DataFrame, ext: dict[int, dict]):
+    """(row, designation) pairs of everything a star is called in our sources: SIMBAD identifiers,
+    census names, Gliese numbers, Wikidata titles and labels."""
+    cols = {c: s[c].to_numpy(dtype=object) for c in ("simbad_main_id", "census_name", "common_name", "hd_name", "hr_name", "census_gj", "gj") if c in s}
+    cat = s["catalog_names"].to_numpy(dtype=object) if "catalog_names" in s else None
+    for c, arr in cols.items():
+        for i in np.nonzero(pd.notna(arr))[0]:
+            v = arr[i]
+            if isinstance(v, str):
+                for part in v.split("|") if c == "common_name" else [v]:
+                    yield int(i), part
+    if cat is not None:
+        for i, v in enumerate(cat):
+            if isinstance(v, (list, tuple, np.ndarray)):
+                for x in v:
+                    if isinstance(x, str):
+                        yield i, x
+    for i, e in ext.items():
+        for x in e.get("simbad") or []:
+            yield i, x
+        for key in ("wiki_en", "label_en"):
+            if isinstance(e.get(key), str):
+                yield i, e[key]
+
+
+def _first_word(d: str) -> str | None:
+    """Cheap pre-filter key of a designation: its first word, Greek letters spelled out."""
+    m = re.match(r"^(?:V?\*+\s*)?([A-Za-z]+)", d.strip())
+    if not m:
+        return None
+    w = m.group(1).lower()
+    return GREEK[w][0].lower() if w in GREEK else w
+
+
+def external_names(s: pd.DataFrame, iau_names: pd.DataFrame, ext: dict[int, dict] | None = None) -> dict[int, dict]:
+    """Attach the IAU (WGSN) names: ext[row]["iau"].
+
+    By HIP number; otherwise by the WGSN designation, matched against HR / HD numbers and against
+    every designation of a star (SIMBAD identifiers, census names, Gliese numbers, Wikidata titles
+    and labels; normalised with names.designation_key, so 'WASP-17' finds 'WASP 17' and
+    'LHS 3844' finds the census star). Each IAU name goes to one star: among several candidates
+    (components or duplicate rows) the one whose component letter fits the designation, then the
+    system primary."""
+    ext = {} if ext is None else ext
+    n = len(s)
+    flags = s["flags"].to_numpy(np.int64) if "flags" in s else np.zeros(n, np.int64)
+
+    def index(col: str) -> dict[int, list[int]]:
+        out: dict[int, list[int]] = {}
+        if col in s:
+            for i, v in enumerate(s[col].to_numpy(dtype=object)):
+                if pd.notna(v):
+                    out.setdefault(int(v), []).append(i)
+        return out
+
+    by_hip, by_hr, by_hd = index("hip"), index("hr"), index("hd")
+    entries = []
+    for name, h, d in zip(iau_names["name"], iau_names["hip"], iau_names["designation"]):
+        d = str(d).strip() if isinstance(d, str) else ""
+        entries.append((name, int(h) if pd.notna(h) else None, d, designation_key(d) if d and d != "-" else None))
+    wanted: set[str] = set()
+    for *_, k in entries:
+        if k:
+            wanted.update((k, k + "a", k + "aa"))
+    first_words = {_first_word(d) for _, _, d, k in entries if k}
+    by_key: dict[str, list[int]] = {}
+    for i, x in _designation_strings(s, ext):
+        if _first_word(x) in first_words:
+            k = designation_key(x)
+            if k in wanted:
+                lst = by_key.setdefault(k, [])
+                if i not in lst:
+                    lst.append(i)
+
+    def pick(rows: list[int], d: str) -> int:
+        letter = split_component(d)[1]
+        row_letter = s["census_name"].to_numpy(dtype=object) if "census_name" in s else None
+
+        def score(i: int) -> tuple:
+            own = None
+            if row_letter is not None and isinstance(row_letter[i], str):
+                own = split_component(row_letter[i])[1]
+            return (
+                1 if letters_conflict(own, letter) else 0,
+                1 if "iau" in ext.get(i, {}) else 0,
+                0 if flags[i] & Flag.SYSTEM_PRIMARY else 1,
+                i,
+            )
+
+        return min(rows, key=score)
+
+    counts = {"HIP": 0, "HR/HD": 0, "designation": 0}
+    for name, h, d, k in entries:
+        rows, how = [], ""
+        if h is not None and h in by_hip:
+            rows, how = by_hip[h], "HIP"
+        else:
+            m = re.fullmatch(r"(HR|HD)\s*(\d+)", d)
+            if m and int(m.group(2)) in (by_hr if m.group(1) == "HR" else by_hd):
+                rows, how = (by_hr if m.group(1) == "HR" else by_hd)[int(m.group(2))], "HR/HD"
+            elif k:
+                for kk in (k, k + "a", k + "aa"):
+                    if by_key.get(kk):
+                        rows, how = by_key[kk], "designation"
+                        break
+        if not rows:
+            continue
+        i = pick(rows, d)
+        if "iau" in ext.get(i, {}):
+            continue
+        ext.setdefault(i, {})["iau"] = name
+        counts[how] += 1
+    log.info(
+        "IAU names attached: %d by HIP, %d by HR/HD, %d by designation (%d not found)",
+        counts["HIP"], counts["HR/HD"], counts["designation"], len(entries) - sum(counts.values()),
+    )
     return ext
 
 
@@ -167,15 +255,17 @@ def build(out: Path, refresh: bool = False, capacity: int = 4096, limit: int | N
     s = derive.physics(s, phot)
     s = systems.assign_systems(s)
     derive.place(s, systems.common_distances(s))
-    ext = external_names(s, iau.load(refresh))
+    ext: dict[int, dict] = {}
     for i, lst in sb_idents.items():
         ext.setdefault(i, {})["simbad"] = lst
     # Wikipedia article titles (via Wikidata) decide which of several names is the common one
     try:
-        for i, v in wikidata.attach(s, wikidata.load(refresh)).items():
+        for i, v in wikidata.attach(s, wikidata.load(refresh), sb_idents).items():
             ext.setdefault(i, {}).update({k: x for k, x in v.items() if x})
     except Exception as err:
         log.warning("Wikidata unavailable, continuing without it: %s", err)
+    # IAU names last: their designations are also matched against the SIMBAD and Wikidata names
+    ext = external_names(s, iau.load(refresh), ext)
     s = naming.assign_names(s, ext)
     sun = s["is_sun"].to_numpy()
     s.loc[sun, ["name_rank", "name_en", "name_de", "desig_cat", "desig_str"]] = [Rank.IAU, "Sun", "Sonne", Desig.STRING, "Sun"]

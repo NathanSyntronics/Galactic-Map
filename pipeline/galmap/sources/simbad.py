@@ -20,6 +20,7 @@ from scipy.spatial import cKDTree
 
 from ..coords import propagate, unit_vectors
 from ..download import CACHE_DIR, exact_int64, tap_sync
+from ..names import letters_conflict
 
 log = logging.getLogger(__name__)
 
@@ -54,13 +55,18 @@ BASIC_COUNT = f"SELECT COUNT(*) AS n FROM basic AS b WHERE {W10}"
 IDENT_COUNT = f"SELECT COUNT(*) AS n FROM ident AS i JOIN basic AS b ON b.oid = i.oidref WHERE {W10}"
 
 # Identifier prefixes that never yield a useful name (cross-match catalogues etc.). Double-star
-# designations ("** STF 2398") stay: some carry traditional names (Struve 2398, Kruger 60).
+# designations ("** STF 2398") stay: some carry traditional names (Struve 2398, Kruger 60), and so do
+# "HIDDEN NAME" identifiers ("HIDDEN NAME 17 Com B"). Cluster members ("Cl* Melotte 25 S 6",
+# "Cl Melotte 111 132") and other catalogues with a "*" acronym ("GR* 195", "EM* StHA 67", "SV* ZI 2047")
+# are not names either.
 NOISE = re.compile(
     r"^(TIC|Gaia DR[12]|Gaia EDR3|UCAC\d|UCAC|AG[+-]|PPM|SAO|GSC|USNO|URAT|TYC|HIC|IRAS|AKARI|ASCC|KIC|EPIC|"
     r"ALLWISE|AllWISE|WISEA|GALEX|SDSS|PS1|SKY#|N30|FK5|GCRV|uvby98|YZ|CSI|PLX|IDS|CCDM|WDS|Renson|JP11|"
     r"UBV|ROT|SPOCS|TD1|Ci|BPS|GEN#|LEP|NSV|RAVE|LAMOST|Pan-STARRS|PSO J\d|2MASX|XMMU|1RXS|RX J|1ES|EUVE|"
-    r"\[|CNS|BIBCODE|Zkh|MCC|StKM|TOI|KOI|K2-|Kepler-)"
+    r"\[|CNS|BIBCODE|Zkh|MCC|StKM|TOI|KOI|K2-|Kepler-|Cl |(?!V\* )[A-Za-z][A-Za-z0-9]{0,3}\?*\* )"
 )
+# catalogue designations used to check a position match against the star's own numbers
+_DESIG = re.compile(r"^(HD|HIP|GJ|Gl|Gaia DR3)\s*(\d+(?:\.\d+)?)\s*([A-H][a-c]?)?$")
 
 # object types that are not stars (planets, clusters, associations, quasars, errors)
 NON_STELLAR = {"Pl", "Pl?", "MGr", "As*", "OpC", "St*", "Cl*", "SFR", "GlC", "QSO", "err", "G", "MoC", "HII"}
@@ -102,9 +108,11 @@ def load(refresh: bool = False) -> tuple[pd.DataFrame, pd.DataFrame]:
 
 
 def attach(stars: pd.DataFrame, basic: pd.DataFrame, ident: pd.DataFrame) -> tuple[dict[int, list[str]], pd.DataFrame]:
-    """Map SIMBAD objects onto star rows via Gaia DR3 id or HIP number.
+    """Map SIMBAD objects onto star rows via Gaia DR3 id or HIP number, and the remaining nearby
+    stars by position.
 
-    Returns ({row index: [identifier, ...]}, per-row frame with main_id, otype, sp_type).
+    Returns ({row index: [identifier, ...]}, per-row frame with main_id, otype, sp_type, wds and
+    simbad_match: "gaia", "hip" or "pos").
     """
     gaia = ident[ident["id"].str.startswith("Gaia DR3 ")]
     g_oid = pd.Series(gaia["oidref"].to_numpy(), index=exact_int64(gaia["id"].str.slice(9)))
@@ -120,9 +128,25 @@ def attach(stars: pd.DataFrame, basic: pd.DataFrame, ident: pd.DataFrame) -> tup
     sh = stars["hip"].astype("Int64")
     m2 = (row_oid < 0) & sh.isin(h_oid.index).to_numpy()
     row_oid[m2] = h_oid.loc[sh[m2]].to_numpy()
+    # Gaia id and HIP number name different SIMBAD objects (often a component and its system):
+    # keep the Gaia match unless it is another component than the 20 pc census says the star is
+    # (census "zeta Her A" with the Gaia source SIMBAD lists as "* zet Her B")
+    both = np.nonzero(m & sh.isin(h_oid.index).to_numpy())[0]
+    if len(both) and "census_name" in stars:
+        h_both = h_oid.loc[sh.iloc[both]].to_numpy()
+        differ = h_both != row_oid[both]
+        census_letters = _census_letter_check(stars, ident, basic)
+        switched = 0
+        for i, o_h in zip(both[differ], h_both[differ]):
+            if not census_letters(int(i), int(row_oid[i])) and census_letters(int(i), int(o_h)):
+                row_oid[i] = o_h
+                m[i] = False
+                m2[i] = True
+                switched += 1
+        log.info("SIMBAD: %d stars matched by HIP instead of a Gaia id that SIMBAD gives another component", switched)
     # Remaining nearby stars (brown dwarfs and others without Gaia DR3 / HIP ids) by position:
     # SIMBAD coordinates are ICRS at epoch J2000; our rows carry their own epoch and proper motion.
-    pos_matched = 0
+    pos_matched = rejected = 0
     plx = stars["plx"].to_numpy(float)
     todo = np.nonzero((row_oid < 0) & (plx > MIN_PLX * 0.9))[0]
     taken = set(int(v) for v in row_oid[row_oid >= 0])
@@ -145,6 +169,7 @@ def attach(stars: pd.DataFrame, basic: pd.DataFrame, ident: pd.DataFrame) -> tup
         dist, k = tree.query(unit_vectors(ra, dec), k=4, distance_upper_bound=float(radius.max()))
         cplx = pd.to_numeric(cand["plx_value"], errors="coerce").to_numpy()
         coid = cand["oid"].to_numpy()
+        consistent = _consistency_check(stars, ident, basic)
         for j, i in enumerate(todo):
             for d_, k_ in zip(dist[j], k[j]):
                 if not np.isfinite(d_) or d_ > radius[j]:
@@ -158,11 +183,18 @@ def attach(stars: pd.DataFrame, basic: pd.DataFrame, ident: pd.DataFrame) -> tup
                 o = int(coid[k_])
                 if o in taken:
                     continue
+                # the neighbour of a companion is often the other component: the object must not
+                # carry other catalogue numbers or another component letter than the star itself
+                if not consistent(int(i), o):
+                    rejected += 1
+                    continue
                 row_oid[i] = o
                 taken.add(o)
                 pos_matched += 1
                 break
-    log.info("SIMBAD: %d further stars matched by position", pos_matched)
+    log.info("SIMBAD: %d further stars matched by position (%d inconsistent neighbours rejected)", pos_matched, rejected)
+    pos = np.zeros(len(stars), bool)
+    pos[[i for i in todo if row_oid[i] >= 0]] = True
 
     # one SIMBAD object per star row (if two rows claim the same object, the first wins)
     seen: set[int] = set()
@@ -187,6 +219,10 @@ def attach(stars: pd.DataFrame, basic: pd.DataFrame, ident: pd.DataFrame) -> tup
     info["simbad_otype"] = None
     info["simbad_sp_type"] = None
     info["wds"] = None
+    info["simbad_match"] = None
+    info.loc[ok & m, "simbad_match"] = "gaia"
+    info.loc[ok & m2, "simbad_match"] = "hip"
+    info.loc[ok & pos, "simbad_match"] = "pos"
     wds = ident[ident["id"].str.match(r"^WDS J\d{5}[+-]\d{4}")]
     wds_of = pd.Series(wds["id"].str.extract(r"^WDS (J\d{5}[+-]\d{4})")[0].to_numpy(), index=wds["oidref"].to_numpy())
     wds_of = wds_of[~wds_of.index.duplicated()]
@@ -196,3 +232,88 @@ def attach(stars: pd.DataFrame, basic: pd.DataFrame, ident: pd.DataFrame) -> tup
     info.loc[ok, "simbad_otype"] = sub["otype"].to_numpy()
     info.loc[ok, "simbad_sp_type"] = sub["sp_type"].replace("", None).to_numpy()
     return idents, info
+
+
+def _census_letter_check(stars: pd.DataFrame, ident: pd.DataFrame, basic: pd.DataFrame):
+    """f(row, oid) -> False if the SIMBAD object is another component than the star's census
+    designation says ("* zet Her B" for the census star "zeta Her A")."""
+    from ..naming import contradicts, lettered_designations  # naming does not import the sources
+
+    main = dict(zip(basic["oid"].to_numpy(), basic["main_id"].to_numpy()))
+    lettered = ident[ident["id"].str.contains(r"(?:\s|\d)[A-H][a-c]?$", regex=True)]
+    obj_lettered = lettered.groupby("oidref")["id"].apply(list).to_dict()
+    cols = [c for c in ("census_name", "census_gj", "catalog_names") if c in stars]
+    values = {c: stars[c].to_numpy(dtype=object) for c in cols}
+
+    def check(i: int, o: int) -> bool:
+        own = lettered_designations({c: values[c][i] for c in cols}, census_only=True)
+        if not own:
+            return True
+        mid = main.get(o)
+        return not any(contradicts(x, own) for x in ([mid] if isinstance(mid, str) else []) + obj_lettered.get(o, []))
+
+    return check
+
+
+def _consistency_check(stars: pd.DataFrame, ident: pd.DataFrame, basic: pd.DataFrame):
+    """f(row, oid) -> False if the SIMBAD object contradicts the star's own HD / HIP / Gaia DR3 /
+    Gliese numbers or its component letter (Algieba B must not get "* gam01 Leo" = HD 89484,
+    Wolf 1130 C not "Wolf 1130 B")."""
+    from ..naming import component_letter, contradicts, lettered_designations  # naming does not import the sources
+
+    d = ident["id"].str.extract(_DESIG)
+    ok = d[0].notna().to_numpy()
+    obj: dict[int, list[tuple[str, str, str | None]]] = {}
+    for o, cat, num, let in zip(ident["oidref"].to_numpy()[ok], d[0][ok], d[1][ok], d[2][ok]):
+        cat = "GJ" if cat == "Gl" else cat
+        obj.setdefault(int(o), []).append((cat, re.sub(r"\.0$", "", num), let if isinstance(let, str) else None))
+    # identifiers that end in a component letter ("Wolf 1130 B", "* alf Com A", "HD 73752A")
+    lettered = ident[ident["id"].str.contains(r"(?:\s|\d)[A-H][a-c]?$", regex=True)]
+    obj_lettered = lettered.groupby("oidref")["id"].apply(list).to_dict()
+    main = dict(zip(basic["oid"].to_numpy(), basic["main_id"].to_numpy()))
+    cols = [c for c in ("census_name", "system_size", "system_row", "census_gj", "gj", "hyg_base", "hyg_comp", "catalog_names") if c in stars]
+    values = {c: stars[c].to_numpy(dtype=object) for c in cols}
+
+    def num(v) -> str | None:
+        return str(int(v)) if pd.notna(v) else None
+
+    hd = stars["hd"].to_numpy(dtype=object) if "hd" in stars else np.full(len(stars), None)
+    hip = stars["hip"].to_numpy(dtype=object)
+    gaia = stars["gaia"].to_numpy(dtype=object)
+
+    def check(i: int, o: int) -> bool:
+        row = {c: values[c][i] for c in cols}
+        letter = component_letter(row)
+        own = lettered_designations(row)
+        mid = main.get(o)
+        for x in ([mid] if isinstance(mid, str) else []) + obj_lettered.get(o, []):
+            if contradicts(x, own):
+                return False
+        gj_num = gj_let = None
+        for key in ("census_gj", "gj"):
+            g = row.get(key)
+            if isinstance(g, str):
+                mg = re.fullmatch(r"\s*(?:GJ|Gl|Gliese)\s*(\d+(?:\.\d+)?)\s*([A-H][a-c]?)?\s*", g)
+                if mg:
+                    gj_num, gj_let = re.sub(r"\.0$", "", mg.group(1)), mg.group(2)
+                    break
+        lst = obj.get(o, [])
+        for cat, own, own_let in (
+            ("HD", num(hd[i]), letter),
+            ("HIP", num(hip[i]), None),
+            ("Gaia DR3", num(gaia[i]), None),
+            ("GJ", gj_num, gj_let or letter),
+        ):
+            if own is None:
+                continue
+            same = [(n, lt) for c, n, lt in lst if c == cat]
+            if not same:
+                continue
+            hits = [lt for n, lt in same if n == own]
+            if not hits:
+                return False
+            if own_let and all(lt and letters_conflict(lt, own_let) for lt in hits):
+                return False
+        return True
+
+    return check
