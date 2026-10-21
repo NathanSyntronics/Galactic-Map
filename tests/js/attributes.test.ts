@@ -65,6 +65,8 @@ describe('CSV', () => {
       ['HD 2', 'B', '2'],
     ]);
     expect(parseCsv('a\tb\n1\t2').rows).toEqual([['1', '2']]);
+    // an unquoted tag with a comma in a comma-separated file
+    expect(parseCsv('name,Faction [text, system],Economy\nVega,League,2').header).toEqual(['name', 'Faction [text, system]', 'Economy']);
     expect(parseCsv('a,b\n"x\ny",2').rows).toEqual([['x\ny', '2']]);
   });
 

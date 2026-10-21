@@ -69,8 +69,29 @@ export function parseCsv(text: string): CsvTable {
     rows.push(row);
   }
   const nonEmpty = rows.filter((r) => r.some((f) => f.trim() !== ''));
-  const header = (nonEmpty.shift() ?? []).map((h) => h.trim());
+  const header = joinSplitTags(nonEmpty.shift() ?? [], delimiter).map((h) => h.trim());
   return { header, rows: nonEmpty, delimiter };
+}
+
+/**
+ * An unquoted header "Faction [text, system]" in a comma-separated file arrives as two cells;
+ * cells from an opening "[" to the closing "]" are joined again.
+ */
+function joinSplitTags(cells: string[], delimiter: string): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < cells.length; i++) {
+    let c = cells[i];
+    if (c.includes('[') && !c.includes(']')) {
+      let j = i + 1;
+      while (j < cells.length && !cells[j].includes(']') && !cells[j].includes('[')) j++;
+      if (j < cells.length && cells[j].includes(']') && !cells[j].includes('[')) {
+        c = cells.slice(i, j + 1).join(delimiter);
+        i = j;
+      }
+    }
+    out.push(c);
+  }
+  return out;
 }
 
 /** The delimiter that splits the first line into the most fields (outside quotes). */

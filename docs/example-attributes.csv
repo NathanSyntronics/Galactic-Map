@@ -1,4 +1,4 @@
-name,Faction [text, system],Economy [number],Population [number],Flag colour [color],Note [text]
+name,"Faction [text, system]",Economy [number],Population [number],Flag colour [color],Note [text]
 Sun,Terran Union,10,9.5,#4e9bff,Capital
 Alpha Centauri A,Terran Union,7.5,4.2,#4e9bff,
 Barnard's Star,Free Worlds,2,0.3,#ff9f43,Mining outpost
