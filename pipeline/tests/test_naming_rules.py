@@ -256,6 +256,8 @@ def test_census_strings_and_simbad_alias_order():
     assert census_display("YY Gem A (alpha Gem C)") == "YY Geminorum A"
     assert census_display("2MASS J07003664+3157266 [C]") == "2MASS J07003664+3157266 C"
     assert census_display("** WJG 5C") == "WJG 5C"
+    assert census_display("DENIS J063001.4-184014 (C)") == "DENIS J063001.4-184014 C"  # a component, not a note
+    assert census_display("Mothallah (A?)") == "Mothallah"
     cands = candidates({"census_name": "YY Gem A (alpha Gem C)", "flags": 0}, {"simbad": ["NAME Castor C"]})
     assert choose(cands)[0].en == "Castor C"
     assert all(c.rank != Rank.COMMON for c in cands if c.src == "census")
@@ -460,3 +462,17 @@ def test_census_objects_keep_a_name():
     assert names[3] == "2MASS J03111547+0106307" and "[BHR2005] 832-2" in out["alt"].iloc[3]
     assert not isinstance(names[4], str) and not isinstance(names[5], str)
     assert out["system_name_en"].iloc[4] == "[MFL2000] J210104.18+030705.1"
+
+
+def test_census_designations_without_notes():
+    from galmap.naming import assign_names, primary_designation
+
+    assert primary_designation({"census_name": "YY Gem B (alpha Gem D)"})[3] == "YY Gem B"
+    assert primary_designation({"census_name": "2MASS J07003664+3157266 [C]"})[3] == "2MASS J07003664+3157266 C"
+    s = _frame([
+        {"census_name": "DENIS J063001.4-184014 A", "system_size": 3, "system_row": 1, "flags": P_FLAGS, "system_id": 1},
+        {"census_name": "DENIS J063001.4-184014 B", "system_size": 3, "system_row": 1, "flags": C_FLAGS, "system_id": 1},
+        {"census_name": "DENIS J063001.4-184014 (C)", "system_size": 3, "system_row": 1, "flags": C_FLAGS, "system_id": 1},
+    ])
+    names = list(assign_names(s, {})["name_en"])
+    assert names == ["DENIS J063001.4-184014 A", "DENIS J063001.4-184014 B", "DENIS J063001.4-184014 C"]

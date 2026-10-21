@@ -209,10 +209,18 @@ def _families(row, ext: dict | None = None) -> dict[str, object]:
 
 def _census_core(name) -> str | None:
     """A census designation without nickname and notes: 'YY Gem A (alpha Gem C)' -> 'YY Gem A',
-    'G 96-29 A "Capella H"' -> 'G 96-29 A', '2MASS J0700+3157 [C]' -> '2MASS J0700+3157 C'."""
+    'G 96-29 A "Capella H"' -> 'G 96-29 A', '2MASS J0700+3157 [C]' -> '2MASS J0700+3157 C',
+    'DENIS J063001.4-184014 (C)' -> 'DENIS J063001.4-184014 C'."""
     if not isinstance(name, str):
         return None
-    return _clean_text(re.sub(r'\s*"[^"]*"', "", name))
+    return _clean_text(_paren_letter(re.sub(r'\s*"[^"]*"', "", name)))
+
+
+def _paren_letter(text: str) -> str:
+    """A census designation's component letter in brackets or parentheses as a plain letter:
+    'DENIS J063001.4-184014 (C)' -> 'DENIS J063001.4-184014 C' (not for common names, where
+    'Castor (Aa)' says which component the name belongs to)."""
+    return re.sub(rf"\s*[\[(]({COMPONENT})[\])]$", r" \1", text.strip())
 
 
 def _int_or_none(v):
@@ -236,7 +244,7 @@ def lettered_designations(row, census_only: bool = False) -> dict[str, str]:
         names.extend(x for x in cat if isinstance(x, str))
     out: dict[str, str] = {}
     for nm in names:
-        t = _clean_text(re.sub(r'\s*"[^"]*"', "", nm))
+        t = _clean_text(_paren_letter(re.sub(r'\s*"[^"]*"', "", nm)))
         if not t:
             continue
         base, letter = split_component_loose(gliese_display(t) if re.match(r"(GJ|Gl)\s*\d", t) else t)
@@ -312,7 +320,7 @@ def _clean_text(text: str) -> str | None:
 def census_display(cname: str) -> str:
     """The census designation of an object without a name, readable: 'YY Gem A (alpha Gem C)' ->
     'YY Geminorum A', 'DENIS-P J0205.4-1159 [C]' -> 'DENIS-P J0205.4-1159 C', '** WJG 5C' -> 'WJG 5C'."""
-    t = re.sub(r'\s*"[^"]*"', "", cname).strip()
+    t = _paren_letter(re.sub(r'\s*"[^"]*"', "", cname))
     t = _clean_text(t) or t
     t = re.sub(r"^\*\*\s+", "", t)
     return prettify_simbad(t) or expand_abbreviated(t) or t
@@ -507,7 +515,7 @@ def candidates(row, ext: dict) -> list[Cand]:
         add_text(nm, P_CENSUS, "census")
     cname = row.get("census_name")
     if isinstance(cname, str):
-        add_text(cname, P_CENSUS, "census")
+        add_text(_paren_letter(cname), P_CENSUS, "census")
     # the census Gliese number (with its component letter) before HYG's; an uncertain one
     # ("GJ 3406 (GJ 3407?)") is not used
     cgj = census_gj(row.get("census_gj"))
@@ -658,6 +666,8 @@ def primary_designation(row) -> tuple[int, int, int, str | None]:
     for key in ("census_name", "name_2mass"):
         v = row.get(key)
         if isinstance(v, str) and v:
+            if key == "census_name":
+                v = _census_core(v) or v  # without notes: "YY Gem B (alpha Gem D)" -> "YY Gem B"
             return Desig.STRING, 0, 0, (f"2MASS J{v}" if key == "name_2mass" and not v.startswith("2MASS") else v)
     return Desig.STRING, 0, 0, None
 
