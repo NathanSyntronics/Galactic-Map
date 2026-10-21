@@ -115,10 +115,18 @@ export function groupLabel(names: string[], whole: boolean, systemName?: string 
   return sharedName(names, false) ?? jointName(names) ?? names[0];
 }
 
-/** Label priority bonus of a star that is prominent in the sky as seen from Earth. */
+const clamp = (x: number, lo: number, hi: number) => Math.min(Math.max(x, lo), hi);
+
+/**
+ * Label priority bonus of a star that is prominent in the sky as seen from Earth: it grows for
+ * stars brighter than apparent magnitude 4.5, and more steeply for the ~20 brightest stars of the
+ * night sky (brighter than magnitude 1.5), so that around the Sun Sirius, Alpha Centauri and
+ * Procyon win against stars that are more luminous but much less known, such as Pollux. At most 4,
+ * as much as the bonus of an IAU name.
+ */
 export function skyBonus(appMag: number | undefined): number {
   if (appMag === undefined || !Number.isFinite(appMag)) return 0;
-  return Math.min(Math.max(0.5 * (4.5 - appMag), 0), 2.5);
+  return clamp(0.5 * (4.5 - appMag), 0, 2.5) + clamp(1.5 * (1.5 - appMag), 0, 1.5);
 }
 
 /** Label priority: luminosity, distance from the camera, name rank, brightness in Earth's sky. */
@@ -178,7 +186,8 @@ const overlapsAny = (r: Rect, placed: Rect[]) => {
 
 /**
  * Candidate positions of a star label, in order of preference (text start x, text middle y, box):
- * right of the star, left, above, below, then the four diagonals.
+ * right of the star, left, above, below, the four diagonals, then the four diagonals a little
+ * further out (for crowded regions such as the Sun's neighbourhood seen from afar).
  */
 export function anchors(x: number, y: number, tw: number): { tx: number; ty: number; r: Rect }[] {
   const at = (tx: number, ty: number) => ({ tx, ty, r: { x: tx - 1, y: ty - 8, w: tw + 4, h: 15 } });
@@ -191,18 +200,30 @@ export function anchors(x: number, y: number, tw: number): { tx: number; ty: num
     at(x + 4, y + 11),
     at(x - 7 - tw, y - 11),
     at(x - 7 - tw, y + 11),
+    at(x + 6, y - 17),
+    at(x + 6, y + 17),
+    at(x - 9 - tw, y - 17),
+    at(x - 9 - tw, y + 17),
   ];
 }
 
+const inside = (r: Rect, b: { w: number; h: number }) => r.x >= 0 && r.y >= 0 && r.x + r.w <= b.w && r.y + r.h <= b.h;
+
 /**
  * Places labels in the given (priority) order, each at the first of its anchors that does not
- * overlap a box in `placed`; labels without a free anchor are dropped (the selected star's label
- * is always shown). At most `maxLabels` labels, a third of them catalogue designations.
- * Adds the boxes of the placed labels to `placed`.
+ * overlap a box in `placed` and lies within `bounds` (the viewport, if given); labels without a
+ * free anchor are dropped (the selected star's label is always shown). At most `maxLabels`
+ * labels, a third of them catalogue designations. Adds the boxes of the placed labels to `placed`.
  */
 export function placeLabels(
   items: ScreenLabel[],
-  opts: { maxLabels: number; selectedKey: string | null; measure: (font: string, text: string) => number; placed: Rect[] },
+  opts: {
+    maxLabels: number;
+    selectedKey: string | null;
+    measure: (font: string, text: string) => number;
+    placed: Rect[];
+    bounds?: { w: number; h: number };
+  },
 ): PlacedLabel[] {
   const out: PlacedLabel[] = [];
   let count = 0;
@@ -218,7 +239,8 @@ export function placeLabels(
     const font = selected ? FONT_SELECTED : named ? FONT_NAME : FONT_DESIGNATION;
     const tw = opts.measure(font, it.text);
     const options = anchors(it.x, it.y, tw);
-    let a = options.find((o) => !overlapsAny(o.r, opts.placed));
+    const bounds = opts.bounds;
+    let a = options.find((o) => (!bounds || inside(o.r, bounds)) && !overlapsAny(o.r, opts.placed));
     if (!a) {
       if (!selected) continue;
       a = options[0];
@@ -315,7 +337,13 @@ export class LabelLayer {
       }
       scored.sort((a, b) => b.score - a.score);
       const visible = mergeSystems(scored, this.selectedKey);
-      stars = placeLabels(visible, { maxLabels: opts.maxLabels, selectedKey: this.selectedKey, measure: this.measure, placed });
+      stars = placeLabels(visible, {
+        maxLabels: opts.maxLabels,
+        selectedKey: this.selectedKey,
+        measure: this.measure,
+        placed,
+        bounds: { w, h },
+      });
     }
 
     if (opts.grid) {

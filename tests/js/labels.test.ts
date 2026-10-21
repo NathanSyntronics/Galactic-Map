@@ -155,10 +155,18 @@ describe('label placement', () => {
     expect(out.map((l) => l.item.text)).toEqual(['Altair']);
   });
 
-  it('has eight distinct anchors, the first one right of the star', () => {
+  it('keeps labels inside the viewport', () => {
+    // a star at the right edge: its label goes to the left
+    const out = placeLabels([item('Procyon', 395, 100)], { maxLabels: 10, selectedKey: null, measure, placed: [], bounds: { w: 400, h: 300 } });
+    expect(out).toHaveLength(1);
+    expect(out[0].rect.x + out[0].rect.w).toBeLessThanOrEqual(400);
+    expect(out[0].tx).toBeLessThan(395);
+  });
+
+  it('has twelve distinct anchors, the first one right of the star', () => {
     const a = anchors(100, 100, 30);
-    expect(a).toHaveLength(8);
-    expect(new Set(a.map((o) => `${o.tx},${o.ty}`)).size).toBe(8);
+    expect(a).toHaveLength(12);
+    expect(new Set(a.map((o) => `${o.tx},${o.ty}`)).size).toBe(12);
     expect(a[0].r.x).toBeGreaterThan(100);
     expect(a[1].r.x + a[1].r.w).toBeLessThan(100);
   });
@@ -168,14 +176,18 @@ describe('label priority', () => {
   it('boosts stars that are bright in Earth\'s sky, moderately', () => {
     expect(skyBonus(undefined)).toBe(0);
     expect(skyBonus(10)).toBe(0);
-    expect(skyBonus(-1.46)).toBe(2.5); // Sirius
+    expect(skyBonus(-1.46)).toBe(4); // Sirius
     expect(skyBonus(0.34)).toBeGreaterThan(skyBonus(1.14)); // Procyon over Pollux
-    expect(skyBonus(-30)).toBe(2.5);
+    expect(skyBonus(-30)).toBe(4);
+    expect(skyBonus(4.5)).toBe(0);
   });
 
-  it('ranks Sirius above a fainter, equally distant named star', () => {
-    const sirius: LabelCandidate = { key: 's', pos: new Vector3(), text: 'Sirius', rank: 0, logL: 1.4, appMag: -1.46 };
-    const pollux: LabelCandidate = { key: 'p', pos: new Vector3(), text: 'Pollux', rank: 0, logL: 1.6, appMag: 1.14 };
+  it('ranks Sirius and Procyon above Pollux, which is more luminous but fainter in our sky', () => {
+    // values of the real data set
+    const sirius: LabelCandidate = { key: 's', pos: new Vector3(), text: 'Sirius', rank: 0, logL: 1.26, appMag: -1.08 };
+    const procyon: LabelCandidate = { key: 'p', pos: new Vector3(), text: 'Procyon', rank: 0, logL: 0.81, appMag: 0.46 };
+    const pollux: LabelCandidate = { key: 'x', pos: new Vector3(), text: 'Pollux', rank: 0, logL: 1.57, appMag: 1.23 };
     expect(labelScore(sirius, 110)).toBeGreaterThan(labelScore(pollux, 110));
+    expect(labelScore(procyon, 110)).toBeGreaterThan(labelScore(pollux, 110));
   });
 });
