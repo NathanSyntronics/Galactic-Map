@@ -102,7 +102,7 @@ describe('PackFetcher', () => {
   it('rejects a truncated pack and fetches it again next time', async () => {
     const short = { 'd/p0': pack(50, 1) };
     let n = 0;
-    const fetchFn = async (url: string) => {
+    const fetchFn = async () => {
       n++;
       return new Response(n === 1 ? short['d/p0'] : files['d/p0'], { status: 200 });
     };
