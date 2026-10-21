@@ -392,7 +392,10 @@ def merge_census(stars: pd.DataFrame, census: pd.DataFrame) -> pd.DataFrame:
         seen_pos.add(key)
     if need.any():
         sra, sdec = _positions_at(s["ra"], s["dec"], np.nan_to_num(s["pmra"].to_numpy(float)), np.nan_to_num(s["pmdec"].to_numpy(float)), s["epoch"])
-        near = s["plx"].to_numpy() > 30  # only stars within ~33 pc can be census objects
+        # only stars within ~33 pc can be census objects; rows without a usable parallax (e.g. a
+        # wrong Gaia link) may still carry the identifiers of a census object
+        plx_s = s["plx"].to_numpy(float)
+        near = (plx_s > 30) | ~np.isfinite(plx_s)
         idx_near = np.nonzero(near)[0]
         tree = cKDTree(unit_vectors(sra[idx_near], sdec[idx_near]))
         ci = np.nonzero(need)[0]
