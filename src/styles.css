@@ -986,26 +986,30 @@ label.check input {
   pointer-events: auto;
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .route-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.route-head h3 {
-  margin: 0;
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-dim);
+  gap: 6px;
 }
 
 .route-ends {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 6px;
-  margin: 4px 0 2px;
   font-weight: 600;
 }
 
@@ -1026,10 +1030,6 @@ label.check input {
 .route-arrow {
   flex: none;
   color: var(--text-dim);
-}
-
-.route-swap {
-  margin-left: auto;
 }
 
 .route-status {

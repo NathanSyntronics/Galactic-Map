@@ -101,6 +101,8 @@ export interface RouteResult {
   /** When not found: straight distance from the last waypoint to the destination. */
   short: number;
   mode: RouteMode;
+  /** Jump range of the network. */
+  range: number;
   stats: RouteStats;
 }
 
@@ -417,7 +419,7 @@ export class RoutePlanner<N extends CorridorNode> {
     for (const p of [...this.cache.keys()]) if (!keep.has(p)) this.cache.delete(p);
 
     const straight = distance(from.pos, to.pos);
-    const result = (t: RouteTry<CorridorNet>): RouteResult => routeResult(t, mode, straight, stats);
+    const result = (t: RouteTry<CorridorNet>): RouteResult => routeResult(t, mode, opt.range, straight, stats);
     switch (plan.status) {
       case 'found':
         return this.finish({ kind: 'found', route: result(plan.route) });
@@ -534,7 +536,7 @@ export class RoutePlanner<N extends CorridorNode> {
 }
 
 /** The waypoints and numbers of a search. */
-function routeResult(t: RouteTry<CorridorNet>, mode: RouteMode, straight: number, stats: RouteStats): RouteResult {
+function routeResult(t: RouteTry<CorridorNet>, mode: RouteMode, range: number, straight: number, stats: RouteStats): RouteResult {
   const { graph, path } = t;
   const { places } = graph;
   const waypoints = path.places.map((p, k): Waypoint => ({
@@ -552,6 +554,7 @@ function routeResult(t: RouteTry<CorridorNet>, mode: RouteMode, straight: number
     width: t.width,
     short: path.found ? 0 : path.closestDistance,
     mode,
+    range,
     stats: { ...stats, tried: [...stats.tried] },
   };
 }

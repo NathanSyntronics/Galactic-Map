@@ -592,7 +592,6 @@ export class App {
     // the route: the shown stars and the network settings (data layers hide stars only with 'hide')
     if (has(...VISIBILITY_KEYS)) this.planner.styleChanged();
     if (has(...ROUTE_KEYS) || (s.missingStyle === 'hide' && has('colorBy', 'sizeBy'))) this.planner.invalidate(ROUTE_DELAY_MS);
-    if (has('jumpRange')) this.routeChanged();
     if (has('jumpColor')) this.jumpLines.setMode(s.jumpColor);
     if (has('jumps') && !s.jumps) {
       this.jumpLines.clear();
@@ -1180,16 +1179,32 @@ export class App {
     }
     // start and destination labels
     this.candidatesDirty = true;
-    const s = this.store.get();
-    this.routeBox.update({ from: p.from, to: p.to, mode: p.mode, status: p.status, route: p.route, range: s.jumpRange }, this.routeNames);
+    this.routeBox.update({ from: p.from, to: p.to, mode: p.mode, status: p.status, route: p.route }, this.routeNames);
   }
 
-  /** Centres the view on the route and zooms out until it fits (the camera only). */
+  /**
+   * Centres the view on the route and zooms out until it fits (the camera only): into the part of
+   * the screen below the top bar and, on phones, above the route box.
+   */
   private showWholeRoute(): void {
     const ext = this.routeLine.extent;
     if (!ext) return;
-    const d = fitDistance(ext.radius, this.camera.fov, this.camera.aspect);
-    this.nav.flyTo(ext.centre, MathUtils.clamp(d, 3, 150_000));
+    const view = this.renderer.domElement.getBoundingClientRect();
+    const h = view.height || 1;
+    let top = 0;
+    let bottom = h;
+    const bar = this.container.querySelector('.topbar')?.getBoundingClientRect();
+    if (bar) top = MathUtils.clamp(bar.bottom - view.top, 0, h / 3);
+    const stack = this.container.querySelector('.bottom-left')?.getBoundingClientRect();
+    if (stack && stack.height > 0 && stack.width > view.width / 2) bottom = MathUtils.clamp(stack.top - view.top, h / 2, h);
+    const free = bottom - top;
+    const half = MathUtils.degToRad(this.camera.fov / 2);
+    const freeHalf = Math.atan((Math.tan(half) * free) / h);
+    const d = MathUtils.clamp(fitDistance(ext.radius, MathUtils.radToDeg(2 * freeHalf), view.width / free), 3, 150_000);
+    // the route's centre in the middle of the free part: the view centre moves along the screen's up direction
+    const up = new Vector3(0, 1, 0).applyQuaternion(this.camera.quaternion);
+    const shift = ((h / 2 - (top + bottom) / 2) / (h / 2)) * d * Math.tan(half);
+    this.nav.flyTo(ext.centre.clone().addScaledVector(up, -shift), d);
   }
 
   /** A waypoint picked in the route box: select it and centre the view on it. */

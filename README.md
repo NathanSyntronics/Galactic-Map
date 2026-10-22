@@ -41,6 +41,8 @@ An interactive 3-D map of the Sun's stellar neighbourhood, built from real star 
   catalogue data such as the number of known exoplanets or the spectral class.
 * **A jump network.** Stars up to a jump range apart (9 ly by default) are linked; bright stars
   get more links than faint ones. Every rule is adjustable.
+* **Route planning** through the jump network, also between distant stars: from the Sun to
+  Betelgeuse it takes 114 jumps.
 * **English and German**, switchable in the settings.
 
 ## Using the map
@@ -174,6 +176,39 @@ specified in [`docs/JUMP_NETWORK.md`](docs/JUMP_NETWORK.md):
 Settings (section *Jump network*): jump range (2–25 ly), number of links by luminosity or by an
 attribute, links of faint, Sun-like and bright stars (0–20), prefer big stars (0–2), connect
 everything in range, line colour and opacity.
+
+### Route planning
+
+A route leads from one star to another through the jump network with the current settings. It is
+specified in [`docs/ROUTES.md`](docs/ROUTES.md):
+* **Start and destination.** *Route from here* and *Route to here* on a star's info card set them;
+  the route box (bottom left, above the legend; full width on phones) shows them, the status and
+  the result. Start, destination and mode are kept in the browser and the route is computed again
+  after a reload.
+* **Best route.** *Fewest jumps* (default; among those the shortest distance) or *shortest
+  distance* (among those the fewest jumps); ties are broken by the stars' stable keys, so the same
+  stars and settings always give the same route, and swapping start and destination gives it
+  reversed.
+* **Long routes.** The network is computed along a corridor around the straight line, from the
+  shown stars within `w + 3 · range` of it, and the path is searched among the places within `w`.
+  `w` starts at twice the jump range and is doubled while there is no path, up to 128 ly. The
+  corridor's star data is loaded in addition to the view's, with a progress bar. If even the
+  widest corridor has no path, the box says that the destination cannot be reached with this jump
+  range and names the place the route got closest to.
+* **Results.** Sun → Vega: 7 jumps, 53 ly (25 ly in a straight line). Sun → Betelgeuse: 114 jumps,
+  772 ly (498 ly straight), found in a corridor of 36 ly from 14.5 MB of star data (shortest
+  distance: 116 jumps, 766 ly). From a local server that takes about half a second; over the
+  internet, loading the data takes most of the time.
+* **Display.** A thick magenta line with ring markers at the waypoints, drawn whole, beyond the
+  visible sphere. Start and destination are always labelled; waypoints in the visible sphere get
+  labels by the usual rules, with a small priority. While a route is shown and the visible radius
+  is larger than three jump ranges, only the route is drawn: zoomed out, the full network would be
+  a tangle. *Show whole route* centres the view on the route and zooms out until it fits.
+* **Waypoints.** The box lists them with each jump's length; a click selects the star and flies
+  there, close enough to see its links.
+* **Changes.** A change of the network settings, the filters or of data layers that hide stars
+  computes the route again; the data of the last corridor is kept, so this takes a fraction of a
+  second.
 
 ## Data sources
 

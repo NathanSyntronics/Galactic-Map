@@ -16,8 +16,6 @@ export interface RouteBoxState {
   status: RouteStatus;
   /** The route drawn (kept while a recomputation runs). */
   route: RouteResult | null;
-  /** Jump range of the settings. */
-  range: number;
 }
 
 /** Display names of route ends and waypoints (in the current language). */
@@ -66,7 +64,7 @@ export function routeStatusText(s: RouteBoxState, names: RouteNames): { text: st
       return { text, warn: false };
     }
     case 'unreachable':
-      return { text: t('routeUnreachable', { to: name(s.to), range: rangeText(s.range) }) + closest(st.route), warn: true };
+      return { text: t('routeUnreachable', { to: name(s.to), range: rangeText(st.route.range) }) + closest(st.route), warn: true };
     case 'refused': {
       const key = st.reason === 'places' ? 'routeTooManyPlaces' : st.reason === 'pairs' ? 'routeTooManyPairs' : 'routeTooMuchData';
       return { text: t(key, { w: formatLy(st.width) }) + closest(st.route), warn: true };
@@ -97,7 +95,7 @@ export class RouteBox {
   /** A waypoint of the list was picked (index into the route's waypoints). */
   onPick: (index: number) => void = () => {};
 
-  private readonly title = el('h3');
+  private readonly title = el('h3', 'sr-only');
   private readonly removeBtn = el('button', 'icon-btn small', '×');
   private readonly fromEl = el('span', 'route-end');
   private readonly toEl = el('span', 'route-end');
@@ -111,8 +109,9 @@ export class RouteBox {
   private readonly listBtn = el('button', 'btn small subtle');
   private readonly list = el('ol', 'route-list');
   private expanded = false;
+  /** The route whose waypoints the list shows, and whether its items are built. */
   private listRoute: RouteResult | null = null;
-  private listKey = '';
+  private listBuilt = false;
   private state: RouteBoxState | null = null;
   private names: RouteNames | null = null;
 
@@ -120,13 +119,13 @@ export class RouteBox {
     this.root = el('section', 'route-box hidden');
     this.root.setAttribute('aria-labelledby', 'route-title');
     this.title.id = 'route-title';
+    // one row: start → destination, swap, remove (the title is for screen readers)
     const head = el('div', 'route-head');
-    this.removeBtn.addEventListener('click', () => this.onRemove());
-    head.append(this.title, this.removeBtn);
-
     const ends = el('div', 'route-ends');
+    ends.append(this.fromEl, el('span', 'route-arrow', '→'), this.toEl);
     this.swapBtn.addEventListener('click', () => this.onSwap());
-    ends.append(this.fromEl, el('span', 'route-arrow', '→'), this.toEl, this.swapBtn);
+    this.removeBtn.addEventListener('click', () => this.onRemove());
+    head.append(ends, this.swapBtn, this.removeBtn);
 
     const controls = el('div', 'route-controls');
     for (const m of ['jumps', 'distance'] as const) {
@@ -147,7 +146,7 @@ export class RouteBox {
     this.progress.appendChild(this.bar);
     this.list.id = 'route-waypoints';
     this.listBtn.setAttribute('aria-controls', this.list.id);
-    this.root.append(head, ends, this.statusEl, this.progress, controls, this.list);
+    this.root.append(this.title, head, this.statusEl, this.progress, controls, this.list);
     parent.appendChild(this.root);
     this.updateTexts();
   }
@@ -164,7 +163,7 @@ export class RouteBox {
     this.modeSel.options[1].textContent = t('routeModeDistance');
     this.showAllBtn.textContent = t('routeShowAll');
     this.retryBtn.textContent = t('routeRetry');
-    this.listKey = '';
+    this.listBuilt = false;
     if (this.state && this.names) this.update(this.state, this.names);
   }
 
@@ -197,7 +196,7 @@ export class RouteBox {
     this.modeSel.hidden = !state.from || !state.to;
     if (route !== this.listRoute) {
       this.listRoute = route;
-      this.listKey = '';
+      this.listBuilt = false;
     }
     this.renderList();
   }
@@ -208,17 +207,22 @@ export class RouteBox {
     this.listBtn.textContent = route ? t('routeWaypoints', { n: formatNumber(route.waypoints.length) }) + (this.expanded ? ' ▴' : ' ▾') : '';
     this.listBtn.setAttribute('aria-expanded', String(this.expanded && !!route));
     this.list.hidden = !this.expanded || !route;
-    if (this.list.hidden || !route || !names) return;
-    const key = `${route.waypoints.length}`;
-    if (key === this.listKey) return;
-    this.listKey = key;
+    if (this.list.hidden || !route || !names || this.listBuilt) return;
+    this.listBuilt = true;
     this.list.replaceChildren();
     route.waypoints.forEach((w, k) => {
       const li = el('li');
       const btn = el('button', 'jump-link');
       btn.type = 'button';
       btn.append(el('span', 'route-step', String(k)), el('span', 'jump-name', names.waypoint(w)), el('span', 'jump-dist', k > 0 ? formatLy(w.jump) : ''));
-      btn.addEventListener('click', () => this.onPick(k));
+      btn.addEventListener('click', () => {
+        // on a phone the list would cover the star the view flies to
+        if (window.matchMedia?.('(max-width: 700px)').matches) {
+          this.expanded = false;
+          this.renderList();
+        }
+        this.onPick(k);
+      });
       li.appendChild(btn);
       this.list.appendChild(li);
     });

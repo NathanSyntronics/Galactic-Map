@@ -137,6 +137,10 @@ them apart.
   with singular forms ("1 star or system in view, 7 links").
 * The legend shows a line sample "Jump link ≤ 9 ly" while the network is on.
 * Keyboard: **J** toggles the network.
+* While a route is shown (`ROUTES.md`) and the visible radius is larger than `3 · range`, the
+  network is neither drawn nor computed, and its margin is not loaded; the legend and the status
+  line in the settings say so, and the info card lists no links. Zoomed in again, it is computed
+  for the current view.
 
 ## Settings
 

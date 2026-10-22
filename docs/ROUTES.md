@@ -12,9 +12,13 @@ This document is the specification the implementation follows.
 * Any shown star can be start or destination; the route connects their **places** (a multiple
   system counts as one place, as in the network).
 * The info card has the buttons **Route from here** and **Route to here**. Setting one end shows
-  the route box; once both are set the route is computed.
-* Start, destination and mode are stored in the browser (designations and names) and the route
-  is computed again after a reload, once the data is there.
+  the route box; once both are set the route is computed. Choosing the star of the other end
+  clears that end.
+* Start, destination and mode are stored in the browser (designations and names, plus the node
+  and index of the star) and the route is computed again after a reload, once the data is there.
+  The node and index are checked against the designation first; if the star data was rebuilt, the
+  star is looked up by its designation in the search index, and the route box says so if it is
+  gone.
 
 ## What counts as the best route
 
@@ -37,23 +41,33 @@ around the straight line from start to destination:
 * **Widening:** if there is no path inside the search corridor, `w` is doubled and the search
   repeated, up to `w = 128 ly`. If there is still no path, the route box says that the destination
   cannot be reached with this jump range (and suggests a larger range); it names the place where
-  the search got closest to the destination.
+  the search got closest to the destination, and the path to that place is drawn fainter.
 * **Data:** all octree nodes that intersect the network corridor are loaded completely, in
-  addition to the nodes of the view (the route box shows the loading progress). Once loaded, the
-  shown stars of the corridor are copied, so the nodes may be evicted again.
+  addition to the nodes of the view (requested after them; the route box shows the loading
+  progress by tiles and megabytes). The planner keeps the decoded data of the last corridor
+  (decoded nodes are never changed) with sizes of its own, computed with the current settings, so
+  the loader may evict the nodes again and a recomputation with other settings only loads what a
+  wider corridor adds. Tiles that cannot be loaded (after the loader's retries) stop the
+  computation; the route box offers to try again.
 * **Limits:** the corridor computation is refused (with a message) if it would hold more places or
   candidate pairs than the network limits allow; a Sun–Betelgeuse route must stay well within them.
+  A corridor whose nodes hold more than 64 MB is refused before loading (Sun–Betelgeuse at
+  `w = 128`: 25 MB).
 * Changing a network setting (range, capacities, hub preference, connection), a display filter
   (brown dwarfs, white dwarfs, distance uncertainty) or the hiding of stars by a data layer
-  computes the route again.
+  computes the route again, 400 ms after the last change (sliders change continuously). A start or
+  destination that is hidden by the settings is not part of the network: the route box says so.
 
 ## Display
 
 * The route is drawn as a thick line (a few pixels wide, a colour of its own that differs from
   the network colours) from star to star, **always visible**: it is not limited to the visible
   sphere, so zooming out shows the whole route.
-* Small markers at the waypoints; start and destination are always labelled; the names of
-  waypoints inside the visible sphere are labelled by the usual label logic.
+* Small markers at the waypoints (rings, so the star stays visible; they shrink to 4 px when zoomed
+  out), larger ones at start and destination; start and destination are always labelled (also
+  with names switched off, in a tint of the route colour); waypoints inside the visible sphere are
+  label candidates by the usual label logic (also without a name, with their designation) with a
+  small priority bonus.
 * **Only the route when zoomed out:** while a route is shown and the visible radius is larger than
   `3 · jumpRange`, the general network is not drawn (and not computed); zoomed in, the network is
   drawn as usual with the route on top. With *radius follows zoom* (the default) zooming out
@@ -65,6 +79,13 @@ around the straight line from start to destination:
   centres the view on it), **show whole route** (centres the view on the route and zooms out so it
   fits; it only moves the camera, and the visible radius follows when it follows the zoom) and
   remove.
+  * Waypoints are listed by their system's name when they have one.
+  * A waypoint click also zooms in to at most the default framing when the radius follows the
+    zoom (radius at most min(20 ly, 3 · range)), so the network around the star shows.
+  * *Show whole route* fits the route into the part of the screen below the top bar and, on
+    phones, above the route box.
+  * While the old route is recomputed (other settings, mode, swap) it stays drawn; a new start or
+    destination removes it at once.
 
 ## Implementation
 
@@ -90,6 +111,24 @@ The pure core (no three.js, no DOM; tests in `tests/js/route.test.ts` and `tests
     refuses (too many places or pairs). The result is *found*, *unreachable* (with the path to the
     closest place of the widest search), *refused* (with the last narrower search), *missing*
     (start or destination star not part of the network) or *cancelled* (`AbortSignal`).
+
+**In the app:**
+
+* `src/network/planner.ts`, `RoutePlanner`: the ends, the mode and the status; the loading of the
+  corridor nodes through a host interface (the app: octree, loader, current settings and data
+  layers, search index, localStorage); the network of each corridor with `computeNetwork` and the
+  same capacity rule and node keys as the view network; `planRoute`; the result with the waypoints
+  (representative stars of the places), jumps, total, straight-line distance and timings. A new
+  computation (another end, mode, setting) cancels a running one. Tests with a fake octree in
+  `tests/js/planner.test.ts`.
+* `src/render/route.ts`, `RouteLine`: the route as `Line2` (three's fat lines, 3 CSS px, magenta
+  `rgb(255, 77, 214)`) over a 6 px dark casing, drawn after the network lines and before the stars,
+  with ring markers drawn last; vertices relative to the route's centre (float32 precision); no
+  fade, and the camera's far plane is extended to the whole route.
+* `src/ui/route-box.ts`, the route box; `src/app.ts` wires it up: the corridor nodes are added to
+  the loader's wanted list after the view's, the network is neither drawn nor computed (and its
+  region not loaded) while only the route is shown, and the legend shows the route and that the
+  network is hidden.
 
 ## Measurements
 
@@ -137,3 +176,22 @@ Findings:
 * At `w = 128` the real Betelgeuse corridor stays within the limits (102,551 places), but a
   corridor with a uniform 0.003 places per ly³ would be refused (160,011 places): where the data
   is dense, the widest try is refused rather than computed.
+
+**In the browser** (dev server on localhost, headless Chromium with software rendering in the
+same container, default settings, view at the Sun already loaded; whole runs from the click to
+the result):
+
+| route | result | widths | nodes | data | places | load | network | search | total |
+|---|---|---|---|---|---|---|---|---|---|
+| Sun → Betelgeuse | 114 jumps, 772 ly | 18, 36 | 79 | 14.5 MB | 14,488 | 160–310 ms | 130–160 ms | 15–30 ms | 0.37–0.50 s |
+| the same, shortest distance (data kept) | 116 jumps, 766 ly | 18, 36 | 79 | | | 0 | 80–140 ms | 10 ms | 0.13–0.2 s |
+| Sun → Vega | 7 jumps, 53.3 ly | 18 | 40 | 11.4 MB | 1,043 | 1 ms | 55–70 ms | 3–6 ms | 0.11–0.13 s |
+| Sun → Vega, range 2 | unreachable (closest: the Sun, 25 ly short) | 4 … 128 | 80 | 15.8 MB | 23,276 | 440 ms | 100 ms | 20 ms | 0.56 s |
+| Sun → Betelgeuse, range 7 | unreachable (closest: the Sun) | 14 … 128 | 141 | 23.7 MB | 93,668 | 550 ms | 400 ms | 16 ms | 1.0 s |
+
+* With the data kept, mode changes, swaps and filter changes take 50–150 ms.
+* After a reload the restored Sun–Betelgeuse route is there after about 3 s: the corridor's
+  tiles load after the view's.
+* On a simulated phone (390 × 844, pixel ratio 2) the Sun–Betelgeuse route took 1.7–2.2 s.
+* At range 7 the Sun's group has only four places (the Sun, Alpha Centauri, Barnard's Star and
+  one more), none of them closer to Betelgeuse than the Sun; checked independently in Node.
