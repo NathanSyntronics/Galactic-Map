@@ -191,7 +191,8 @@ the result):
 
 * With the data kept, mode changes, swaps and filter changes take 50–150 ms.
 * After a reload the restored Sun–Betelgeuse route is there after about 3 s: the corridor's
-  tiles load after the view's.
+  tiles load after the view's. From a zoomed-out view (the whole route, radius ≈ 300 ly) it takes
+  about 8 s (measured with the production build), because the view's ~600,000 stars come first.
 * On a simulated phone (390 × 844, pixel ratio 2) the Sun–Betelgeuse route took 1.7–2.2 s.
 * At range 7 the Sun's group has only four places (the Sun, Alpha Centauri, Barnard's Star and
   one more), none of them closer to Betelgeuse than the Sun; checked independently in Node.

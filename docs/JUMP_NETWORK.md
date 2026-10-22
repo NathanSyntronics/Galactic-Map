@@ -116,7 +116,10 @@ them apart.
   view to rest). Measured in a browser (software rendering): a 6 s wheel zoom out and back in
   around 40 ly ran no computation instead of 17 of about 25 ms; a 3 s zoom out from 20 to 59 ly ran
   two; zooming from 150 ly out past the limit (235 ly) and back to 150 ly ran none during the zoom
-  and one after it.
+  and one after it. A 2.9 s wheel zoom from 20 to 300 ly (with the drawing switched off, so that
+  frames come at a real rate) ran two computations (at 40 and 61 ly, 40–55 ms), the zoom back in
+  none; the app's own work per frame was 3 ms (median) and 24 ms (95th percentile) out, 1.3 and
+  10 ms back in.
 
 ## Display
 

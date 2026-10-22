@@ -737,8 +737,9 @@ export class App {
         const ey = y - cy;
         const ez = z - cz;
         const dist = Math.sqrt(ex * ex + ey * ey + ez * ez);
-        if (name || sun) named.push(starPriority(starLogL(d, i), dist, sun ? 0 : name!.rank, apparentMag(d, i), sun), { d, i, size: rn.sizes[i] });
-        else unnamed.push(starPriority(starLogL(d, i), dist, 99, undefined), { d, i, size: rn.sizes[i] });
+        const top = name || sun ? named : unnamed;
+        const score = name || sun ? starPriority(starLogL(d, i), dist, sun ? 0 : name!.rank, apparentMag(d, i), sun) : starPriority(starLogL(d, i), dist, 99, undefined);
+        if (score > top.threshold) top.push(score, { d, i, size: rn.sizes[i] });
       }
     }
     for (const { d, i, size } of named.items()) {
