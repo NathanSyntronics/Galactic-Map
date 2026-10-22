@@ -1,4 +1,4 @@
-import { Vector3 } from 'three';
+import { Matrix4, PerspectiveCamera, Vector3 } from 'three';
 import { describe, expect, it } from 'vitest';
 import {
   anchors,
@@ -6,7 +6,11 @@ import {
   jointName,
   labelScore,
   mergeSystems,
+  namedCandidateLimit,
+  onScreen,
   placeLabels,
+  starPriority,
+  TopK,
   sharedName,
   skyBonus,
   spriteGap,
@@ -237,5 +241,68 @@ describe('label priority', () => {
     expect(labelScore(waypoint, 10) - labelScore(star, 10)).toBe(ROUTE_BONUS);
     expect(labelScore(waypoint, 10)).toBeLessThan(labelScore({ ...star, rank: 0 }, 10));
     expect(labelScore(end, 1000)).toBeGreaterThan(labelScore(sun, 1));
+  });
+});
+
+describe('label candidates of large views', () => {
+  // deterministic pseudo-random numbers
+  const rng = (seed: number) => () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return seed / 2 ** 32;
+  };
+
+  it('TopK keeps the k highest scores', () => {
+    const r = rng(7);
+    const scores = Array.from({ length: 5000 }, () => Math.round(r() * 1000) / 10);
+    const top = new TopK<number>(50);
+    scores.forEach((sc, k) => top.push(sc, k));
+    const kept = top.items().map((k) => scores[k]).sort((a, b) => b - a);
+    const best = [...scores].sort((a, b) => b - a).slice(0, 50);
+    expect(kept).toEqual(best);
+    expect(top.threshold).toBe(best[49]);
+    const none = new TopK<number>(0);
+    none.push(1, 1);
+    expect(none.items()).toEqual([]);
+  });
+
+  it('starPriority is the label score without the route bonuses', () => {
+    const c: LabelCandidate = { key: 'a', pos: new Vector3(), text: 'Vega', rank: 1, logL: 1.6, appMag: 0.03 };
+    expect(starPriority(1.6, 25, 1, 0.03)).toBe(labelScore(c, 25));
+    expect(starPriority(0, 1, 0, -26, true)).toBe(labelScore({ ...c, logL: 0, rank: 0, appMag: -26, sun: true }, 1));
+  });
+
+  it('onScreen accepts points in front of the camera within the screen and a margin', () => {
+    const cam = new PerspectiveCamera(55, 1.6, 0.1, 1000);
+    cam.position.set(0, 0, 10);
+    cam.lookAt(0, 0, 0);
+    cam.updateMatrixWorld();
+    const m = new Matrix4().multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse).elements;
+    expect(onScreen(m, 0, 0, 0)).toBe(true);
+    expect(onScreen(m, 0, 0, 20)).toBe(false); // behind the camera
+    // the half height at distance 10 is 10 tan(27.5°) = 5.2: 6 is beyond the edge but within the 25 % margin
+    expect(onScreen(m, 0, 6, 0)).toBe(true);
+    expect(onScreen(m, 0, 7, 0)).toBe(false);
+    expect(onScreen(m, 0, 7, 0, 0.5)).toBe(true);
+  });
+
+  it('labels the same stars from the best candidates as from all of them', () => {
+    const r = rng(11);
+    const measure = (_f: string, text: string) => 6 * text.length;
+    for (const maxLabels of [5, 30, 120]) {
+      const all: ScreenLabel[] = Array.from({ length: 20000 }, (_, k) => {
+        const c: LabelCandidate = { key: `n${k}`, pos: new Vector3(), text: `Star ${k}`, rank: Math.floor(r() * 8), logL: r() * 4 - 2 };
+        return { c, score: r() * 10, x: r() * 1280, y: r() * 800, fade: 1, text: c.text };
+      });
+      const place = (items: ScreenLabel[]) =>
+        placeLabels(
+          [...items].sort((a, b) => b.score - a.score),
+          { maxLabels, selectedKey: null, measure, placed: [], bounds: { w: 1280, h: 800 } },
+        ).map((l) => l.item.c.key);
+      const top = new TopK<ScreenLabel>(namedCandidateLimit(maxLabels));
+      for (const it of all) top.push(it.score, it);
+      const full = place(all);
+      expect(full.length).toBe(maxLabels);
+      expect(place([...top.items()])).toEqual(full);
+    }
   });
 });

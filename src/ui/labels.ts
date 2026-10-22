@@ -144,15 +144,99 @@ export function skyBonus(appMag: number | undefined): number {
   return clamp(0.5 * (4.5 - appMag), 0, 2.5) + clamp(1.5 * (1.5 - appMag), 0, 1.5);
 }
 
-/** Label priority: luminosity, distance from the camera, name rank, brightness in Earth's sky. */
+/** Label priority of a star: luminosity, distance from the camera, name rank, brightness in Earth's sky. */
+export function starPriority(logL: number, distToCamera: number, rank: number, appMag: number | undefined, sun = false): number {
+  let score = logL - 2 * Math.log10(Math.max(distToCamera, 1e-3));
+  score += rank < RANK_BONUS.length ? RANK_BONUS[rank] : 0;
+  score += skyBonus(appMag);
+  if (sun) score += 100;
+  return score;
+}
+
+/** Label priority of a candidate: the star's, plus the route bonuses. */
 export function labelScore(c: LabelCandidate, distToCamera: number): number {
-  let score = c.logL - 2 * Math.log10(Math.max(distToCamera, 1e-3));
-  score += c.rank < RANK_BONUS.length ? RANK_BONUS[c.rank] : 0;
-  score += skyBonus(c.appMag);
-  if (c.sun) score += 100;
+  let score = starPriority(c.logL, distToCamera, c.rank, c.appMag, c.sun);
   if (c.route) score += ROUTE_BONUS;
   if (c.pinned) score += PINNED_BONUS;
   return score;
+}
+
+/**
+ * The `k` items with the highest scores (a min-heap; on equal scores the earlier item stays).
+ * Large views hold tens of thousands of named stars, but a frame labels a few hundred at most.
+ */
+export class TopK<T> {
+  private readonly scores: number[] = [];
+  private readonly entries: T[] = [];
+
+  constructor(readonly k: number) {}
+
+  /** Lowest score kept once full (items at or below it are not taken). */
+  get threshold(): number {
+    return this.entries.length < this.k ? -Infinity : this.scores[0];
+  }
+
+  push(score: number, item: T): void {
+    const s = this.scores;
+    const e = this.entries;
+    if (this.k <= 0) return;
+    if (e.length < this.k) {
+      s.push(score);
+      e.push(item);
+      let i = e.length - 1;
+      while (i > 0) {
+        const p = (i - 1) >> 1;
+        if (s[p] <= s[i]) break;
+        this.swap(i, p);
+        i = p;
+      }
+      return;
+    }
+    if (score <= s[0]) return;
+    s[0] = score;
+    e[0] = item;
+    let i = 0;
+    for (;;) {
+      const l = 2 * i + 1;
+      const r = l + 1;
+      let m = i;
+      if (l < e.length && s[l] < s[m]) m = l;
+      if (r < e.length && s[r] < s[m]) m = r;
+      if (m === i) break;
+      this.swap(i, m);
+      i = m;
+    }
+  }
+
+  /** The kept items, in no particular order. */
+  items(): readonly T[] {
+    return this.entries;
+  }
+
+  private swap(a: number, b: number): void {
+    const s = this.scores;
+    const e = this.entries;
+    [s[a], s[b]] = [s[b], s[a]];
+    [e[a], e[b]] = [e[b], e[a]];
+  }
+}
+
+/**
+ * Whether a point can be labelled: in front of the camera and within the screen plus a margin
+ * (`m`: elements of the view-projection matrix; `margin`: fraction of the half screen).
+ */
+export function onScreen(m: ArrayLike<number>, x: number, y: number, z: number, margin = 0.25): boolean {
+  const w = m[3] * x + m[7] * y + m[11] * z + m[15];
+  if (w <= 0) return false;
+  const lim = (1 + margin) * w;
+  const px = m[0] * x + m[4] * y + m[8] * z + m[12];
+  const py = m[1] * x + m[5] * y + m[9] * z + m[13];
+  return px >= -lim && px <= lim && py >= -lim && py <= lim;
+}
+
+/** Named stars kept as label candidates (the best by priority): plenty for `maxLabels` labels. */
+export function namedCandidateLimit(maxLabels: number): number {
+  return Math.max(500, 8 * maxLabels);
 }
 
 /**

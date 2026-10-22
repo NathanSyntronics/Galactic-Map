@@ -1,3 +1,4 @@
+import { formatNumber } from './i18n';
 export type Lang = 'en' | 'de';
 export type Quality = 'low' | 'medium' | 'high' | 'ultra';
 export type MissingStyle = 'dim' | 'hide' | 'normal';
@@ -149,9 +150,9 @@ export function sliderToStarSize(v: number): number {
   return Math.min(Math.max(Math.round(size * d) / d, STAR_SIZE_MIN), STAR_SIZE_MAX);
 }
 
-/** Display text of a star size ("0.85×", "1.00×", "8.0×"). */
+/** Display text of a star size ("0.85×", "1.00×", "8.0×"; decimal comma in German). */
 export function starSizeText(size: number): string {
-  return `${size.toFixed(size < 2 ? 2 : 1)}×`;
+  return `${formatNumber(size, size < 2 ? 2 : 1)}×`;
 }
 
 const STORAGE_KEY = 'galactic-map:settings:v1';

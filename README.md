@@ -62,7 +62,8 @@ Hold Shift for faster keyboard movement.
 The search finds stars by name or catalogue designation; while the field is empty it lists the
 last three stars picked from the search (newest first, kept in the browser). A click or tap next
 to the open settings panel, or on the backdrop of a dialog, closes it; that click does not select
-or deselect a star, and a drag still turns the view.
+or deselect a star, and a drag still turns the view. On a phone the route box and the star card
+step aside while the panel is open, so that such a tap never lands on one of their buttons.
 
 The settings panel (☰) controls:
 * the visible radius, and whether it follows the zoom (on by default: radius = camera distance
@@ -279,7 +280,13 @@ Multiple systems (`systems.py`) are grouped from four sources:
 The stars are stored in an octree (`pipeline/galmap/octree.py`):
 * Each node keeps the most luminous stars of its cube that are not already in an ancestor.
 * Distant regions therefore show their brightest stars first.
-* Nodes are bundled into a few pack files that the app reads with HTTP range requests.
+* Nodes are bundled into a few pack files that the app reads with HTTP range requests. A range
+  that comes back short (Chrome's cache sometimes answers a revalidated range with an empty body,
+  e.g. after a reload) is asked for once more past the browser cache.
+* Labels: a view of a few hundred light years holds tens of thousands of named stars, but only a
+  few dozen get a label. After each view change the app keeps the best of them on screen by label
+  priority (eight times the number of labels, at least 500); each frame places labels among
+  those only, so large views stay smooth.
 
 ## Building
 

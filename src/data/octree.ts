@@ -308,11 +308,22 @@ export class PackFetcher {
       release();
     };
     try {
-      const res = await this.fetchFn(url, { headers: { Range: `bytes=${offset}-${offset + bytes - 1}` } });
+      const range = `bytes=${offset}-${offset + bytes - 1}`;
+      const res = await this.fetchFn(url, { headers: { Range: range } });
       if (res.status === 206) {
         this.rangeSeen = true;
         open();
-        const buf = await res.arrayBuffer();
+        let buf = await res.arrayBuffer();
+        if (buf.byteLength !== bytes) {
+          // the browser's HTTP cache sometimes answers a revalidated range with an empty body
+          // (seen in Chrome after a reload): ask the server once more, past the cache
+          const again = await this.fetchFn(url, { headers: { Range: range }, cache: 'no-store' });
+          if (again.status === 206) buf = await again.arrayBuffer();
+          else if (again.ok) {
+            const whole = await again.arrayBuffer();
+            if (whole.byteLength >= offset + bytes) buf = whole.slice(offset, offset + bytes);
+          }
+        }
         if (buf.byteLength !== bytes) throw new Error(`short range read ${buf.byteLength}/${bytes} from ${url}`);
         return buf;
       }

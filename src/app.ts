@@ -56,7 +56,7 @@ import {
 import { AttributesDialog } from './ui/attributes-dialog';
 import { InfoPanel, displayName, type JumpListing, type StarInfo } from './ui/info';
 import { Legend } from './ui/legend';
-import { LabelLayer, type LabelCandidate } from './ui/labels';
+import { LabelLayer, TopK, namedCandidateLimit, onScreen, starPriority, type LabelCandidate } from './ui/labels';
 import { SettingsPanel } from './ui/panel';
 import { RouteBox, type RouteNames } from './ui/route-box';
 import { SearchBox, SearchIndex, type SearchHit, type SearchTuple } from './ui/search';
@@ -199,6 +199,7 @@ export class App {
   private lastTime = performance.now();
   private hashTimer = 0;
   private lastTap = { time: 0, x: 0, y: 0 };
+  private readonly viewProj = new Matrix4();
 
   constructor(private readonly container: HTMLElement) {
     this.baseUrl = `${import.meta.env.BASE_URL}data/`;
@@ -365,13 +366,14 @@ export class App {
     // a route kept from the last visit
     this.planner.invalidate();
     this.loop();
-    if (!AttributeStore.readStored()) void this.loadSiteData();
+    // fetched for everyone (it is small), so that visitors with data of their own can go back to it
+    void this.loadSiteData(!AttributeStore.readStored());
   }
 
   // ------------------------------------------------------------------ user attributes
 
-  /** Loads the site's attribute dataset for visitors without data of their own. */
-  private async loadSiteData(): Promise<void> {
+  /** Loads the site's attribute dataset; `apply`: shows it (visitors without data of their own). */
+  private async loadSiteData(apply: boolean): Promise<void> {
     try {
       const res = await fetch(`${import.meta.env.BASE_URL}user/attributes.csv`);
       if (!res.ok) return;
@@ -379,7 +381,7 @@ export class App {
       // dev servers answer unknown paths with the app page
       if (/^\s*</.test(text)) return;
       this.siteData = text;
-      await this.applySiteData();
+      if (apply) await this.applySiteData();
     } catch (err) {
       console.warn('site attributes unavailable', err);
     }
@@ -700,34 +702,11 @@ export class App {
     const r2 = s.radius * s.radius;
     const cands: LabelCandidate[] = [];
     let inView = 0;
-    const K = s.labelDesignations ? Math.min(s.labelCount, 200) : 0;
-    // min-heap of unnamed stars by apparent prominence
-    const heap: { score: number; path: string; i: number; data: NodeData; size: number }[] = [];
-    const heapPush = (item: (typeof heap)[number]) => {
-      if (heap.length < K) {
-        heap.push(item);
-        let i = heap.length - 1;
-        while (i > 0) {
-          const p = (i - 1) >> 1;
-          if (heap[p].score <= heap[i].score) break;
-          [heap[p], heap[i]] = [heap[i], heap[p]];
-          i = p;
-        }
-      } else if (K > 0 && item.score > heap[0].score) {
-        heap[0] = item;
-        let i = 0;
-        for (;;) {
-          const l = 2 * i + 1;
-          const rr = l + 1;
-          let m = i;
-          if (l < heap.length && heap[l].score < heap[m].score) m = l;
-          if (rr < heap.length && heap[rr].score < heap[m].score) m = rr;
-          if (m === i) break;
-          [heap[m], heap[i]] = [heap[i], heap[m]];
-          i = m;
-        }
-      }
-    };
+    // the best named stars and unnamed stars by label priority, among those on screen (a large
+    // view holds tens of thousands of named stars; candidates are rebuilt after each view change)
+    const named = new TopK<{ d: NodeData; i: number; size: number }>(namedCandidateLimit(s.labelCount));
+    const unnamed = new TopK<{ d: NodeData; i: number; size: number }>(s.labelDesignations ? Math.min(s.labelCount, 200) : 0);
+    const vp = this.viewProj.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse).elements;
 
     const tx = target.x;
     const ty = target.y;
@@ -751,41 +730,45 @@ export class App {
         if (rn.sizes[i] <= 0) continue;
         inView++;
         const name = d.names.get(i);
-        const f = d.flags[i];
-        if (name || f & Flag.SUN) {
-          const sys = d.systems.get(i);
-          const sysInfo = sys !== undefined ? d.systemInfo.get(sys) : undefined;
-          cands.push({
-            key: `${d.path}:${i}`,
-            pos: new Vector3(x, y, z),
-            text: f & Flag.SUN ? t('theSun') : localName(name!.en, name!.de),
-            rank: f & Flag.SUN ? 0 : name!.rank,
-            logL: starLogL(d, i),
-            sun: (f & Flag.SUN) !== 0,
-            sys,
-            sysName: sysInfo?.nameEn ? localName(sysInfo.nameEn, sysInfo.nameDe) : undefined,
-            appMag: apparentMag(d, i),
-            size: rn.sizes[i],
-          });
-        } else if (K > 0) {
-          const ex = x - cx;
-          const ey = y - cy;
-          const ez = z - cz;
-          const dc2 = Math.max(ex * ex + ey * ey + ez * ez, 1e-6);
-          const score = starLogL(d, i) - Math.log10(dc2);
-          if (heap.length < K || score > heap[0].score) heapPush({ score, path: d.path, i, data: d, size: rn.sizes[i] });
-        }
+        const sun = (d.flags[i] & Flag.SUN) !== 0;
+        if (!name && !sun && unnamed.k === 0) continue;
+        if (!sun && !onScreen(vp, x, y, z)) continue;
+        const ex = x - cx;
+        const ey = y - cy;
+        const ez = z - cz;
+        const dist = Math.sqrt(ex * ex + ey * ey + ez * ez);
+        if (name || sun) named.push(starPriority(starLogL(d, i), dist, sun ? 0 : name!.rank, apparentMag(d, i), sun), { d, i, size: rn.sizes[i] });
+        else unnamed.push(starPriority(starLogL(d, i), dist, 99, undefined), { d, i, size: rn.sizes[i] });
       }
     }
-    for (const h of heap) {
-      const p = h.data.positions;
+    for (const { d, i, size } of named.items()) {
+      const name = d.names.get(i);
+      const sun = (d.flags[i] & Flag.SUN) !== 0;
+      const sys = d.systems.get(i);
+      const sysInfo = sys !== undefined ? d.systemInfo.get(sys) : undefined;
+      const p = d.positions;
       cands.push({
-        key: `${h.path}:${h.i}`,
-        pos: new Vector3(p[3 * h.i], p[3 * h.i + 1], p[3 * h.i + 2]),
-        text: designationOf(h.data, h.i),
+        key: `${d.path}:${i}`,
+        pos: new Vector3(p[3 * i], p[3 * i + 1], p[3 * i + 2]),
+        text: sun ? t('theSun') : localName(name!.en, name!.de),
+        rank: sun ? 0 : name!.rank,
+        logL: starLogL(d, i),
+        sun,
+        sys,
+        sysName: sysInfo?.nameEn ? localName(sysInfo.nameEn, sysInfo.nameDe) : undefined,
+        appMag: apparentMag(d, i),
+        size,
+      });
+    }
+    for (const { d, i, size } of unnamed.items()) {
+      const p = d.positions;
+      cands.push({
+        key: `${d.path}:${i}`,
+        pos: new Vector3(p[3 * i], p[3 * i + 1], p[3 * i + 2]),
+        text: designationOf(d, i),
         rank: 99,
-        logL: starLogL(h.data, h.i),
-        size: h.size,
+        logL: starLogL(d, i),
+        size,
       });
     }
     this.routeCandidates(cands, target, r2);

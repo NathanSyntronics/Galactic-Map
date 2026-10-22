@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { setLang } from '../../src/i18n';
 import {
   AUTO_RADIUS_RATIO,
   DEFAULT_SETTINGS,
@@ -98,6 +99,19 @@ describe('star size slider', () => {
     expect(starSizeText(0.85)).toBe('0.85×');
     expect(starSizeText(8)).toBe('8.0×');
     expect(starSizeText(12)).toBe('12.0×');
+  });
+
+  it('writes the star size with a decimal comma in German', () => {
+    // setLang marks the page language
+    vi.stubGlobal('document', { documentElement: {} });
+    setLang('de');
+    try {
+      expect(starSizeText(1)).toBe('1,00×');
+      expect(starSizeText(12)).toBe('12,0×');
+    } finally {
+      setLang('en');
+      vi.unstubAllGlobals();
+    }
   });
 });
 

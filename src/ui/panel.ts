@@ -199,10 +199,10 @@ export class SettingsPanel {
       ),
     );
     b.appendChild(
-      this.slider('brightness', 0.2, 3, 0.05, () => s().brightness, (v) => this.store.set({ brightness: v }), () => `${s().brightness.toFixed(2)}×`),
+      this.slider('brightness', 0.2, 3, 0.05, () => s().brightness, (v) => this.store.set({ brightness: v }), () => `${formatNumber(s().brightness, 2)}×`),
     );
     b.appendChild(
-      this.slider('saturation', 0, 3, 0.05, () => s().saturation, (v) => this.store.set({ saturation: v }), () => `${s().saturation.toFixed(2)}×`),
+      this.slider('saturation', 0, 3, 0.05, () => s().saturation, (v) => this.store.set({ saturation: v }), () => `${formatNumber(s().saturation, 2)}×`),
     );
     b.appendChild(this.checkbox('grid', () => s().grid, (v) => this.store.set({ grid: v })));
     b.appendChild(this.checkbox('dropLines', () => s().dropLines, (v) => this.store.set({ dropLines: v })));

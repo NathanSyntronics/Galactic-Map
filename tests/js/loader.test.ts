@@ -112,6 +112,37 @@ describe('PackFetcher', () => {
     expect(bytesOf(await f.fetch(0, 100, 10))).toEqual(Array.from(files['d/p0'].slice(100, 110)));
   });
 
+  it('asks once more past the browser cache when a range comes back short', async () => {
+    const { fetchFn: ok } = server(files);
+    const inits: (RequestInit | undefined)[] = [];
+    // the cache answers with an empty body; the server itself (no-store) with the right bytes
+    const fetchFn = async (url: string, init?: RequestInit) => {
+      inits.push(init);
+      return init?.cache === 'no-store' ? ok(url, init) : new Response(new Uint8Array(0), { status: 206 });
+    };
+    const f = new PackFetcher('d/', names, fetchFn);
+    expect(bytesOf(await f.fetch(0, 100, 50))).toEqual(Array.from(files['d/p0'].slice(100, 150)));
+    expect(inits.map((i) => i?.cache)).toEqual([undefined, 'no-store']);
+    // a server that ignores the range on the second try still serves the blob
+    const whole = async (_url: string, init?: RequestInit) =>
+      init?.cache === 'no-store' ? new Response(files['d/p1'].slice(), { status: 200 }) : new Response(new Uint8Array(3), { status: 206 });
+    const g = new PackFetcher('d/', names, whole);
+    expect(bytesOf(await g.fetch(1, 10, 20))).toEqual(Array.from(files['d/p1'].slice(10, 30)));
+  });
+
+  it('reports a range that stays short as a transient error', async () => {
+    let n = 0;
+    const fetchFn = async () => {
+      n++;
+      return new Response(new Uint8Array(5), { status: 206 });
+    };
+    const f = new PackFetcher('d/', names, fetchFn);
+    const err = await f.fetch(0, 0, 10).catch((e) => e);
+    expect(String(err)).toMatch(/short range read 5\/10/);
+    expect(isPermanentError(err)).toBe(false);
+    expect(n).toBe(2);
+  });
+
   it('reports HTTP errors', async () => {
     const { fetchFn } = server({});
     const f = new PackFetcher('d/', names, fetchFn);
