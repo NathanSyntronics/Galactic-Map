@@ -1,8 +1,8 @@
 # Jump network
 
-Stage 3 of the Galactic Map: stars that have neighbours within a jump range (10 ly by default)
+Stage 3 of the Galactic Map: stars that have neighbours within a jump range (9 ly by default)
 are connected with some of them. Bigger stars get more connections than small ones, e.g. Sirius
-about 11, the Sun about 7, a brown dwarf 3. Everything is adjustable in the settings.
+about 11, the Sun about 6, a brown dwarf 2. Everything is adjustable in the settings.
 
 This document is the specification the implementation follows.
 
@@ -26,8 +26,8 @@ This document is the specification the implementation follows.
 ## Capacity: how many links a place wants
 
 * **By luminosity** (default), piecewise linear in log10 L/L☉ of the representative star:
-  * log L ≤ −4.5 (brown dwarfs): `jumpFaint` links (default 3);
-  * log L = 0 (the Sun): `jumpSun` links (default 7);
+  * log L ≤ −4.5 (brown dwarfs): `jumpFaint` links (default 2);
+  * log L = 0 (the Sun): `jumpSun` links (default 6);
   * log L ≥ 1.5 (about 30 L☉) and brighter: `jumpBright` links (default 12; Sirius, 18.5 L☉ in
     the data, gets 11);
   * linear in between, rounded to the nearest integer.
@@ -44,7 +44,7 @@ This document is the specification the implementation follows.
 
 ## Which links
 
-Candidates are all pairs of places at most `jumpRange` apart (default 10 ly). The selection is
+Candidates are all pairs of places at most `jumpRange` apart (default 9 ly). The selection is
 deterministic: the same stars and settings always give the same links, whatever the order in
 which the data arrived.
 
@@ -89,11 +89,12 @@ them apart.
   the network on and off; always using `R + M` had cost up to 45 % of them.
 * If the region holds more than 150,000 places or 1.5 million candidate pairs, the network is not
   computed and the settings show a hint to reduce the radius. Measured in a browser (4-core
-  container, software rendering): 20 ly about 15 ms, 100 ly 25–35 ms, 150 ly 65–95 ms, 200 ly
-  (105,000 places) 150–200 ms, occasionally up to 0.45 s. With the default detail level the
-  limit is reached at about 230 ly. After such a result the level-of-detail selection goes back to
-  `R` alone (the region's extra stars are of no use) until a setting that changes the region or
-  the shown stars changes, or the view centre has moved by more than `R`; then it tries again.
+  container, software rendering, with the earlier defaults: range 10 ly, 3 / 7 / 12 links):
+  20 ly about 15 ms, 100 ly 25–35 ms, 150 ly 65–95 ms, 200 ly (105,000 places) 150–200 ms,
+  occasionally up to 0.45 s. With the default detail level the limit is reached at about 230 ly.
+  After such a result the level-of-detail selection goes back to `R` alone (the region's extra
+  stars are of no use) until a setting that changes the region or the shown stars changes, or the
+  view centre has moved by more than `R`; then it tries again.
 * If the point budget cuts the level-of-detail selection inside the region (not every node that
   touches the region is selected), the network is not computed either, because its links would
   change with the camera position; the settings ask to reduce the radius or raise the detail
@@ -123,7 +124,7 @@ them apart.
   focus moves to the new card's title, so one can walk the network with Tab and Enter.
 * The status line in the settings counts the places inside the visible sphere and their links,
   with singular forms ("1 star or system in view, 7 links").
-* The legend shows a line sample "Jump link ≤ 10 ly" while the network is on.
+* The legend shows a line sample "Jump link ≤ 9 ly" while the network is on.
 * Keyboard: **J** toggles the network.
 
 ## Settings
@@ -131,12 +132,12 @@ them apart.
 | key | default | control |
 |---|---|---|
 | `jumps` | `true` | checkbox "Jump network" |
-| `jumpRange` | `10` | slider 2–25 ly |
-| `jumpFaint`, `jumpSun`, `jumpBright` | `3`, `7`, `12` | sliders 0–20 ("faint stars", "Sun-like stars", "bright stars (from about 30 L☉)"; by attribute: "lowest value", "highest value") |
+| `jumpRange` | `9` | slider 2–25 ly |
+| `jumpFaint`, `jumpSun`, `jumpBright` | `2`, `6`, `12` | sliders 0–20 ("faint stars", "Sun-like stars", "bright stars (from about 30 L☉)"; by attribute: "lowest value", "highest value") |
 | `jumpBy` | `''` (luminosity) | select: luminosity or a numeric attribute |
 | `jumpHub` | `1` | slider 0–2 "prefer big stars" |
 | `jumpConnect` | `true` | checkbox "connect everything in range" |
-| `jumpColor` | `'stars'` | select |
+| `jumpColor` | `'length'` | select |
 | `jumpOpacity` | `0.6` | slider |
 
 Settings are stored as differences from the defaults (see `src/settings.ts`), English and German

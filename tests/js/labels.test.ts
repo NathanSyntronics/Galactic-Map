@@ -9,6 +9,7 @@ import {
   placeLabels,
   sharedName,
   skyBonus,
+  spriteGap,
   type LabelCandidate,
   type Rect,
   type ScreenLabel,
@@ -169,6 +170,27 @@ describe('label placement', () => {
     expect(new Set(a.map((o) => `${o.tx},${o.ty}`)).size).toBe(12);
     expect(a[0].r.x).toBeGreaterThan(100);
     expect(a[1].r.x + a[1].r.w).toBeLessThan(100);
+  });
+
+  it('moves the anchors outwards beside a large sprite', () => {
+    const near = anchors(100, 100, 30);
+    const far = anchors(100, 100, 30, 20);
+    expect(far[0].tx).toBe(near[0].tx + 20);
+    expect(far[1].tx).toBe(near[1].tx - 20);
+    expect(far[2].ty).toBe(near[2].ty - 20);
+    expect(far[3].ty).toBe(near[3].ty + 20);
+    for (let k = 0; k < 12; k++) {
+      const dNear = Math.hypot(near[k].r.x + near[k].r.w / 2 - 100, near[k].r.y + near[k].r.h / 2 - 100);
+      const dFar = Math.hypot(far[k].r.x + far[k].r.w / 2 - 100, far[k].r.y + far[k].r.h / 2 - 100);
+      expect(dFar).toBeGreaterThan(dNear);
+    }
+  });
+
+  it('keeps the usual distance from small sprites', () => {
+    expect(spriteGap(3)).toBe(0);
+    expect(spriteGap(20)).toBe(0);
+    expect(spriteGap(64)).toBeCloseTo(9.08, 6);
+    expect(spriteGap(192)).toBeGreaterThan(35);
   });
 });
 

@@ -181,6 +181,10 @@ export class App {
     helpBtn.addEventListener('click', () => this.showHelp());
     this.helpBtn = helpBtn;
     top.appendChild(helpBtn);
+    // a press on the top bar outside the settings panel closes the panel (the control still acts)
+    top.addEventListener('pointerdown', (e) => {
+      if (this.panel.isOpen && !this.menuBtn.contains(e.target as Node)) this.panel.toggle(false);
+    });
 
     this.panel = new SettingsPanel(container, this.store, this.attrs);
     this.panel.onManageAttributes = () => this.showAttributes();
@@ -209,9 +213,10 @@ export class App {
     container.appendChild(this.loadingEl);
     this.dialog = el('dialog', 'dialog');
     container.appendChild(this.dialog);
+    this.closeOnBackdrop(this.dialog);
 
     this.search.onPick = (hit) => this.pickSearch(hit);
-    this.search.onFocus = () => void this.loadSearch();
+    this.search.loadIndex = () => this.loadSearch();
 
     this.nav.onChange = () => {
       this.lastViewChange = performance.now();
@@ -431,7 +436,7 @@ export class App {
           const res = await fetch(`${this.baseUrl}search.json`);
           if (!res.ok) return;
           this.searchIndex.load((await res.json()) as SearchTuple[]);
-          if (this.search.input.value) this.search.update();
+          this.search.indexLoaded();
         } catch (err) {
           console.warn('search index unavailable', err);
         }
@@ -568,7 +573,7 @@ export class App {
     let inView = 0;
     const K = s.labelDesignations ? Math.min(s.labelCount, 200) : 0;
     // min-heap of unnamed stars by apparent prominence
-    const heap: { score: number; path: string; i: number; data: NodeData }[] = [];
+    const heap: { score: number; path: string; i: number; data: NodeData; size: number }[] = [];
     const heapPush = (item: (typeof heap)[number]) => {
       if (heap.length < K) {
         heap.push(item);
@@ -631,6 +636,7 @@ export class App {
             sys,
             sysName: sysInfo?.nameEn ? localName(sysInfo.nameEn, sysInfo.nameDe) : undefined,
             appMag: apparentMag(d, i),
+            size: rn.sizes[i],
           });
         } else if (K > 0) {
           const ex = x - cx;
@@ -638,7 +644,7 @@ export class App {
           const ez = z - cz;
           const dc2 = Math.max(ex * ex + ey * ey + ez * ez, 1e-6);
           const score = starLogL(d, i) - Math.log10(dc2);
-          if (heap.length < K || score > heap[0].score) heapPush({ score, path: d.path, i, data: d });
+          if (heap.length < K || score > heap[0].score) heapPush({ score, path: d.path, i, data: d, size: rn.sizes[i] });
         }
       }
     }
@@ -650,6 +656,7 @@ export class App {
         text: designationOf(h.data, h.i),
         rank: 99,
         logL: starLogL(h.data, h.i),
+        size: h.size,
       });
     }
     // Keep the selected star labelled even if it is outside the candidate set.
@@ -693,6 +700,12 @@ export class App {
     dom.addEventListener('pointercancel', (e) => taps.cancel(e.pointerId));
     dom.addEventListener('pointerup', (e) => {
       if (!taps.up(e.pointerId, e.clientX, e.clientY, performance.now())) return;
+      // with the settings panel open, a tap on the map only closes the panel (a drag still rotates)
+      if (this.panel.isOpen) {
+        this.panel.toggle(false);
+        this.lastTap = { time: 0, x: 0, y: 0 };
+        return;
+      }
       const hit = this.pickAt(e.clientX, e.clientY, e.pointerType === 'touch' ? 22 : 14);
       const now = performance.now();
       const isDouble =
@@ -983,6 +996,26 @@ export class App {
 
   // ------------------------------------------------------------------ dialogs
 
+  /**
+   * A click on the backdrop of a modal dialog (outside its box) closes it. Only a press that also
+   * started outside counts, so a text selection or a drag from inside the box never closes it.
+   */
+  private closeOnBackdrop(dialog: HTMLDialogElement): void {
+    const outside = (e: MouseEvent) => {
+      if (e.target !== dialog) return false;
+      const r = dialog.getBoundingClientRect();
+      return e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom;
+    };
+    let pressedOutside = false;
+    dialog.addEventListener('pointerdown', (e) => {
+      pressedOutside = outside(e);
+    });
+    dialog.addEventListener('click', (e) => {
+      if (pressedOutside && outside(e)) dialog.close();
+      pressedOutside = false;
+    });
+  }
+
   private openDialog(title: string, body: HTMLElement): void {
     this.dialog.replaceChildren();
     const head = el('div', 'dialog-head');
@@ -1105,7 +1138,8 @@ export class App {
     // the more stars are in view, the fainter the faintest ones, so dense regions do not saturate
     u.uMinAlpha.value = MathUtils.clamp(0.55 * Math.sqrt(2500 / Math.max(this.inView, 1)), 0.035, 0.55);
     u.uMinPx.value = 2.6 * this.renderer.getPixelRatio();
-    u.uMaxPx.value = 64 * this.renderer.getPixelRatio();
+    // larger star sizes raise the cap too (gently), so that the brightest stars keep growing
+    u.uMaxPx.value = 64 * this.renderer.getPixelRatio() * MathUtils.clamp(Math.sqrt(s.starSize), 1, 3);
 
     if (this.styleDirty && now - this.lastStyle > 150) {
       this.styleDirty = false;
@@ -1151,6 +1185,8 @@ export class App {
       enabled: s.labels,
       grid: s.grid ? this.grid.labels : null,
       gridHighlight: 'rgba(255, 200, 120, 0.85)',
+      // labels keep clear of large sprites
+      sprite: { scale: (s.starSize * u.uScale.value) / u.uPixelRatio.value, max: u.uMaxPx.value / u.uPixelRatio.value },
     });
     if (s.dropLines && s.labels) this.dropLines.set(this.labels.labelledPositions, this.nav.target);
     this.dropLines.lines.visible = s.dropLines && s.labels && s.grid;

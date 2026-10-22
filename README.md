@@ -38,7 +38,7 @@ An interactive 3-D map of the Sun's stellar neighbourhood, built from real star 
 * **Your own data on the map.** Give stars attributes of your own (a faction, an economy value,
   a colour …), edit them on the map or as a CSV file, and colour or size the stars by them or by
   catalogue data such as the number of known exoplanets or the spectral class.
-* **A jump network.** Stars up to a jump range apart (10 ly by default) are linked; bright stars
+* **A jump network.** Stars up to a jump range apart (9 ly by default) are linked; bright stars
   get more links than faint ones. Every rule is adjustable.
 * **English and German**, switchable in the settings.
 
@@ -56,11 +56,16 @@ An interactive 3-D map of the Sun's stellar neighbourhood, built from real star 
 
 Hold Shift for faster keyboard movement.
 
+The search finds stars by name or catalogue designation; while the field is empty it lists the
+last three stars picked from the search (newest first, kept in the browser). A click or tap next
+to the open settings panel, or on the backdrop of a dialog, closes it; that click does not select
+or deselect a star, and a drag still turns the view.
+
 The settings panel (☰) controls:
 * the visible radius;
 * brown dwarfs (off by default) and white dwarfs;
 * a maximum distance uncertainty;
-* labels, star size, brightness and colour saturation;
+* labels, star size (0.2× to 12×), brightness and colour saturation;
 * the galactic grid and the height lines;
 * the level of detail (how many stars may be loaded at once; it matters only for view radii of a few hundred light years and more);
 * the data layers (below);
@@ -106,7 +111,7 @@ site's dataset* returns to it.
 
 ### Jump network
 
-The jump network links stars that are at most the *jump range* apart (10 ly by default). It is
+The jump network links stars that are at most the *jump range* apart (9 ly by default). It is
 specified in [`docs/JUMP_NETWORK.md`](docs/JUMP_NETWORK.md):
 * **Places.** A multiple system counts as one place; its members are never linked to each other.
   Stars closer than 0.1 ly (about 6,300 AU) to each other count as one place too, which covers
@@ -114,7 +119,7 @@ specified in [`docs/JUMP_NETWORK.md`](docs/JUMP_NETWORK.md):
   hiding brown dwarfs or stars without a value changes the network. A place is represented by its
   most luminous shown star.
 * **Capacity.** Each place wants a number of links. By default it follows the luminosity:
-  3 for brown dwarfs (log L ≤ −4.5), 7 for Sun-like stars, 12 for stars from about 30 L☉ up
+  2 for brown dwarfs (log L ≤ −4.5), 6 for Sun-like stars, 12 for stars from about 30 L☉ up
   (log L ≥ 1.5), linear in log L in between (Sirius, 18.5 L☉, gets 11). It can instead follow a
   numeric attribute (yours or catalogue data) along the range of the attribute's colour scale;
   a higher value always gives more links, even when the colour scale is reversed.
@@ -137,8 +142,8 @@ specified in [`docs/JUMP_NETWORK.md`](docs/JUMP_NETWORK.md):
   the default detail level this allows radii up to about 230 ly. The default view (20 ly) takes
   about 15 ms, 100 ly about 30 ms, 200 ly about 0.2 s; a slow computation waits until the view
   rests.
-* **Display.** Lines in the stars' colours (or one teal, or coloured by length) end at the edge
-  of the visible sphere, fading out like the stars, and get fainter when many stars are in
+* **Display.** Lines coloured by their length (or in the stars' colours, or one teal) end at the
+  edge of the visible sphere, fading out like the stars, and get fainter when many stars are in
   view. The selected star's links are highlighted (the others dimmed while it is inside the
   visible sphere), and its info card lists them with distances; a click on one (or Enter) goes
   there and keeps the keyboard focus in the card. **J** switches the network on and off.

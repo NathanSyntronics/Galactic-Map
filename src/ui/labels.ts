@@ -17,6 +17,8 @@ export interface LabelCandidate {
   sysName?: string;
   /** Apparent visual magnitude as seen from the Sun, if known. */
   appMag?: number;
+  /** Symbol radius of the star's sprite in light years (before the star size setting). */
+  size?: number;
 }
 
 export interface Rect {
@@ -37,6 +39,8 @@ export interface ScreenLabel {
   text: string;
   /** Own names of the components merged into this label, the label's own first. */
   merged?: string[];
+  /** Extra distance (CSS px) of the label from the star, beside a large sprite. */
+  gap?: number;
 }
 
 export interface PlacedLabel {
@@ -189,22 +193,34 @@ const overlapsAny = (r: Rect, placed: Rect[]) => {
  * right of the star, left, above, below, the four diagonals, then the four diagonals a little
  * further out (for crowded regions such as the Sun's neighbourhood seen from afar).
  */
-export function anchors(x: number, y: number, tw: number): { tx: number; ty: number; r: Rect }[] {
+export function anchors(x: number, y: number, tw: number, gap = 0): { tx: number; ty: number; r: Rect }[] {
   const at = (tx: number, ty: number) => ({ tx, ty, r: { x: tx - 1, y: ty - 8, w: tw + 4, h: 15 } });
+  // `gap` moves every anchor outwards, away from a large sprite
+  const g = gap;
+  const d = gap * 0.7;
   return [
-    at(x + 7, y),
-    at(x - 10 - tw, y),
-    at(x - tw / 2 - 1, y - 13),
-    at(x - tw / 2 - 1, y + 13),
-    at(x + 4, y - 11),
-    at(x + 4, y + 11),
-    at(x - 7 - tw, y - 11),
-    at(x - 7 - tw, y + 11),
-    at(x + 6, y - 17),
-    at(x + 6, y + 17),
-    at(x - 9 - tw, y - 17),
-    at(x - 9 - tw, y + 17),
+    at(x + 7 + g, y),
+    at(x - 10 - tw - g, y),
+    at(x - tw / 2 - 1, y - 13 - g),
+    at(x - tw / 2 - 1, y + 13 + g),
+    at(x + 4 + d, y - 11 - d),
+    at(x + 4 + d, y + 11 + d),
+    at(x - 7 - tw - d, y - 11 - d),
+    at(x - 7 - tw - d, y + 11 + d),
+    at(x + 6 + d, y - 17 - d),
+    at(x + 6 + d, y + 17 + d),
+    at(x - 9 - tw - d, y - 17 - d),
+    at(x - 9 - tw - d, y + 17 + d),
   ];
+}
+
+/**
+ * Extra label distance beside a sprite of `px` CSS pixels: the anchors suit sprites up to about
+ * 25 px; the bright core and inner glow of a larger one cover about 0.22 of its width around the
+ * centre.
+ */
+export function spriteGap(px: number): number {
+  return Math.max(0, 0.22 * px - 5);
 }
 
 const inside = (r: Rect, b: { w: number; h: number }) => r.x >= 0 && r.y >= 0 && r.x + r.w <= b.w && r.y + r.h <= b.h;
@@ -238,7 +254,7 @@ export function placeLabels(
     }
     const font = selected ? FONT_SELECTED : named ? FONT_NAME : FONT_DESIGNATION;
     const tw = opts.measure(font, it.text);
-    const options = anchors(it.x, it.y, tw);
+    const options = anchors(it.x, it.y, tw, it.gap ?? 0);
     const bounds = opts.bounds;
     let a = options.find((o) => (!bounds || inside(o.r, bounds)) && !overlapsAny(o.r, opts.placed));
     if (!a) {
@@ -311,6 +327,8 @@ export class LabelLayer {
     enabled: boolean;
     grid: GridLabel[] | null;
     gridHighlight: string;
+    /** Sprite size in CSS px = min(2 · size · scale / distance, max), as in the star shader. */
+    sprite?: { scale: number; max: number };
   }): void {
     const { camera, target, radius } = opts;
     const ctx = this.ctx;
@@ -332,8 +350,11 @@ export class LabelLayer {
         if (fade <= 0.02) continue;
         const s = this.project(c.pos, camera, w, h);
         if (!s) continue;
-        const score = labelScore(c, c.pos.distanceTo(camera.position)) + (selected ? 1000 : 0);
-        scored.push({ c, score, x: s[0], y: s[1], fade, text: c.text });
+        const dist = c.pos.distanceTo(camera.position);
+        const score = labelScore(c, dist) + (selected ? 1000 : 0);
+        const sp = opts.sprite;
+        const gap = sp && c.size ? spriteGap(Math.min((2 * c.size * sp.scale) / Math.max(dist, 1e-6), sp.max)) : 0;
+        scored.push({ c, score, x: s[0], y: s[1], fade, text: c.text, gap });
       }
       scored.sort((a, b) => b.score - a.score);
       const visible = mergeSystems(scored, this.selectedKey);

@@ -190,6 +190,19 @@ select {
   cursor: default;
 }
 
+.search .results li.header {
+  padding: 4px 9px 2px;
+  color: var(--text-dim);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  cursor: default;
+}
+
+.search .results li.header:hover {
+  background: none;
+}
+
 .search .results .meta {
   color: var(--text-dim);
   font-size: 12px;

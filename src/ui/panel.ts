@@ -12,6 +12,9 @@ import {
 import {
   RADIUS_MAX,
   RADIUS_MIN,
+  sliderToStarSize,
+  starSizeText,
+  starSizeToSlider,
   type JumpColor,
   type MissingStyle,
   type Quality,
@@ -183,7 +186,16 @@ export class SettingsPanel {
     // --- Display
     b.appendChild(el('h3', '', t('display')));
     b.appendChild(
-      this.slider('starSize', 0.2, 4, 0.05, () => s().starSize, (v) => this.store.set({ starSize: v }), () => `${s().starSize.toFixed(2)}×`),
+      // logarithmic, so that small sizes stay as easy to set as large ones
+      this.slider(
+        'starSize',
+        0,
+        1,
+        0.001,
+        () => starSizeToSlider(s().starSize),
+        (v) => this.store.set({ starSize: sliderToStarSize(v) }),
+        () => starSizeText(s().starSize),
+      ),
     );
     b.appendChild(
       this.slider('brightness', 0.2, 3, 0.05, () => s().brightness, (v) => this.store.set({ brightness: v }), () => `${s().brightness.toFixed(2)}×`),

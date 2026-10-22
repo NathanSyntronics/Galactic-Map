@@ -67,14 +67,14 @@ export const DEFAULT_SETTINGS: Settings = {
   missingStyle: 'dim',
   legend: true,
   jumps: true,
-  jumpRange: 10,
-  jumpFaint: 3,
-  jumpSun: 7,
+  jumpRange: 9,
+  jumpFaint: 2,
+  jumpSun: 6,
   jumpBright: 12,
   jumpBy: '',
   jumpHub: 1,
   jumpConnect: true,
-  jumpColor: 'stars',
+  jumpColor: 'length',
   jumpOpacity: 0.6,
 };
 
@@ -88,6 +88,7 @@ const CHOICES: Partial<Record<keyof Settings, readonly unknown[]>> = {
 
 /** Range of numeric settings whose controls are sliders with fixed ends. */
 const RANGES: Partial<Record<keyof Settings, [number, number]>> = {
+  starSize: [0.2, 12],
   jumpRange: [2, 25],
   jumpFaint: [0, 20],
   jumpSun: [0, 20],
@@ -105,6 +106,28 @@ export const QUALITY_BUDGET: Record<Quality, number> = {
 
 export const RADIUS_MIN = 2;
 export const RADIUS_MAX = 50_000;
+
+export const STAR_SIZE_MIN = 0.2;
+export const STAR_SIZE_MAX = 12;
+const STAR_SIZE_SPAN = Math.log(STAR_SIZE_MAX / STAR_SIZE_MIN);
+
+/** Position (0..1) of a star size on its logarithmic slider. */
+export function starSizeToSlider(size: number): number {
+  const v = Math.log(size / STAR_SIZE_MIN) / STAR_SIZE_SPAN;
+  return Math.min(Math.max(v, 0), 1);
+}
+
+/** Star size at a slider position, rounded as displayed: 0.01 below 2×, 0.1 from 2× up. */
+export function sliderToStarSize(v: number): number {
+  const size = STAR_SIZE_MIN * Math.exp(Math.min(Math.max(v, 0), 1) * STAR_SIZE_SPAN);
+  const d = size < 2 ? 100 : 10;
+  return Math.min(Math.max(Math.round(size * d) / d, STAR_SIZE_MIN), STAR_SIZE_MAX);
+}
+
+/** Display text of a star size ("0.85×", "1.00×", "8.0×"). */
+export function starSizeText(size: number): string {
+  return `${size.toFixed(size < 2 ? 2 : 1)}×`;
+}
 
 const STORAGE_KEY = 'galactic-map:settings:v1';
 /** Marker of the stored format that holds only the values that differ from the defaults. */

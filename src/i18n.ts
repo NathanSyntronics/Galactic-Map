@@ -35,6 +35,7 @@ const en = {
   goToSun: 'Back to the Sun',
   search: 'Search star…',
   noResults: 'No matches',
+  recentSearches: 'Recent',
   help: 'Controls',
   about: 'About & sources',
   close: 'Close',
@@ -90,7 +91,8 @@ const en = {
 </ul>
 <p>The view centre is the point the camera orbits around. Only stars inside the visible radius around it are shown; move the centre to explore further.</p>
 <p>The grid lies parallel to the galactic plane. 0° points towards the Galactic Centre, 90° in the direction of Galactic rotation.</p>
-<p>The jump network links stars up to the jump range apart (10 ly by default); brighter stars get more links. A star's info card lists its links; click one to go there.</p>`,
+<p>The jump network links stars up to the jump range apart (9 ly by default); brighter stars get more links. A star's info card lists its links; click one to go there.</p>
+<p>The empty search field lists the last three stars you picked from the search. A click next to the settings or a dialog closes it.</p>`,
   aboutText: `
 <p>Positions are computed from measured trigonometric parallaxes and sky coordinates and converted into a heliocentric galactic coordinate system (X towards the Galactic Centre, Z towards the North Galactic Pole). Stars are drawn with symbolic sizes; true stellar diameters would be invisibly small.</p>
 <p>Data sources:</p>`,
@@ -244,6 +246,7 @@ const de: Record<MessageKey, string> = {
   goToSun: 'Zurück zur Sonne',
   search: 'Stern suchen…',
   noResults: 'Keine Treffer',
+  recentSearches: 'Zuletzt gesucht',
   help: 'Steuerung',
   about: 'Info & Quellen',
   close: 'Schließen',
@@ -299,7 +302,8 @@ const de: Record<MessageKey, string> = {
 </ul>
 <p>Der Blickpunkt ist der Punkt, um den sich die Kamera dreht. Angezeigt werden nur Sterne innerhalb des sichtbaren Radius um ihn; verschiebe den Blickpunkt, um weiter zu erkunden.</p>
 <p>Das Gitter liegt parallel zur galaktischen Ebene. 0° zeigt zum Galaktischen Zentrum, 90° in Richtung der galaktischen Rotation.</p>
-<p>Das Sprungnetz verbindet Sterne bis zur Sprungweite (standardmäßig 10 Lj); hellere Sterne bekommen mehr Verbindungen. Die Infokarte eines Sterns listet seine Verbindungen auf; ein Klick darauf führt dorthin.</p>`,
+<p>Das Sprungnetz verbindet Sterne bis zur Sprungweite (standardmäßig 9 Lj); hellere Sterne bekommen mehr Verbindungen. Die Infokarte eines Sterns listet seine Verbindungen auf; ein Klick darauf führt dorthin.</p>
+<p>Das leere Suchfeld zeigt die drei zuletzt über die Suche gewählten Sterne. Ein Klick neben die Einstellungen oder einen Dialog schließt sie.</p>`,
   aboutText: `
 <p>Die Positionen werden aus gemessenen trigonometrischen Parallaxen und Himmelskoordinaten berechnet und in ein heliozentrisches galaktisches Koordinatensystem umgerechnet (X zum Galaktischen Zentrum, Z zum galaktischen Nordpol). Die Sterngrößen sind symbolisch; echte Sterndurchmesser wären unsichtbar klein.</p>
 <p>Datenquellen:</p>`,
