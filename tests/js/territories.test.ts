@@ -85,11 +85,13 @@ describe('territories', () => {
 
 describe('example factions (public/user/attributes.csv)', () => {
   const table = parseCsv(readFileSync(new URL('../../public/user/attributes.csv', import.meta.url), 'utf8'));
-  const { keyColumn } = csvLayout(table.header);
+  const { keyColumn, exactKeys } = csvLayout(table.header);
   const col = (name: string) => table.header.findIndex((h) => parseColumnHeader(h).name === name);
 
   it('has a whole-system text column Faction and four factions of 10 to 100 systems', () => {
-    expect(table.header[keyColumn]).toBe('designation');
+    // exact keys: applied without loading the search index
+    expect(table.header[keyColumn]).toBe('designation [exact]');
+    expect(exactKeys).toBe(true);
     const spec = parseColumnHeader(table.header[col('Faction')]);
     expect(spec).toMatchObject({ type: 'text', system: true });
     const sizes = new Map<string, number>();

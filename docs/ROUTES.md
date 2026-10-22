@@ -16,9 +16,12 @@ This document is the specification the implementation follows.
   clears that end.
 * Start, destination and mode are stored in the browser (designations and names, plus the node
   and index of the star) and the route is computed again after a reload, once the data is there.
-  The node and index are checked against the designation first; if the star data was rebuilt, the
-  star is looked up by its designation in the search index, and the route box says so if it is
-  gone.
+  The node and index are checked against the designation first. If the star data was rebuilt,
+  the star with that designation is looked for near the stored position (within 1 ly, or 2 % of
+  its distance from the Sun, at most 10 ly; this finds every star), then by an exact lookup of the
+  designation in the search index (named stars only). If neither finds it, the route box says that
+  it could not be located; if the search index could not be loaded, it says so and offers to try
+  again.
 
 ## What counts as the best route
 
@@ -48,7 +51,9 @@ around the straight line from start to destination:
   (decoded nodes are never changed) with sizes of its own, computed with the current settings, so
   the loader may evict the nodes again and a recomputation with other settings only loads what a
   wider corridor adds. Tiles that cannot be loaded (after the loader's retries) stop the
-  computation; the route box offers to try again.
+  computation; the route box offers to try again. A tile the loader had already given up on
+  before the computation (e.g. while the view needed it on a bad connection) is asked for once
+  more per computation; only a tile that fails during the computation stops it.
 * **Limits:** the corridor computation is refused (with a message) if it would hold more places or
   candidate pairs than the network limits allow; a Sun–Betelgeuse route must stay well within them.
   A corridor whose nodes hold more than 64 MB is refused before loading (Sun–Betelgeuse at
@@ -64,10 +69,12 @@ around the straight line from start to destination:
   the network colours) from star to star, **always visible**: it is not limited to the visible
   sphere, so zooming out shows the whole route.
 * Small markers at the waypoints (rings, so the star stays visible; they shrink to 4 px when zoomed
-  out), larger ones at start and destination; start and destination are always labelled (also
+  out), larger ones at start and destination (also at a destination the partial route of an
+  unreachable one does not reach); start and destination are always labelled (also
   with names switched off, in a tint of the route colour); waypoints inside the visible sphere are
   label candidates by the usual label logic (also without a name, with their designation) with a
-  small priority bonus.
+  small priority bonus. The labels of start and destination are never merged into the label of
+  another member of their system (e.g. the selected one).
 * **Only the route when zoomed out:** while a route is shown and the visible radius is larger than
   `3 · jumpRange`, the general network is not drawn (and not computed); zoomed in, the network is
   drawn as usual with the route on top. With *radius follows zoom* (the default) zooming out
@@ -82,8 +89,10 @@ around the straight line from start to destination:
   * Waypoints are listed by their system's name when they have one.
   * A waypoint click also zooms in to at most the default framing when the radius follows the
     zoom (radius at most min(20 ly, 3 · range)), so the network around the star shows.
-  * *Show whole route* fits the route into the part of the screen below the top bar and, on
-    phones, above the route box.
+  * *Show whole route* fits the route and both chosen stars (a partial route does not reach the
+    destination) into the part of the screen below the top bar and, on phones, above the route box.
+  * On phones the info card covers the lower half: while it is open, the route box moves under
+    the top bar in short form (start → destination and the status), and the legend is left out.
   * While the old route is recomputed (other settings, mode, swap) it stays drawn; a new start or
     destination removes it at once.
 

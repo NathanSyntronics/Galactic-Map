@@ -37,6 +37,7 @@ const en = {
   search: 'Search star…',
   noResults: 'No matches',
   recentSearches: 'Recent',
+  searchUnavailable: 'The star catalogue could not be loaded. Try again later.',
   help: 'Controls',
   about: 'About & sources',
   close: 'Close',
@@ -93,7 +94,7 @@ const en = {
 <p>The view centre is the point the camera orbits around. Only stars inside the visible radius around it are shown; move the centre to explore further. The radius follows the zoom: zooming out shows a larger region (this can be switched off in the settings).</p>
 <p>The grid lies parallel to the galactic plane. 0° points towards the Galactic Centre, 90° in the direction of Galactic rotation.</p>
 <p>The jump network links stars up to the jump range apart (9 ly by default); brighter stars get more links. A star's info card lists its links; click one to go there.</p>
-<p>Routes: “Route from here” and “Route to here” on a star’s card plan a route through the jump network, also between distant stars (the Sun and Betelgeuse, say). The route box lists the waypoints; zoomed out, only the route is drawn.</p>
+<p>Routes: “Route from here” and “Route to here” on a star’s info card plan a route through the jump network, also between distant stars (the Sun and Betelgeuse, say). The route box lists the waypoints; zoomed out, only the route is drawn.</p>
 <p>The empty search field lists the last three stars you picked from the search. A click next to the settings or a dialog closes it.</p>`,
   aboutText: `
 <p>Positions are computed from measured trigonometric parallaxes and sky coordinates and converted into a heliocentric galactic coordinate system (X towards the Galactic Centre, Z towards the North Galactic Pole). Stars are drawn with symbolic sizes; true stellar diameters would be invisibly small.</p>
@@ -215,8 +216,8 @@ const en = {
   routeToHere: 'Route to here',
   routeNoStart: 'start?',
   routeNoGoal: 'destination?',
-  routeChooseFrom: 'Choose a start: “Route from here” on a star’s card.',
-  routeChooseTo: 'Choose a destination: “Route to here” on a star’s card.',
+  routeChooseFrom: 'Choose a start: “Route from here” on a star’s info card.',
+  routeChooseTo: 'Choose a destination: “Route to here” on a star’s info card.',
   routeSwap: 'Swap start and destination',
   routeMode: 'Best route',
   routeModeJumps: 'Fewest jumps',
@@ -238,7 +239,8 @@ const en = {
   routeTooManyPairs: 'Up to {w} from the straight line there are too many star pairs within the jump range.',
   routeTooMuchData: 'The stars up to {w} from the straight line are too much data to load.',
   routeMissing: '{name} is hidden by the current settings (filters or data layers), so it is not part of the jump network.',
-  routeNotFound: '{name} is no longer in the star data.',
+  routeNotFound: '{name} could not be located in the star data.',
+  routeLookupFailed: '{name} could not be located: the star index could not be loaded.',
   routeFailed: '{n} tiles of star data could not be loaded.',
   routeFailedOne: '1 tile of star data could not be loaded.',
   routeError: 'The route could not be computed.',
@@ -285,6 +287,7 @@ const de: Record<MessageKey, string> = {
   search: 'Stern suchen…',
   noResults: 'Keine Treffer',
   recentSearches: 'Zuletzt gesucht',
+  searchUnavailable: 'Der Sternkatalog konnte nicht geladen werden. Bitte später erneut versuchen.',
   help: 'Steuerung',
   about: 'Info & Quellen',
   close: 'Schließen',
@@ -341,8 +344,8 @@ const de: Record<MessageKey, string> = {
 <p>Der Blickpunkt ist der Punkt, um den sich die Kamera dreht. Angezeigt werden nur Sterne innerhalb des sichtbaren Radius um ihn; verschiebe den Blickpunkt, um weiter zu erkunden. Der Radius folgt dem Zoom: Herauszoomen zeigt einen größeren Bereich (abschaltbar in den Einstellungen).</p>
 <p>Das Gitter liegt parallel zur galaktischen Ebene. 0° zeigt zum Galaktischen Zentrum, 90° in Richtung der galaktischen Rotation.</p>
 <p>Das Sprungnetz verbindet Sterne bis zur Sprungweite (standardmäßig 9 Lj); hellere Sterne bekommen mehr Verbindungen. Die Infokarte eines Sterns listet seine Verbindungen auf; ein Klick darauf führt dorthin.</p>
-<p>Routen: „Route von hier“ und „Route hierher“ in der Karte eines Sterns planen eine Route durch das Sprungnetz, auch zwischen weit entfernten Sternen (etwa der Sonne und Beteigeuze). Das Routenfeld listet die Wegpunkte; herausgezoomt wird nur die Route gezeichnet.</p>
-<p>Das leere Suchfeld zeigt die drei zuletzt über die Suche gewählten Sterne. Ein Klick neben die Einstellungen oder einen Dialog schließt sie.</p>`,
+<p>Routen: „Route von hier“ und „Route hierher“ in der Infokarte eines Sterns planen eine Route durch das Sprungnetz, auch zwischen weit entfernten Sternen (etwa der Sonne und Beteigeuze). Das Routenfeld listet die Wegpunkte; herausgezoomt wird nur die Route gezeichnet.</p>
+<p>Das leere Suchfeld zeigt die drei zuletzt über die Suche gewählten Sterne. Ein Klick neben die Einstellungen oder neben einen Dialog schließt diese.</p>`,
   aboutText: `
 <p>Die Positionen werden aus gemessenen trigonometrischen Parallaxen und Himmelskoordinaten berechnet und in ein heliozentrisches galaktisches Koordinatensystem umgerechnet (X zum Galaktischen Zentrum, Z zum galaktischen Nordpol). Die Sterngrößen sind symbolisch; echte Sterndurchmesser wären unsichtbar klein.</p>
 <p>Datenquellen:</p>`,
@@ -463,8 +466,8 @@ const de: Record<MessageKey, string> = {
   routeToHere: 'Route hierher',
   routeNoStart: 'Start?',
   routeNoGoal: 'Ziel?',
-  routeChooseFrom: 'Start wählen: „Route von hier“ in der Karte eines Sterns.',
-  routeChooseTo: 'Ziel wählen: „Route hierher“ in der Karte eines Sterns.',
+  routeChooseFrom: 'Start wählen: „Route von hier“ in der Infokarte eines Sterns.',
+  routeChooseTo: 'Ziel wählen: „Route hierher“ in der Infokarte eines Sterns.',
   routeSwap: 'Start und Ziel tauschen',
   routeMode: 'Beste Route',
   routeModeJumps: 'Wenigste Sprünge',
@@ -486,7 +489,8 @@ const de: Record<MessageKey, string> = {
   routeTooManyPairs: 'Bis {w} um die gerade Linie gibt es zu viele Sternpaare innerhalb der Sprungweite.',
   routeTooMuchData: 'Die Sterne bis {w} um die gerade Linie sind zu viele Daten zum Laden.',
   routeMissing: '{name} ist mit den aktuellen Einstellungen (Filter oder Datenebenen) ausgeblendet und deshalb nicht Teil des Sprungnetzes.',
-  routeNotFound: '{name} ist nicht mehr in den Sterndaten.',
+  routeNotFound: '{name} wurde in den Sterndaten nicht gefunden.',
+  routeLookupFailed: '{name} wurde nicht gefunden: Der Sternindex konnte nicht geladen werden.',
   routeFailed: '{n} Kacheln mit Sterndaten konnten nicht geladen werden.',
   routeFailedOne: '1 Kachel mit Sterndaten konnte nicht geladen werden.',
   routeError: 'Die Route konnte nicht berechnet werden.',

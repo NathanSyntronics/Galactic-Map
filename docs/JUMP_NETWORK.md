@@ -113,7 +113,11 @@ them apart.
   the visible sphere (`offset + R ≤ R₀ + M − jumpRange`, `R₀` the radius of the last
   computation), no computation runs at all, however fast: zooming in never needs one, zooming
   out only once the sphere grows beyond the drawn links (and then a slow one still waits for the
-  view to rest). Measured in a browser (software rendering): a 6 s wheel zoom out and back in
+  view to rest). After the zoom, too, a radius change (or a level of detail that only drops nodes)
+  computes nothing while the network is complete and its region holds the one the view needs
+  (`offset + R + M ≤ R₀ + M`) without being more than 1.5 times as large (`networkServes` in
+  `src/network/places.ts`); so zooming in tick by tick from 160 ly to 98 ly computes nothing (it
+  used to compute after each tick: 40–200 ms), and the next tick computes the smaller region once. Measured in a browser (software rendering): a 6 s wheel zoom out and back in
   around 40 ly ran no computation instead of 17 of about 25 ms; a 3 s zoom out from 20 to 59 ly ran
   two; zooming from 150 ly out past the limit (235 ly) and back to 150 ly ran none during the zoom
   and one after it. A 2.9 s wheel zoom from 20 to 300 ly (with the drawing switched off, so that

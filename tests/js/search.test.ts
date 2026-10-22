@@ -56,4 +56,24 @@ describe('SearchIndex', () => {
     expect(first('wega')).toBe('Vega');
     expect(first('55 Cnc'.replace('Cnc', 'Cancri'))).toBe('Rho¹ Cancri');
   });
+
+  it('prefers the exact spelling when two designations share a normalised key', () => {
+    const idx = new SearchIndex();
+    idx.load([
+      ['G 18-57', null, 'r1', 1, 0, 0, 0, 7, null, 'G 18-57', -1],
+      ['G 185-7', null, 'r2', 2, 0, 0, 0, 7, null, 'G 185-7', -1],
+      ['Star X', null, 'r3', 3, 0, 0, 0, 7, ['LP 131-33'], 'HIP 1', -1],
+      ['LP 13-133', null, 'r4', 4, 0, 0, 0, 7, null, 'LP 13-133', -1],
+    ]);
+    expect(idx.find('G 18-57')?.[3]).toBe(1);
+    expect(idx.find('G 185-7')?.[3]).toBe(2);
+    // an alternative designation spelled exactly beats a primary that only normalises the same
+    expect(idx.find('LP 131-33')?.[3]).toBe(3);
+    expect(idx.find('LP 13-133')?.[3]).toBe(4);
+    // other spellings still find the first (primary designations first)
+    expect(idx.find('g18-57')?.[3]).toBe(1);
+    expect(idx.find('lp 1313-3')?.[3]).toBe(4);
+    expect(idx.byPrimary('G 185-7')?.[3]).toBe(2);
+    expect(idx.byPrimary('G 1857')).toBeNull();
+  });
 });

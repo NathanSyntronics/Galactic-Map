@@ -1,10 +1,11 @@
 import { Color, MathUtils, Matrix4, PerspectiveCamera, Scene, Vector3, WebGLRenderer } from 'three';
 import { Navigation } from './controls/navigation';
+import { SPRITE_CORE, pickScore } from './controls/pick';
 import { TapDetector } from './controls/tap';
 import { AttributeStore } from './data/attributes';
 import { Flag, designationOf, type NodeData } from './data/format';
 import { decodeCsv } from './data/csv';
-import { exportCsv, importCsv, type ImportReport, type StarResolver } from './data/importer';
+import { NO_LOOKUP, csvNeedsLookup, exportCsv, importCsv, type ImportReport, type StarResolver } from './data/importer';
 import { galacticToWorld, worldToGalactic } from './data/galactic';
 import {
   HttpError,
@@ -24,6 +25,7 @@ import {
   computeNetwork,
   jumpMargin,
   linksOfStar,
+  networkServes,
   placeOfStar,
   type CapacityRule,
   type JumpNetwork,
@@ -32,8 +34,8 @@ import {
 import { ROUTE_STORAGE_KEY, RoutePlanner, parseStoredRoute, type RouteEnd, type RouteResult, type StoredRoute, type Waypoint } from './network/planner';
 import { JumpLines } from './render/links';
 import { DropLines, Marker, PolarGrid } from './render/overlays';
-import { RouteLine, fitDistance } from './render/route';
-import { Starfield, apparentMag, computeStyle, starLogL } from './render/starfield';
+import { RouteLine, fitDistance, routeBounds } from './render/route';
+import { Starfield, apparentMag, computeStyle, spritePx, starLogL } from './render/starfield';
 import {
   SIZE_LUMINOSITY,
   SIZE_UNIFORM,
@@ -80,8 +82,8 @@ function parseStarKey(key: string): { path: string; i: number } {
 
 /** Settings that change which stars are shown (and so the jump network). */
 const VISIBILITY_KEYS: (keyof Settings)[] = ['showBrownDwarfs', 'showWhiteDwarfs', 'maxDistErr', 'colorBy', 'sizeBy', 'missingStyle'];
-/** Settings that change the jump network. */
-const JUMP_KEYS: (keyof Settings)[] = ['jumps', 'jumpRange', 'jumpFaint', 'jumpSun', 'jumpBright', 'jumpBy', 'jumpHub', 'jumpConnect', 'radius'];
+/** Settings that change the jump network (the radius only when the network no longer serves, see networkServes). */
+const JUMP_KEYS: (keyof Settings)[] = ['jumps', 'jumpRange', 'jumpFaint', 'jumpSun', 'jumpBright', 'jumpBy', 'jumpHub', 'jumpConnect'];
 /** Settings that change the route (besides hiding stars without a value of the data layers). */
 const ROUTE_KEYS: (keyof Settings)[] = [
   'jumpRange',
@@ -151,6 +153,8 @@ export class App {
   private routeOnly = false;
   /** The jump network needs to be recomputed. */
   private jumpDirty = true;
+  /** The radius changed or the selection lost nodes: recomputed only if the network no longer serves. */
+  private jumpCheck = false;
   private lastJump = -Infinity;
   /** Duration of the last network computation (ms); recomputations are spaced by a multiple of it. */
   private jumpCost = 0;
@@ -186,7 +190,8 @@ export class App {
   private manifest: Manifest | null = null;
   private octree: Octree | null = null;
   private loader: NodeLoader | null = null;
-  private searchLoaded: Promise<void> | null = null;
+  /** The search index load (true: loaded); reset after a failure, so the next use tries again. */
+  private searchLoaded: Promise<boolean> | null = null;
   private selected: StarInfo | null = null;
   private pendingSelect: SearchHit | null = null;
 
@@ -289,10 +294,11 @@ export class App {
         },
         style: (data, colors, sizes) => computeStyle(data, this.store.get(), this.stylePlan, colors, sizes),
         nodeKey: (path) => this.nodeOrdinal.get(path) ?? 0,
+        // an exact lookup (find() would also take other spellings); a failed index load is reported
         find: async (designation) => {
-          await this.loadSearch();
-          const e = this.searchIndex.find(designation);
-          return e && e[9] === designation ? { path: e[2], index: e[3] } : null;
+          if (!(await this.loadSearch())) throw new Error('search index unavailable');
+          const e = this.searchIndex.byPrimary(designation);
+          return e ? { path: e[2], index: e[3] } : null;
         },
         save: saveRoute,
       },
@@ -305,6 +311,7 @@ export class App {
     this.routeBox.onRetry = () => this.planner.retry();
     this.routeBox.onShowAll = () => this.showWholeRoute();
     this.routeBox.onPick = (k) => this.pickWaypoint(k);
+    this.placeAboveCard();
 
     this.updateLegend();
     this.attrs.subscribe((kind) => this.attributesChanged(kind));
@@ -366,7 +373,8 @@ export class App {
     // a route kept from the last visit
     this.planner.invalidate();
     this.loop();
-    // fetched for everyone (it is small), so that visitors with data of their own can go back to it
+    // fetched for everyone (it is small), so that visitors with data of their own can go back to it;
+    // the shipped one has exact keys, so applying it loads no search index
     void this.loadSiteData(!AttributeStore.readStored());
   }
 
@@ -389,7 +397,8 @@ export class App {
 
   private async applySiteData(): Promise<void> {
     if (!this.siteData) return;
-    const resolver = await this.resolver();
+    // a dataset with exact keys (the shipped one) needs neither the search index nor systems.json
+    const resolver = csvNeedsLookup(this.siteData) ? await this.resolver() : NO_LOOKUP;
     // the site dataset is not saved as the visitor's own data: site updates keep reaching them
     this.attrs.withoutSaving(() => {
       this.attrs.load({ v: 1, defs: [], values: {} }, false);
@@ -471,7 +480,7 @@ export class App {
 
   private async importFile(file: File, replace: boolean): Promise<ImportReport> {
     const text = decodeCsv(await file.arrayBuffer());
-    const resolver = await this.resolver();
+    const resolver = csvNeedsLookup(text) ? await this.resolver() : NO_LOOKUP;
     return importCsv(text, this.attrs, resolver, replace);
   }
 
@@ -541,21 +550,31 @@ export class App {
     this.loadingEl.classList.remove('hidden');
   }
 
-  /** The search index is loaded on first use of the search box. */
-  private loadSearch(): Promise<void> {
+  /** The search index is loaded on first use of the search box; resolves to false if it could not be loaded. */
+  private loadSearch(): Promise<boolean> {
     if (!this.searchLoaded) {
-      this.searchLoaded = (async () => {
-        try {
-          const res = await fetch(`${this.baseUrl}search.json`);
-          if (!res.ok) return;
-          this.searchIndex.load((await res.json()) as SearchTuple[]);
-          this.search.indexLoaded();
-        } catch (err) {
-          console.warn('search index unavailable', err);
-        }
-      })();
+      const p: Promise<boolean> = this.fetchSearch().then((ok) => {
+        // after a failure the next use tries again
+        if (!ok && this.searchLoaded === p) this.searchLoaded = null;
+        return ok;
+      });
+      this.searchLoaded = p;
     }
     return this.searchLoaded;
+  }
+
+  private async fetchSearch(): Promise<boolean> {
+    try {
+      const res = await fetch(`${this.baseUrl}search.json`);
+      if (!res.ok) throw new HttpError(res.status, res.url);
+      this.searchIndex.load((await res.json()) as SearchTuple[]);
+      this.search.indexLoaded();
+      return true;
+    } catch (err) {
+      console.warn('search index unavailable', err);
+      this.search.indexFailed();
+      return false;
+    }
   }
 
   // ------------------------------------------------------------------ settings
@@ -591,6 +610,7 @@ export class App {
       this.lodDirty = true;
     }
     if (has(...JUMP_KEYS, ...VISIBILITY_KEYS)) this.jumpDirty = true;
+    else if (has('radius')) this.jumpCheck = true;
     // the route: the shown stars and the network settings (data layers hide stars only with 'hide')
     if (has(...VISIBILITY_KEYS)) this.planner.styleChanged();
     if (has(...ROUTE_KEYS) || (s.missingStyle === 'hide' && has('colorBy', 'sizeBy'))) this.planner.invalidate(ROUTE_DELAY_MS);
@@ -676,8 +696,11 @@ export class App {
     );
     const before = this.selectedPaths;
     this.selectedPaths = new Set(selected.map((n) => n.path));
-    if (before.size !== this.selectedPaths.size || [...before].some((p) => !this.selectedPaths.has(p))) {
-      this.jumpDirty = true;
+    const added = [...this.selectedPaths].some((p) => !before.has(p));
+    if (added || [...before].some((p) => !this.selectedPaths.has(p))) {
+      // new nodes change the network; nodes dropped by a zoom in only when it no longer serves
+      if (added) this.jumpDirty = true;
+      else this.jumpCheck = true;
       // labels and the status line (also when no node has to be loaded for the change)
       this.candidatesDirty = true;
     }
@@ -901,6 +924,12 @@ export class App {
     const s = this.store.get();
     const target = this.nav.target;
     const r2 = s.radius * s.radius;
+    // sprite sizes as the shader draws them (large star sizes make discs much wider than the pick radius)
+    const u = this.starfield.material.uniforms;
+    const pr = this.renderer.getPixelRatio();
+    const scale = u.uScale.value as number;
+    const minPx = u.uMinPx.value as number;
+    const maxPx = u.uMaxPx.value as number;
     let best: { d: number; data: NodeData; i: number } | null = null;
     for (const rn of this.starfield.visibleNodes()) {
       const d = rn.data;
@@ -920,10 +949,11 @@ export class App {
         const sx = ((m[0] * x + m[4] * y + m[8] * z + m[12]) / cw + 1) * 0.5 * w;
         const sy = (1 - (m[1] * x + m[5] * y + m[9] * z + m[13]) / cw) * 0.5 * h;
         const dist = Math.hypot(sx - mx, sy - my);
-        if (dist > radiusPx) continue;
-        // prefer named / brighter stars when several are under the cursor
-        const score = dist - (d.names.has(i) ? 4 : 0) - starLogL(d, i);
-        if (!best || score < best.d) best = { d: score, data: d, i };
+        if (dist > radiusPx && dist > (SPRITE_CORE * maxPx) / (2 * pr)) continue;
+        // clip w is the view depth
+        const core = (SPRITE_CORE * spritePx(rn.sizes[i], s.starSize, scale, cw, minPx, maxPx)) / (2 * pr);
+        const score = pickScore({ dist, core, named: d.names.has(i), logL: starLogL(d, i) }, radiusPx);
+        if (score !== null && (!best || score < best.d)) best = { d: score, data: d, i };
       }
     }
     return best ? this.starInfo(best.data, best.i) : null;
@@ -1153,12 +1183,31 @@ export class App {
     },
   };
 
+  /**
+   * Phones: while the info card is open, the route box (and legend) would sit under it, so the
+   * bottom-left stack moves to the top of the screen (CSS: .card-open, --card-h).
+   */
+  private placeAboveCard(): void {
+    const phone = window.matchMedia?.('(max-width: 700px)');
+    const card = this.info.root;
+    const place = () => {
+      const open = !!phone?.matches && !card.classList.contains('hidden');
+      this.container.classList.toggle('card-open', open);
+      if (open) this.container.style.setProperty('--card-h', `${card.offsetHeight}px`);
+    };
+    // the card's size changes with its content and when it is shown or hidden
+    if (typeof ResizeObserver !== 'undefined') new ResizeObserver(place).observe(card);
+    phone?.addEventListener?.('change', place);
+    place();
+  }
+
   /** The planner's ends, status or route changed. */
   private routeChanged(): void {
     const p = this.planner;
     if (p.route !== this.route) {
       this.route = p.route;
-      this.routeLine.set(this.route ? this.route.waypoints.map((w) => w.pos) : null, this.route?.found ?? true);
+      // a partial route: the destination it did not reach gets its own marker
+      this.routeLine.set(this.route ? this.route.waypoints.map((w) => w.pos) : null, this.route?.found ?? true, p.to?.pos ?? null);
       this.updateLegend();
     }
     // start and destination labels
@@ -1171,7 +1220,9 @@ export class App {
    * the screen below the top bar and, on phones, above the route box.
    */
   private showWholeRoute(): void {
-    const ext = this.routeLine.extent;
+    // the route, and the chosen stars (a partial route does not reach the destination)
+    const pts = [...(this.route?.waypoints.map((w) => w.pos) ?? []), ...[this.planner.from, this.planner.to].filter((e) => !!e).map((e) => e!.pos)];
+    const ext = routeBounds(pts);
     if (!ext) return;
     const view = this.renderer.domElement.getBoundingClientRect();
     const h = view.height || 1;
@@ -1441,6 +1492,11 @@ export class App {
     if (s.jumps && !this.routeOnly && this.octree) {
       const net = this.jumpLines.network;
       const c = this.nav.target;
+      // a zoom in keeps a network whose region still holds the view's (no computation)
+      if (this.jumpCheck) {
+        this.jumpCheck = false;
+        if (!this.jumpRegion || !networkServes(net, c, s.radius)) this.jumpDirty = true;
+      }
       const moved = net ? Math.hypot(c.x - net.centre.x, c.y - net.centre.y, c.z - net.centre.z) : 0;
       if (moved > 0.05 * s.radius) this.jumpDirty = true;
       // a slow computation waits until the view rests, so that moving stays smooth, or until the

@@ -4,6 +4,7 @@ import type { Aabb } from '../../src/network/capsule';
 import {
   MAX_CORRIDOR_BYTES,
   RoutePlanner,
+  locateRadius,
   parseStoredRoute,
   sameStar,
   type CorridorNode,
@@ -63,7 +64,13 @@ function chain34(): Star[] {
 class FakeHost implements PlannerHost<TestNode> {
   readonly tree = tree();
   readonly loaded = new Set<string>();
+  /** Nodes whose loads fail (until a retry: the connection is back). */
   readonly failing = new Set<string>();
+  /** Nodes the loader has given up on; `permanent` ones stay given up after a retry. */
+  readonly gaveUp = new Set<string>();
+  readonly permanent = new Set<string>();
+  /** find() throws (the name index could not be loaded). */
+  findFails = false;
   readonly requested = new Set<string>();
   wanted: TestNode[] = [];
   hidden = new Set<string>();
@@ -83,9 +90,11 @@ class FakeHost implements PlannerHost<TestNode> {
     for (const n of nodes) this.requested.add(n.path);
   };
   data = (path: string) => (this.loaded.has(path) ? this.tree.nodes.get(path)?.data : undefined);
-  failed = (path: string) => this.failing.has(path);
+  failed = (path: string) => this.gaveUp.has(path);
   retry = (path: string) => {
     this.retried.push(path);
+    if (this.permanent.has(path)) return;
+    this.gaveUp.delete(path);
     this.failing.delete(path);
   };
   options = () => ({
@@ -102,6 +111,7 @@ class FakeHost implements PlannerHost<TestNode> {
   nodeKey = (path: string) => [...this.tree.nodes.keys()].indexOf(path);
   find = async (designation: string) => {
     this.finds.push(designation);
+    if (this.findFails) throw new Error('index unavailable');
     for (const n of this.tree.nodes.values()) {
       for (let i = 0; i < n.data.count; i++) if (n.data.designations.get(i) === designation) return { path: n.path, index: i };
     }
@@ -113,7 +123,10 @@ class FakeHost implements PlannerHost<TestNode> {
 
   /** Loads (or fails) the wanted nodes and tells the planner. */
   deliver(): void {
-    for (const n of this.wanted) if (!this.failing.has(n.path)) this.loaded.add(n.path);
+    for (const n of this.wanted) {
+      if (this.failing.has(n.path)) this.gaveUp.add(n.path);
+      else this.loaded.add(n.path);
+    }
     this.planner.nodeArrived();
   }
 
@@ -270,10 +283,35 @@ describe('route planner', () => {
     await settle(host, planner);
     expect(planner.status).toEqual({ kind: 'failed', tiles: 1 });
     expect(host.wanted).toEqual([]);
+    // it failed during this run: not retried by the planner itself
+    expect(host.retried).toEqual([]);
     planner.retry();
     expect(host.retried).toEqual(['r11']);
     await settle(host, planner);
     expect(planner.status.kind).toBe('found');
+  });
+
+  it('asks once more for a tile the loader gave up on before the run', async () => {
+    const { host, planner } = setup();
+    // given up earlier (while the view needed it); the connection is back
+    host.gaveUp.add('r11');
+    planner.setEnd('from', host.end('r10', 0));
+    planner.setEnd('to', host.end('r11', 4));
+    await settle(host, planner);
+    expect(host.retried).toEqual(['r11']);
+    expect(planner.status.kind).toBe('found');
+  });
+
+  it('fails a run when a stale give-up fails again, and does not retry it twice', async () => {
+    const { host, planner } = setup();
+    host.gaveUp.add('r11');
+    host.failing.add('r11');
+    host.permanent.add('r11');
+    planner.setEnd('from', host.end('r10', 0));
+    planner.setEnd('to', host.end('r11', 4));
+    await settle(host, planner);
+    expect(planner.status).toEqual({ kind: 'failed', tiles: 1 });
+    expect(host.retried).toEqual(['r11']);
   });
 
   it('cancels a running computation when an end changes', async () => {
@@ -305,20 +343,58 @@ describe('route planner', () => {
     expect(planner.status.kind).toBe('found');
   });
 
-  it('finds an end by its designation when the stored node and index no longer match', async () => {
+  it('finds an end near its stored position when the stored node and index no longer match', async () => {
     const { host, planner } = setup();
+    // the data was rebuilt: same star (and position), other node and index
     const stale = { ...host.end('r11', 4), path: 'r10', index: 1 };
     planner.setEnd('from', host.end('r10', 0));
     planner.setEnd('to', stale);
     await settle(host, planner);
-    expect(host.finds).toEqual(['r11-4']);
+    // found by position, without the name index (which holds only named stars)
+    expect(host.finds).toEqual([]);
     expect(planner.status.kind).toBe('found');
     expect(planner.to).toMatchObject({ path: 'r11', index: 4 });
     expect(host.saved?.to).toMatchObject({ path: 'r11', index: 4 });
     // a designation that no longer exists
     planner.setEnd('to', { ...stale, designation: 'gone' });
     await settle(host, planner);
+    expect(host.finds).toEqual(['gone']);
     expect(planner.status).toEqual({ kind: 'notFound', end: 'to' });
+  });
+
+  it('finds an end by its designation when it moved away from its stored position', async () => {
+    const { host, planner } = setup();
+    const moved = { ...host.end('r11', 4), path: 'r10', index: 1, pos: { x: 20, y: 30, z: 0 } };
+    planner.setEnd('from', host.end('r10', 0));
+    planner.setEnd('to', moved);
+    await settle(host, planner);
+    expect(host.finds).toEqual(['r11-4']);
+    expect(planner.status.kind).toBe('found');
+    expect(planner.to).toMatchObject({ path: 'r11', index: 4, pos: { x: 50 } });
+  });
+
+  it('reports a failed name lookup with a retry, and not as a missing star', async () => {
+    const { host, planner } = setup();
+    host.findFails = true;
+    const moved = { ...host.end('r11', 4), path: 'r10', index: 1, pos: { x: 20, y: 30, z: 0 } };
+    planner.setEnd('from', host.end('r10', 0));
+    planner.setEnd('to', moved);
+    await settle(host, planner);
+    expect(planner.status).toEqual({ kind: 'lookupFailed', end: 'to' });
+    host.findFails = false;
+    const kinds: string[] = [];
+    planner.onChange = () => kinds.push(planner.status.kind);
+    planner.retry();
+    await settle(host, planner);
+    expect(planner.status.kind).toBe('found');
+    // the old error is not shown while the lookup runs
+    expect(kinds[0]).toBe('waiting');
+  });
+
+  it('looks for a moved end within a radius that grows with the distance', () => {
+    expect(locateRadius({ x: 3, y: 4, z: 0 })).toBe(1);
+    expect(locateRadius({ x: 300, y: 0, z: 0 })).toBeCloseTo(6, 9);
+    expect(locateRadius({ x: 0, y: 0, z: 2000 })).toBe(10);
   });
 
   it('refuses a corridor with too much data before loading it', async () => {

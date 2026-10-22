@@ -1,4 +1,4 @@
-﻿designation,name,"Faction [text, system]",Capital [text]
+﻿designation [exact],name,"Faction [text, system]",Capital [text]
 Sun,Sun,Commonwealth of Sol,yes
 HR 5459,Alpha Centauri,Commonwealth of Sol,
 HIP 87937,Barnard's Star,Commonwealth of Sol,

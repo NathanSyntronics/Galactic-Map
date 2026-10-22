@@ -103,6 +103,12 @@ void main() {
 }
 `;
 
+/** Sprite size in device pixels, as the vertex shader computes it (size: symbol radius in ly). */
+export function spritePx(size: number, sizeMul: number, scale: number, depth: number, minPx: number, maxPx: number): number {
+  const px = (2 * size * sizeMul * scale) / Math.max(depth, 1e-5);
+  return Math.min(Math.max(px, minPx), maxPx);
+}
+
 export function createStarMaterial(): ShaderMaterial {
   return new ShaderMaterial({
     vertexShader,

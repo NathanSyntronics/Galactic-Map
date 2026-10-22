@@ -243,14 +243,15 @@ export function namedCandidateLimit(maxLabels: number): number {
  * Merges the labels of system components that coincide on screen and names the resulting labels.
  * `items` must be sorted by descending score; the result keeps that order. The selected star
  * leads its group and keeps its own name, and it counts as a separately labelled member of its
- * system, so its siblings' labels never claim the whole system's name.
+ * system, so its siblings' labels never claim the whole system's name. A route's start and
+ * destination (pinned) are treated alike: never merged into another label, always their own name.
  */
 export function mergeSystems(items: ScreenLabel[], selectedKey: string | null): ScreenLabel[] {
   const leaders = new Map<number, ScreenLabel[]>();
   const visible: ScreenLabel[] = [];
   for (const it of items) {
     const sys = it.c.sys;
-    const selected = it.c.key === selectedKey;
+    const selected = it.c.key === selectedKey || !!it.c.pinned;
     it.text = it.c.text;
     it.merged = undefined;
     if (sys === undefined || (it.c.rank >= 99 && !selected)) {
@@ -271,7 +272,7 @@ export function mergeSystems(items: ScreenLabel[], selectedKey: string | null): 
   // one that stands for some of the components joins their letters ("Alpha Centauri AB").
   for (const it of visible) {
     const sys = it.c.sys;
-    if (sys === undefined || it.c.rank >= 99 || it.c.key === selectedKey) continue;
+    if (sys === undefined || it.c.rank >= 99 || it.c.key === selectedKey || it.c.pinned) continue;
     const whole = leaders.get(sys)!.length === 1;
     it.text = groupLabel(it.merged ?? [it.c.text], whole, it.c.sysName);
   }

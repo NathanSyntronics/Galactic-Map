@@ -171,6 +171,7 @@ describe('radius follows zoom', () => {
 
 describe('settings store', () => {
   let writes: string[];
+  let narrow = false;
   let handlers: Record<string, () => void>;
   beforeEach(() => {
     vi.useFakeTimers();
@@ -185,7 +186,11 @@ describe('settings store', () => {
       },
       removeItem: (k: string) => items.delete(k),
     });
-    vi.stubGlobal('window', { addEventListener: (type: string, fn: () => void) => (handlers[type] = fn) });
+    narrow = false;
+    vi.stubGlobal('window', {
+      addEventListener: (type: string, fn: () => void) => (handlers[type] = fn),
+      matchMedia: () => ({ matches: narrow }),
+    });
     vi.stubGlobal('document', {
       visibilityState: 'visible',
       addEventListener: (type: string, fn: () => void) => (handlers[type] = fn),
@@ -235,5 +240,64 @@ describe('settings store', () => {
     store.set({ autoRadius: false, radius: 130 });
     store.flush();
     expect(new SettingsStore().get()).toMatchObject({ autoRadius: false, radius: 130 });
+  });
+
+  it('never stores the defaults of a narrow window, so a zoom does not keep them for wide ones', () => {
+    narrow = true;
+    const phone = new SettingsStore();
+    expect(phone.get()).toMatchObject({ quality: 'low', labelCount: 25 });
+    phone.set({ radius: 24.2 });
+    phone.flush();
+    expect(JSON.parse(writes.at(-1)!)).toEqual({ v: 2, radius: 24.2 });
+    narrow = false;
+    expect(new SettingsStore().get()).toMatchObject({ quality: 'medium', labelCount: 30, radius: 24.2 });
+    // a chosen value is stored, also on a phone
+    narrow = true;
+    const again = new SettingsStore();
+    expect(again.get()).toMatchObject({ quality: 'low', radius: 24.2 });
+    again.set({ quality: 'medium' });
+    again.flush();
+    expect(JSON.parse(writes.at(-1)!)).toEqual({ v: 2, radius: 24.2, quality: 'medium' });
+    narrow = false;
+    expect(new SettingsStore().get().quality).toBe('medium');
+  });
+
+  it('writes only its own changes, so an older tab keeps what another tab changed', () => {
+    const tabB = new SettingsStore();
+    const tabA = new SettingsStore();
+    tabA.set({ starSize: 8, lang: 'de' });
+    tabA.flush();
+    // tab B, opened before, only zooms
+    tabB.set({ radius: 437 });
+    tabB.flush();
+    expect(JSON.parse(writes.at(-1)!)).toEqual({ v: 2, starSize: 8, lang: 'de', radius: 437 });
+    // a value set back to the default is removed
+    tabB.set({ radius: 20 });
+    tabB.flush();
+    expect(JSON.parse(writes.at(-1)!)).toEqual({ v: 2, starSize: 8, lang: 'de' });
+  });
+
+  it('turns a stored first-format record into a diff when writing', () => {
+    localStorage.setItem('galactic-map:settings:v1', JSON.stringify({ ...DEFAULT_SETTINGS, grid: false }));
+    const store = new SettingsStore();
+    store.set({ starSize: 2 });
+    store.flush();
+    expect(JSON.parse(writes.at(-1)!)).toEqual({ v: 2, grid: false, starSize: 2 });
+  });
+
+  it('resets every setting but the language and tells listeners about all of them', () => {
+    const store = new SettingsStore();
+    store.set({ autoRadius: false, radius: 20, starSize: 3, lang: 'de' });
+    store.flush();
+    let changed: string[] = [];
+    store.subscribe((_, c) => (changed = c));
+    store.reset();
+    expect(store.get()).toEqual({ ...DEFAULT_SETTINGS, lang: 'de' });
+    // the radius was already the default: still reported, so the camera goes back to 44 ly
+    expect(changed).toContain('radius');
+    expect(changed).toContain('autoRadius');
+    expect(changed).not.toContain('lang');
+    store.flush();
+    expect(JSON.parse(writes.at(-1)!)).toEqual({ v: 2, lang: 'de' });
   });
 });

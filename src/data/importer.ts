@@ -10,6 +10,14 @@ export interface StarResolver {
   systemPrimary(system: number): string | null;
 }
 
+/** For files whose keys need no lookup (an "[exact]" key column). */
+export const NO_LOOKUP: StarResolver = { star: () => null, systemPrimary: () => null };
+
+/** False when the CSV's keys are exact designations (an "[exact]" key column): no resolver needed. */
+export function csvNeedsLookup(text: string): boolean {
+  return !csvLayout(parseCsv(text).header).exactKeys;
+}
+
 export interface ImportedAttribute {
   name: string;
   type: AttrType;
@@ -24,7 +32,7 @@ export interface ImportReport {
   rows: number;
   /** Rows whose key names a star. */
   matched: number;
-  /** Rows whose key is a catalogue designation that is not in the name index (taken as it is). */
+  /** Rows whose key is a catalogue designation that is not in the name index, or an exact key (taken as it is). */
   unverified: number;
   /** Keys that name no known star. */
   unresolved: string[];
@@ -41,12 +49,12 @@ function looksLikeDesignation(key: string): boolean {
  * column, one column per attribute. Unknown attributes are created (type from a "[number]" /
  * "[text]" / "[color]" header tag, else from the values; "[system]" for whole-system values).
  * Empty cells leave existing values alone; with `replace`, the imported attributes lose their
- * old values first.
+ * old values first. Keys of an "[exact]" key column are not looked up (see CsvLayout).
  */
 export function importCsv(text: string, store: AttributeStore, resolver: StarResolver, replace = false): ImportReport {
   const table = parseCsv(text);
   const decimalComma = table.delimiter !== ',';
-  const { keyColumn, valueColumns } = csvLayout(table.header);
+  const { keyColumn, valueColumns, exactKeys } = csvLayout(table.header);
   const report: ImportReport = { rows: table.rows.length, matched: 0, unverified: 0, unresolved: [], attributes: [] };
 
   const columns: { col: number; def: AttributeDef; info: ImportedAttribute }[] = [];
@@ -79,8 +87,12 @@ export function importCsv(text: string, store: AttributeStore, resolver: StarRes
   for (const row of table.rows) {
     const key = (row[keyColumn] ?? '').trim();
     if (!key) continue;
-    let star = resolver.star(key);
-    if (star) report.matched++;
+    // exact keys are taken as they are, also for whole-system values (already the primary's)
+    let star = exactKeys ? null : resolver.star(key);
+    if (exactKeys) {
+      star = { designation: canonicalDesignation(key), system: -1 };
+      report.unverified++;
+    } else if (star) report.matched++;
     else if (looksLikeDesignation(key)) {
       star = { designation: canonicalDesignation(key), system: -1 };
       report.unverified++;

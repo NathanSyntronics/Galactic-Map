@@ -50,4 +50,26 @@ describe('route display', () => {
     expect(line.shown).toBe(false);
     expect(line.group.children).toHaveLength(1);
   });
+
+  it('marks the destination of a partial route, apart from the line, and includes it in the extent', () => {
+    const line = new RouteLine();
+    const attr = (name: string) => {
+      const markers = line.group.children.find((c) => c.type === 'Points') as unknown as { geometry: { getAttribute(n: string): { array: Float32Array; count: number } } };
+      return markers.geometry.getAttribute(name);
+    };
+    // unreachable: the path ends at the Sun, the destination is 500 ly away
+    line.set([{ x: 0, y: 0, z: 0 }], false, { x: 500, y: 0, z: 0 });
+    expect(line.extent!.radius).toBeCloseTo(250, 6);
+    expect(attr('position').count).toBe(2);
+    expect([...attr('aEnd').array]).toEqual([1, 1]);
+    // a single point: no line, only the markers
+    expect(line.group.children).toHaveLength(1);
+    line.set([{ x: 0, y: 0, z: 0 }, { x: 5, y: 0, z: 0 }, { x: 9, y: 0, z: 0 }], false, { x: 30, y: 0, z: 0 });
+    expect([...attr('aEnd').array]).toEqual([1, 0, 0, 1]);
+    expect(line.group.children).toHaveLength(3);
+    // a complete route: the goal is its last waypoint
+    line.set([{ x: 0, y: 0, z: 0 }, { x: 5, y: 0, z: 0 }], true, { x: 30, y: 0, z: 0 });
+    expect([...attr('aEnd').array]).toEqual([1, 1]);
+    expect(line.extent!.radius).toBeCloseTo(2.5, 6);
+  });
 });

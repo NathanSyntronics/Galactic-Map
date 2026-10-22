@@ -362,6 +362,21 @@ export function computeNetwork(sources: PlaceSource[], opt: NetworkOptions): Jum
   return { ...base, links, overflow: links.overflow ? 'pairs' : null };
 }
 
+/** A computed network is replaced when its region is more than this many times the needed one. */
+export const REGION_SLACK = 1.5;
+
+/**
+ * Whether a network still serves a view after a zoom (or a selection that only dropped nodes):
+ * it is complete and its region holds the region the view needs (sphere plus margin), without
+ * being much larger. Zooming in thus needs no computation until the region is 1.5 times too large.
+ */
+export function networkServes(net: JumpNetwork | null, centre: { x: number; y: number; z: number }, radius: number): boolean {
+  if (!net || net.overflow) return false;
+  const need = radius + jumpMargin(net.range);
+  const moved = Math.hypot(centre.x - net.centre.x, centre.y - net.centre.y, centre.z - net.centre.z);
+  return moved + need <= net.region * (1 + 1e-9) && net.region <= REGION_SLACK * need;
+}
+
 /** Links of a star's place, nearest first, or null when the star is not part of the network. */
 export function linksOfStar(net: JumpNetwork, path: string, i: number): { place: number; links: PlaceLink[] } | null {
   const place = placeOfStar(net.places, path, i);

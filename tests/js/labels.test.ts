@@ -116,6 +116,18 @@ describe('mergeSystems', () => {
     expect(texts(mergeSystems([a2, b2], null))).toEqual(['61 Cygni']);
   });
 
+  it('never merges a route end into another label, and keeps its own name', () => {
+    const a = item('Alpha Centauri A', 100, 100, acen);
+    const b = item('Alpha Centauri B', 101, 100, { ...acen, pinned: true });
+    // A selected, B the route's destination: both labels stay
+    expect(texts(mergeSystems([a, b], a.c.key))).toEqual(['Alpha Centauri A', 'Alpha Centauri B']);
+    // nothing selected: B leads (pinned labels score highest) and keeps its own name
+    expect(texts(mergeSystems([b, a], null))).toEqual(['Alpha Centauri B']);
+    // a pinned designation-only star stays as it is
+    const g = item('Gaia DR3 7', 100, 100, { rank: 99, sys: 3, pinned: true });
+    expect(texts(mergeSystems([g], null))).toEqual(['Gaia DR3 7']);
+  });
+
   it('leaves single stars and catalogue designations alone', () => {
     const v = mergeSystems([item('Vega', 10, 10), item('Gaia DR3 1', 10, 10, { rank: 99, sys: 5 }), item('Gaia DR3 2', 10, 10, { rank: 99, sys: 5 })], null);
     expect(texts(v)).toEqual(['Vega', 'Gaia DR3 1', 'Gaia DR3 2']);

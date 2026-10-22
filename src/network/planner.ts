@@ -60,7 +60,10 @@ export interface PlannerHost<N extends CorridorNode> {
   style(data: NodeData, colors: Uint8Array, sizes: Float32Array): void;
   /** Stable number of a node (tie-break keys, as in the view network). */
   nodeKey(path: string): number;
-  /** A star by its primary designation, when the stored node and index no longer match. */
+  /**
+   * A star by its primary designation (exact), when it is no longer near its stored position. Throws
+   * when the lookup is unavailable (e.g. the name index could not be loaded).
+   */
   find(designation: string): Promise<{ path: string; index: number } | null>;
   save(route: StoredRoute): void;
 }
@@ -123,8 +126,10 @@ export type RouteStatus =
   | { kind: 'refused'; reason: 'places' | 'pairs' | 'data'; width: number; route: RouteResult | null }
   /** The star is hidden by the current settings, so it is not part of the network. */
   | { kind: 'missing'; end: 'from' | 'to' }
-  /** The star is no longer in the star data. */
+  /** The star could not be located in the star data (not at its position, not in the name index). */
   | { kind: 'notFound'; end: 'from' | 'to' }
+  /** The star had to be looked up by name, and the lookup failed (name index not loaded). */
+  | { kind: 'lookupFailed'; end: 'from' | 'to' }
   /** Tiles of the corridor could not be loaded. */
   | { kind: 'failed'; tiles: number }
   /** An unexpected error. */
@@ -202,6 +207,20 @@ class LoadFailed extends Error {
   }
 }
 
+class LookupFailed extends Error {
+  constructor(readonly end: 'from' | 'to') {
+    super(`the ${end} star could not be looked up`);
+  }
+}
+
+/**
+ * A route end whose stored node and index no longer hold it (the star data was rebuilt) is looked
+ * for within this distance of its stored position: 1 ly, or 2 % of its distance from the Sun, at most 10 ly.
+ */
+export function locateRadius(pos: Vec3): number {
+  return Math.min(Math.max(1, 0.02 * Math.hypot(pos.x, pos.y, pos.z)), 10);
+}
+
 const distance = (a: Vec3, b: Vec3) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
@@ -228,6 +247,11 @@ export class RoutePlanner<N extends CorridorNode> {
   private wake: (() => void) | null = null;
   /** Nodes that failed in the last run (for a retry). */
   private failedPaths: string[] = [];
+  /**
+   * Nodes this run has asked for or retried: a node the loader gave up on earlier (e.g. while the
+   * view needed it) is retried once per run; one that fails during the run fails the route.
+   */
+  private asked = new Set<string>();
   /** Number of runs started (tests and diagnostics). */
   runs = 0;
 
@@ -339,11 +363,13 @@ export class RoutePlanner<N extends CorridorNode> {
     const ctl = new AbortController();
     this.abort = ctl;
     this.runs++;
+    this.asked = new Set();
     void this.compute(root, this.from, this.to, ctl.signal).catch((err: unknown) => {
       if (ctl.signal.aborted) return;
       this.host.want([]);
       this.route = null;
       if (err instanceof LoadFailed) return this.setStatus({ kind: 'failed', tiles: err.tiles });
+      if (err instanceof LookupFailed) return this.setStatus({ kind: 'lookupFailed', end: err.end });
       console.error('route planning failed', err);
       this.setStatus({ kind: 'error' });
     });
@@ -352,10 +378,10 @@ export class RoutePlanner<N extends CorridorNode> {
   private async compute(root: N, fromEnd: RouteEnd, toEnd: RouteEnd, signal: AbortSignal): Promise<void> {
     const t0 = now();
     const stats: RouteStats = { tried: [], nodes: 0, bytes: 0, places: 0, pairs: 0, loadMs: 0, networkMs: 0, searchMs: 0, totalMs: 0 };
-    const from = await this.locate(fromEnd, signal, stats);
+    const from = await this.locate(root, fromEnd, 'from', signal, stats);
     if (signal.aborted) return;
     if (!from) return this.finish({ kind: 'notFound', end: 'from' });
-    const to = await this.locate(toEnd, signal, stats);
+    const to = await this.locate(root, toEnd, 'to', signal, stats);
     if (signal.aborted) return;
     if (!to) return this.finish({ kind: 'notFound', end: 'to' });
     const opt = this.host.options();
@@ -453,23 +479,60 @@ export class RoutePlanner<N extends CorridorNode> {
 
   /**
    * The star of a route end in the current data: its stored node and index when the designation
-   * still matches, else found by designation (the star data was rebuilt). Updates the end.
+   * still matches; else (the star data was rebuilt) the star with that designation near its stored
+   * position, or the one the name index gives. Updates the end.
    */
-  private async locate(end: RouteEnd, signal: AbortSignal, stats: RouteStats): Promise<RouteEnd | null> {
+  private async locate(root: N, end: RouteEnd, which: 'from' | 'to', signal: AbortSignal, stats: RouteStats): Promise<RouteEnd | null> {
+    const at = (d: NodeData, index: number): RouteEnd => {
+      const p = d.positions;
+      return { ...end, path: d.path, index, pos: { x: p[3 * index], y: p[3 * index + 1], z: p[3 * index + 2] } };
+    };
+    const load = async (nodes: N[]): Promise<void> => {
+      const t = now();
+      await this.load(nodes, 0, signal);
+      stats.loadMs += now() - t;
+    };
     const check = async (path: string, index: number): Promise<RouteEnd | null> => {
       const node = this.host.node(path);
       if (!node) return null;
-      const t = now();
-      await this.load([node], 0, signal);
-      stats.loadMs += now() - t;
+      await load([node]);
       const d = this.cache.get(path)?.data;
       if (!d || index < 0 || index >= d.count || designationOf(d, index) !== end.designation) return null;
-      const p = d.positions;
-      return { ...end, path, index, pos: { x: p[3 * index], y: p[3 * index + 1], z: p[3 * index + 2] } };
+      return at(d, index);
+    };
+    // near the stored position: finds every star (the name index holds only the named ones)
+    const nearby = async (): Promise<RouteEnd | null> => {
+      const r = locateRadius(end.pos);
+      const nodes = nodesInCapsule<CorridorNode>(root, end.pos, end.pos, r) as N[];
+      await load(nodes);
+      if (signal.aborted) return null;
+      const { x, y, z } = end.pos;
+      for (const n of nodes) {
+        const d = this.cache.get(n.path)?.data;
+        if (!d) continue;
+        const p = d.positions;
+        for (let i = 0; i < d.count; i++) {
+          const dx = p[3 * i] - x;
+          const dy = p[3 * i + 1] - y;
+          const dz = p[3 * i + 2] - z;
+          if (dx * dx + dy * dy + dz * dz <= r * r && designationOf(d, i) === end.designation) return at(d, i);
+        }
+      }
+      return null;
     };
     let found = await check(end.path, end.index);
+    if (!found && !signal.aborted) found = await nearby();
     if (!found && !signal.aborted) {
-      const hit = await this.host.find(end.designation);
+      let hit: { path: string; index: number } | null;
+      // the lookup may load the name index first (seconds on a slow connection)
+      this.setStatus({ kind: 'waiting' });
+      try {
+        hit = await this.host.find(end.designation);
+      } catch (err) {
+        if (signal.aborted) return null;
+        console.warn('route end lookup failed', err);
+        throw new LookupFailed(which);
+      }
       if (hit && !signal.aborted) found = await check(hit.path, hit.index);
     }
     if (found && !signal.aborted) {
@@ -494,8 +557,14 @@ export class RoutePlanner<N extends CorridorNode> {
           const data = this.host.data(n.path);
           if (data) this.cache.set(n.path, { data, colors: new Uint8Array(3 * data.count), sizes: new Float32Array(data.count), version: -1 });
         }
-        if (this.cache.has(n.path)) loadedBytes += n.bytes;
-        else if (this.host.failed(n.path)) failed.push(n.path);
+        if (this.cache.has(n.path)) {
+          loadedBytes += n.bytes;
+          continue;
+        }
+        // given up before this run (not while it waited): asked for once more
+        if (this.host.failed(n.path) && !this.asked.has(n.path)) this.host.retry(n.path);
+        this.asked.add(n.path);
+        if (this.host.failed(n.path)) failed.push(n.path);
         else missing.push(n);
       }
       if (failed.length) {

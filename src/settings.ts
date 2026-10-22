@@ -168,17 +168,23 @@ const LEGACY_DEFAULTS: Partial<Settings> = { radius: 50, labelCount: 60 };
 
 type Listener = (s: Settings, changed: (keyof Settings)[]) => void;
 
+/** Defaults of this device: phones and narrow windows start with less detail and fewer labels. */
+export function deviceDefaults(narrow: boolean): Settings {
+  return narrow ? { ...DEFAULT_SETTINGS, quality: 'low', labelCount: 25 } : { ...DEFAULT_SETTINGS };
+}
+
 export class SettingsStore {
+  /** Defaults of this device; only values that differ from them are stored. */
+  readonly defaults: Settings;
   private state: Settings;
   private listeners: Listener[] = [];
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Keys changed in this tab since the last write: only these are written. */
+  private readonly dirty = new Set<keyof Settings>();
 
   constructor() {
-    this.state = { ...DEFAULT_SETTINGS, ...loadStored() };
-    if (window.matchMedia?.('(max-width: 700px)').matches && !hasStored()) {
-      this.state.quality = 'low';
-      this.state.labelCount = 25;
-    }
+    this.defaults = deviceDefaults(!!window.matchMedia?.('(max-width: 700px)').matches);
+    this.state = { ...this.defaults, ...loadStored() };
     // a pending change is written before the page goes away
     window.addEventListener('pagehide', () => this.flush());
     document.addEventListener('visibilitychange', () => {
@@ -194,27 +200,44 @@ export class SettingsStore {
     const changed = (Object.keys(patch) as (keyof Settings)[]).filter((k) => patch[k] !== this.state[k]);
     if (changed.length === 0) return;
     this.state = { ...this.state, ...patch };
-    // written once the changes pause, not on every step of a zoom
-    if (this.saveTimer !== null) clearTimeout(this.saveTimer);
-    this.saveTimer = setTimeout(() => this.flush(), SAVE_DELAY_MS);
+    for (const k of changed) this.dirty.add(k);
+    this.scheduleSave();
     for (const l of this.listeners) l(this.state, changed);
   }
 
-  /** Writes a pending change now. */
+  /** Written once the changes pause, not on every step of a zoom. */
+  private scheduleSave(): void {
+    if (this.saveTimer !== null) clearTimeout(this.saveTimer);
+    this.saveTimer = setTimeout(() => this.flush(), SAVE_DELAY_MS);
+  }
+
+  /**
+   * Writes a pending change now: only the keys changed in this tab, on top of what is stored, so
+   * that a zoom in an older tab keeps the settings another tab changed in the meantime.
+   */
   flush(): void {
     if (this.saveTimer === null) return;
     clearTimeout(this.saveTimer);
     this.saveTimer = null;
+    const keys = [...this.dirty];
+    this.dirty.clear();
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(storedForm(this.state)));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(mergeStored(readStoredDiff(), this.state, keys, this.defaults)));
     } catch {
       // storage unavailable (private mode etc.) – settings simply are not persisted
     }
   }
 
+  /**
+   * Back to the defaults (the language stays). Every setting counts as changed, so listeners also
+   * redo what depends on a value that happened to be the default already (e.g. the camera distance).
+   */
   reset(): void {
-    const lang = this.state.lang;
-    this.set({ ...DEFAULT_SETTINGS, lang });
+    const keys = (Object.keys(this.defaults) as (keyof Settings)[]).filter((k) => k !== 'lang');
+    this.state = { ...this.defaults, lang: this.state.lang };
+    for (const k of keys) this.dirty.add(k);
+    this.scheduleSave();
+    for (const l of this.listeners) l(this.state, keys);
   }
 
   subscribe(l: Listener): void {
@@ -222,19 +245,21 @@ export class SettingsStore {
   }
 }
 
-function hasStored(): boolean {
-  try {
-    return localStorage.getItem(STORAGE_KEY) !== null;
-  } catch {
-    return false;
-  }
-}
-
 /** Only the values that differ from the defaults are stored, so changed defaults reach every user. */
-export function storedForm(s: Settings): Record<string, unknown> {
+export function storedForm(s: Settings, defaults: Settings = DEFAULT_SETTINGS): Record<string, unknown> {
   const out: Record<string, unknown> = { v: STORED_FORMAT };
   for (const k of Object.keys(DEFAULT_SETTINGS) as (keyof Settings)[]) {
-    if (s[k] !== DEFAULT_SETTINGS[k]) out[k] = s[k];
+    if (s[k] !== defaults[k]) out[k] = s[k];
+  }
+  return out;
+}
+
+/** The stored values with `keys` taken from `state` (dropped where they equal the defaults); other keys stay as stored. */
+export function mergeStored(stored: Partial<Settings>, state: Settings, keys: (keyof Settings)[], defaults: Settings): Record<string, unknown> {
+  const out: Record<string, unknown> = { v: STORED_FORMAT, ...stored };
+  for (const k of keys) {
+    if (state[k] === defaults[k]) delete out[k];
+    else out[k] = state[k];
   }
   return out;
 }
@@ -259,6 +284,20 @@ export function parseStored(raw: string | null): Partial<Settings> {
     (out as Record<string, unknown>)[k] = v;
   }
   return out;
+}
+
+/** The stored values as a diff (the first format, which held every setting, reduced to what differs from the defaults). */
+function readStoredDiff(): Partial<Settings> {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    const stored = parseStored(raw);
+    if (raw && (JSON.parse(raw) as { v?: number }).v === undefined) {
+      for (const k of Object.keys(stored) as (keyof Settings)[]) if (stored[k] === DEFAULT_SETTINGS[k]) delete stored[k];
+    }
+    return stored;
+  } catch {
+    return {};
+  }
 }
 
 function loadStored(): Partial<Settings> {

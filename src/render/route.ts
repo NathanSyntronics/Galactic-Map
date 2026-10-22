@@ -127,16 +127,22 @@ export class RouteLine {
     return this.bounds;
   }
 
-  /** Draws a route through `points` (null removes it); `complete` false draws it fainter (a partial route). */
-  set(points: readonly { x: number; y: number; z: number }[] | null, complete = true): void {
+  /**
+   * Draws a route through `points` (null removes it); `complete` false draws it fainter (a partial
+   * route), and `goal` then gets its own end marker (not joined by the line), which also counts
+   * for the extent.
+   */
+  set(points: readonly { x: number; y: number; z: number }[] | null, complete = true, goal: { x: number; y: number; z: number } | null = null): void {
     for (const l of [this.line, this.casing]) {
       if (!l) continue;
       this.group.remove(l);
       l.geometry.dispose();
     }
     this.line = this.casing = null;
-    this.bounds = points ? routeBounds(points) : null;
-    if (!points || !this.bounds) {
+    // the line's points, then the marker of an unreached destination
+    const marked = points && !complete && goal ? [...points, goal] : points;
+    this.bounds = marked ? routeBounds(marked) : null;
+    if (!points || !marked || !this.bounds) {
       this.markers.visible = false;
       return;
     }
@@ -145,8 +151,8 @@ export class RouteLine {
     this.group.position.set(Math.fround(c.x), Math.fround(c.y), Math.fround(c.z));
     this.group.updateMatrix();
     const o = this.group.position;
-    const rel = new Float32Array(points.length * 3);
-    points.forEach((p, i) => {
+    const rel = new Float32Array(marked.length * 3);
+    marked.forEach((p, i) => {
       rel[3 * i] = p.x - o.x;
       rel[3 * i + 1] = p.y - o.y;
       rel[3 * i + 2] = p.z - o.z;
@@ -154,7 +160,7 @@ export class RouteLine {
     if (points.length >= 2) {
       const make = (material: LineMaterial, order: number): Line2 => {
         const g = new LineGeometry();
-        g.setPositions(rel);
+        g.setPositions(rel.subarray(0, 3 * points.length));
         const l = new Line2(g, material);
         l.frustumCulled = false;
         // after the network lines (-2, -1), before the stars (their level, >= 0)
@@ -167,9 +173,9 @@ export class RouteLine {
     }
     this.lineMaterial.opacity = complete ? 1 : 0.55;
     this.markerMaterial.uniforms.uOpacity.value = complete ? 1 : 0.7;
-    const ends = new Float32Array(points.length);
+    const ends = new Float32Array(marked.length);
     ends[0] = 1;
-    if (complete) ends[points.length - 1] = 1;
+    if (complete || marked.length > points.length) ends[marked.length - 1] = 1;
     this.markers.geometry.dispose();
     const g = new BufferGeometry();
     g.setAttribute('position', new BufferAttribute(rel, 3));

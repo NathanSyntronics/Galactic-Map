@@ -186,24 +186,33 @@ export interface CsvLayout {
   keyColumn: number;
   /** Columns that hold attribute values. */
   valueColumns: number[];
+  /**
+   * The key column is tagged "[exact]" ("designation [exact]"): its keys are designations exactly
+   * as the values are stored (whole-system values under the system's primary), so the import
+   * needs no name lookup.
+   */
+  exactKeys: boolean;
 }
+
+const EXACT_TAG = /\s*\[\s*exact\s*\]$/;
 
 /** Which column holds the star key and which hold attribute values. */
 export function csvLayout(header: string[]): CsvLayout {
   const norm = header.map((h) => h.trim().toLowerCase());
+  const base = norm.map((h) => h.replace(EXACT_TAG, ''));
   let keyColumn = 0;
   for (const k of KEY_HEADERS) {
-    const i = norm.indexOf(k);
+    const i = base.indexOf(k);
     if (i >= 0) {
       keyColumn = i;
       break;
     }
   }
-  const keyIsName = norm[keyColumn] === 'name';
+  const keyIsName = base[keyColumn] === 'name';
   const valueColumns = header
     .map((_, i) => i)
     .filter((i) => i !== keyColumn && norm[i] !== '' && (keyIsName || !INFO_HEADERS.includes(norm[i])));
-  return { keyColumn, valueColumns };
+  return { keyColumn, valueColumns, exactKeys: EXACT_TAG.test(norm[keyColumn] ?? '') };
 }
 
 /** A field quoted for CSV if it needs to be. */

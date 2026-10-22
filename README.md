@@ -60,10 +60,20 @@ An interactive 3-D map of the Sun's stellar neighbourhood, built from real star 
 Hold Shift for faster keyboard movement.
 
 The search finds stars by name or catalogue designation; while the field is empty it lists the
-last three stars picked from the search (newest first, kept in the browser). A click or tap next
-to the open settings panel, or on the backdrop of a dialog, closes it; that click does not select
-or deselect a star, and a drag still turns the view. On a phone the route box and the star card
-step aside while the panel is open, so that such a tap never lands on one of their buttons.
+last three stars picked from the search (newest first, kept in the browser). One picked before the
+star catalogue has loaded says *Loading…* and is carried out when it arrives, unless you type or
+pick something else first; if the catalogue cannot be loaded, the list says so and the next click
+into the field tries again. A click or tap next to the open settings panel, or on the backdrop of
+a dialog, closes it; that click does not select or deselect a star, and a drag still turns the
+view. On a phone the route box and the star card step aside while the panel is open, so that such
+a tap never lands on one of their buttons; while a star card is open, the route box moves to the
+top of the screen in short form (start, destination, status), so that it is not hidden under the
+card. A click anywhere on the bright disc of a large star (at large star sizes) selects that star.
+
+The settings are kept in the browser, but only the values you changed: phones and narrow windows
+start with fewer stars and labels, and those defaults are never stored, so the same browser in a
+wide window gets the normal ones. Each tab writes only the settings it changed, so zooming in an
+older tab keeps what you set in another.
 
 The settings panel (☰) controls:
 * the visible radius, and whether it follows the zoom (on by default: radius = camera distance
@@ -100,8 +110,10 @@ card or imported from a CSV file.
 
 **CSV files** have one row per star. The star is named in the first column, or in a column
 called `designation`, `Bezeichnung` or `name`: a name ("Sirius", "Barnards Pfeilstern") or a
-catalogue designation ("HIP 32349", "HD 48915", "TYC 9007-5848-1", "Gaia DR3 …"). Every other
-column is an attribute. A tag in the header sets the type and the system flag:
+catalogue designation ("HIP 32349", "HD 48915", "TYC 9007-5848-1", "Gaia DR3 …"). A key column
+headed `designation [exact]` holds designations exactly as the values are stored (a star's
+primary designation; for whole-system attributes the system's primary): such a file is imported
+without looking the keys up, so it needs no name index. Every other column is an attribute. A tag in the header sets the type and the system flag:
 `Faction [text, system]`, `Economy [number]`, `Flag colour [color]` (German: `[Zahl]`, `[Farbe]`,
 `[Text]`); without a tag the type follows the values. Comma, semicolon and tab separated files
 and decimal commas are recognised. The export writes the same format: English with `,`, German
@@ -113,7 +125,8 @@ the dataset; attribute values are stored under it, so they survive rebuilds of t
 
 The attributes are stored in the browser (localStorage). A site can ship a dataset of its own
 as `public/user/attributes.csv`: visitors see it until they change something, and *Back to the
-site's dataset* returns to it.
+site's dataset* returns to it. With an `[exact]` key column it is applied right away; otherwise
+applying it first loads the name index (`search.json`, 16.5 MB, and `systems.json`).
 
 **Example factions.** This repository ships such a dataset: four factions (attribute *Faction*,
 whole system; the capitals also have *Capital* = `yes`). Choose *Colour by → Faction* to see
@@ -133,7 +146,9 @@ to one faction at most. So every territory is one connected part of the network.
 coloured in alphabetical order, so the names set the colours: the Sun and Vega, which share the
 longest border, get blue and orange, which stay distinct with red-green colour blindness.
 `npm run factions` (`tools/make-factions.mjs`) recomputes them from the star data in
-`public/data/` and checks that the app's CSV import finds every row.
+`public/data/`. It writes exact keys (so a first visit loads no name index for them) and checks
+that importing the file gives every star of a territory its faction, and that looking the keys up
+by name instead gives the same values.
 
 ### Jump network
 
@@ -167,7 +182,8 @@ specified in [`docs/JUMP_NETWORK.md`](docs/JUMP_NETWORK.md):
   whose stars do not all fit the detail level (the settings then ask for a smaller radius); with
   the default detail level this allows radii up to about 230 ly. The default view (20 ly) takes
   about 15 ms, 100 ly about 30 ms, 200 ly about 0.2 s; a slow computation waits until the view
-  rests.
+  rests. Zooming in computes nothing while the computed region still holds the one the view
+  needs, until it is 1.5 times as large; zooming out computes once the zoom pauses.
 * **Display.** Lines coloured by their length (or in the stars' colours, or one teal) end at the
   edge of the visible sphere, fading out like the stars, and get fainter when many stars are in
   view. The selected star's links are highlighted (the others dimmed while it is inside the
@@ -185,7 +201,8 @@ specified in [`docs/ROUTES.md`](docs/ROUTES.md):
 * **Start and destination.** *Route from here* and *Route to here* on a star's info card set them;
   the route box (bottom left, above the legend; full width on phones) shows them, the status and
   the result. Start, destination and mode are kept in the browser and the route is computed again
-  after a reload.
+  after a reload. If the star data was rebuilt, each end is looked for by its designation near its
+  stored position (any star), else in the name index (named stars).
 * **Best route.** *Fewest jumps* (default; among those the shortest distance) or *shortest
   distance* (among those the fewest jumps); ties are broken by the stars' stable keys, so the same
   stars and settings always give the same route, and swapping start and destination gives it
@@ -195,7 +212,9 @@ specified in [`docs/ROUTES.md`](docs/ROUTES.md):
   `w` starts at twice the jump range and is doubled while there is no path, up to 128 ly. The
   corridor's star data is loaded in addition to the view's, with a progress bar. If even the
   widest corridor has no path, the box says that the destination cannot be reached with this jump
-  range and names the place the route got closest to.
+  range and names the place the route got closest to; the partial route is drawn fainter, with the
+  destination marked. Tiles the loader had given up on earlier are asked for once more; tiles that
+  fail during the planning are reported with *Try again*.
 * **Results.** Sun → Vega: 7 jumps, 53 ly (25 ly in a straight line). Sun → Betelgeuse: 114 jumps,
   772 ly (498 ly straight), found in a corridor of 36 ly from 14.5 MB of star data (shortest
   distance: 116 jumps, 766 ly). From a local server that takes about half a second; over the
@@ -204,7 +223,8 @@ specified in [`docs/ROUTES.md`](docs/ROUTES.md):
   visible sphere. Start and destination are always labelled; waypoints in the visible sphere get
   labels by the usual rules, with a small priority. While a route is shown and the visible radius
   is larger than three jump ranges, only the route is drawn: zoomed out, the full network would be
-  a tangle. *Show whole route* centres the view on the route and zooms out until it fits.
+  a tangle. *Show whole route* centres the view on the route and both chosen stars and zooms out
+  until they fit.
 * **Waypoints.** The box lists them with each jump's length; a click selects the star and flies
   there, close enough to see its links.
 * **Changes.** A change of the network settings, the filters or of data layers that hide stars

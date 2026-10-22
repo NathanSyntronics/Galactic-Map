@@ -3,7 +3,7 @@ import { AttributeStore } from '../../src/data/attributes';
 import { csvLayout, decodeCsv, inferType, parseColumnHeader, parseCsv, parseNumber } from '../../src/data/csv';
 import { DesignationMap, canonicalDesignation, parseDesignation } from '../../src/data/designation';
 import { DesigCat, type NodeData } from '../../src/data/format';
-import { exportCsv, importCsv, type StarResolver } from '../../src/data/importer';
+import { csvNeedsLookup, exportCsv, importCsv, type StarResolver } from '../../src/data/importer';
 
 function fakeNode(desigs: [number, number, number, string?][]): NodeData {
   const n = desigs.length;
@@ -97,10 +97,16 @@ describe('CSV', () => {
   });
 
   it('finds the key column and skips the informational name column', () => {
-    expect(csvLayout(['designation', 'name', 'A', 'B'])).toEqual({ keyColumn: 0, valueColumns: [2, 3] });
-    expect(csvLayout(['A', 'Name', 'B'])).toEqual({ keyColumn: 1, valueColumns: [0, 2] });
-    expect(csvLayout(['Stern', 'B'])).toEqual({ keyColumn: 0, valueColumns: [1] });
-    expect(csvLayout(['designation', 'System'])).toEqual({ keyColumn: 0, valueColumns: [1] });
+    expect(csvLayout(['designation', 'name', 'A', 'B'])).toEqual({ keyColumn: 0, valueColumns: [2, 3], exactKeys: false });
+    expect(csvLayout(['A', 'Name', 'B'])).toEqual({ keyColumn: 1, valueColumns: [0, 2], exactKeys: false });
+    expect(csvLayout(['Stern', 'B'])).toEqual({ keyColumn: 0, valueColumns: [1], exactKeys: false });
+    expect(csvLayout(['designation', 'System'])).toEqual({ keyColumn: 0, valueColumns: [1], exactKeys: false });
+  });
+
+  it('recognises an exact key column', () => {
+    expect(csvLayout(['name', 'Designation [exact]', 'A'])).toEqual({ keyColumn: 1, valueColumns: [2], exactKeys: true });
+    // only the key column's tag counts; other tags do not make a key column
+    expect(csvLayout(['A', 'Star [number]'])).toEqual({ keyColumn: 0, valueColumns: [1], exactKeys: false });
   });
 });
 
@@ -151,6 +157,24 @@ describe('import and export', () => {
       expect(b.toJSON().defs).toEqual(a.toJSON().defs);
       expect(b.toJSON().values).toEqual(a.toJSON().values);
     }
+  });
+
+  it('takes exact keys as they are, without lookups, also for whole-system values', () => {
+    const store = new AttributeStore(false);
+    const lookups: string[] = [];
+    const spy: StarResolver = { star: (k) => (lookups.push(k), resolver.star(k)), systemPrimary: resolver.systemPrimary };
+    const csv = 'designation [exact],name,Faction [text, system],Capital [text]\nHR 2491,Sirius,Union,\nSun,Sun,Sol,yes\nhip  7,,Sol,';
+    expect(csvNeedsLookup(csv)).toBe(false);
+    expect(csvNeedsLookup('designation,A\nHR 1,1')).toBe(true);
+    const r = importCsv(csv, store, spy);
+    expect(lookups).toEqual([]);
+    expect(r).toMatchObject({ rows: 3, matched: 0, unverified: 3, unresolved: [] });
+    const faction = store.defByName('Faction')!;
+    expect(store.getValue(faction.id, 'HR 2491')).toBe('Union');
+    expect(store.getValue(faction.id, 'Sun')).toBe('Sol');
+    // catalogue numbers in their stored spelling
+    expect(store.getValue(faction.id, 'HIP 7')).toBe('Sol');
+    expect(store.getValue(store.defByName('Capital')!.id, 'Sun')).toBe('yes');
   });
 
   it('tells listeners about an import once', () => {

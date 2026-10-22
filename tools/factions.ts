@@ -10,7 +10,7 @@ import { Vector3 } from 'three';
 import { AttributeStore } from '../src/data/attributes';
 import { toCsv } from '../src/data/csv';
 import { decodeNode, designationOf, type NodeData } from '../src/data/format';
-import { importCsv, type ImportReport, type StarResolver } from '../src/data/importer';
+import { NO_LOOKUP, importCsv, type ImportReport, type StarResolver } from '../src/data/importer';
 import { Octree, type Manifest } from '../src/data/octree';
 import { MAX_PAIRS, MAX_PLACES, computeNetwork, jumpMargin, placeOfStar, type JumpNetwork, type PlaceSource } from '../src/network/places';
 import { computeStyle } from '../src/render/starfield';
@@ -42,6 +42,7 @@ export const FACTIONS: Faction[] = [
 
 export const FACTION_COLUMN = 'Faction [text, system]';
 export const CAPITAL_COLUMN = 'Capital [text]';
+export const KEY_COLUMN = 'designation [exact]';
 
 /** Radius around the Sun whose stars form the network; territories must stay a jump margin inside. */
 const REGION = 100;
@@ -162,7 +163,6 @@ export function makeFactions(root: string): FactionResult {
   if (net.overflow) throw new Error(`network not computed: ${net.overflow}`);
   const index = new SearchIndex();
   index.load(JSON.parse(readFileSync(join(dataDir, 'search.json'), 'utf8')) as SearchTuple[]);
-  const resolver = resolverOf(index, dataDir);
 
   const pos = net.places.positions;
   /** Storage keys of the capital stars. */
@@ -188,11 +188,11 @@ export function makeFactions(root: string): FactionResult {
   );
 
   const lines: string[] = [];
-  const rows: string[][] = [['designation', 'name', FACTION_COLUMN, CAPITAL_COLUMN]];
+  // exact keys: the app applies the file without loading the search index (see CsvLayout)
+  const rows: string[][] = [[KEY_COLUMN, 'name', FACTION_COLUMN, CAPITAL_COLUMN]];
   /** Expected faction per storage key, for the check below. */
   const expected = new Map<string, string>();
   const safe = REGION - jumpMargin(s.jumpRange);
-  let unindexed = 0;
   FACTIONS.forEach((f, k) => {
     const places = terr.members[k];
     if (places.length < 10 || places.length > 100) throw new Error(`${f.name}: ${places.length} places (want 10..100)`);
@@ -211,19 +211,11 @@ export function makeFactions(root: string): FactionResult {
       const stars = members(net, p).slice().sort((x, y) => isRep(y) - isRep(x));
       const seen = new Set<string>();
       for (const star of stars) {
+        // exact keys: the designation the values are stored under (the system's primary)
         const key = storageKey(star);
         if (seen.has(key)) continue;
         seen.add(key);
-        // the import takes a key that is not in the name index as an unverified designation; for a
-        // system, a member the index knows names the same system
-        let rowKey = key;
-        if (!resolver.star(key)) {
-          const sid = star.data.systems.get(star.i);
-          const known = sid === undefined ? undefined : stars.find((m) => m.data.systems.get(m.i) === sid && resolver.star(designationOf(m.data, m.i)));
-          if (known) rowKey = designationOf(known.data, known.i);
-          else unindexed++;
-        }
-        rows.push([rowKey, nameOf(star), f.name, capitalKeys.has(key) ? 'yes' : '']);
+        rows.push([key, nameOf(star), f.name, capitalKeys.has(key) ? 'yes' : '']);
         expected.set(key, f.name);
       }
     }
@@ -233,13 +225,14 @@ export function makeFactions(root: string): FactionResult {
   for (let k = 0; k < FACTIONS.length; k++)
     for (let l = k + 1; l < FACTIONS.length; l++)
       if (border[k][l]) lines.push(`${FACTIONS[k].name} – ${FACTIONS[l].name}: ${border[k][l]} link${border[k][l] > 1 ? 's' : ''} across the border`);
+  const unindexed = rows.slice(1).filter((r) => !index.byPrimary(r[0])).length;
   lines.push(`${rows.length - 1} rows, ${unindexed} keys not in the name index`);
   const csv = toCsv(rows);
 
-  // the CSV as the app imports it: every key resolves and every star of a territory gets its faction
+  // the CSV as the app imports it (exact keys, no lookups): every star of a territory gets its faction
   const store = new AttributeStore(false);
-  const report = importCsv(csv, store, resolver);
-  if (report.unresolved.length) throw new Error(`unresolved keys: ${report.unresolved.join(', ')}`);
+  const report = importCsv(csv, store, NO_LOOKUP);
+  if (report.unresolved.length || report.unverified !== rows.length - 1) throw new Error('the keys were not taken as exact');
   const def = store.defByName('Faction');
   const get = def && valueGetter(def.id, store);
   if (!get) throw new Error('no Faction attribute after the import');
@@ -251,7 +244,12 @@ export function makeFactions(root: string): FactionResult {
       }
   });
   if (store.valueCount(def.id) !== expected.size) throw new Error(`${store.valueCount(def.id)} values, expected ${expected.size}`);
-  lines.push(`import check: ${report.matched} matched, ${report.unverified} unverified designations, 0 unresolved`);
+  // the same rows looked up by name (a plain "designation" column) give the same values
+  const looked = new AttributeStore(false);
+  const viaIndex = importCsv(csv.replace(KEY_COLUMN, 'designation'), looked, resolverOf(index, dataDir));
+  if (viaIndex.unresolved.length) throw new Error(`unresolved keys: ${viaIndex.unresolved.join(', ')}`);
+  if (JSON.stringify(looked.toJSON().values) !== JSON.stringify(store.toJSON().values)) throw new Error('looked-up keys differ from the exact keys');
+  lines.push(`import check: ${report.unverified} exact keys; by lookup ${viaIndex.matched} matched, ${viaIndex.unverified} unverified, the same values`);
   return { csv, report, lines, network: net, territories: terr, capitals };
 }
 

@@ -73,6 +73,8 @@ export function routeStatusText(s: RouteBoxState, names: RouteNames): { text: st
       return { text: t('routeMissing', { name: name(st.end === 'from' ? s.from : s.to) }), warn: true };
     case 'notFound':
       return { text: t('routeNotFound', { name: name(st.end === 'from' ? s.from : s.to) }), warn: true };
+    case 'lookupFailed':
+      return { text: t('routeLookupFailed', { name: name(st.end === 'from' ? s.from : s.to) }), warn: true };
     case 'failed':
       return { text: st.tiles === 1 ? t('routeFailedOne') : t('routeFailed', { n: formatNumber(st.tiles) }), warn: true };
     case 'error':
@@ -189,7 +191,7 @@ export class RouteBox {
     this.root.classList.toggle('busy', busy);
     this.progress.hidden = st.kind !== 'loading';
     if (st.kind === 'loading') this.bar.style.width = `${Math.round((100 * st.loadedBytes) / Math.max(st.totalBytes, 1))}%`;
-    this.retryBtn.hidden = st.kind !== 'failed';
+    this.retryBtn.hidden = st.kind !== 'failed' && st.kind !== 'lookupFailed';
     const route = state.route;
     this.showAllBtn.hidden = !route;
     this.listBtn.hidden = !route;

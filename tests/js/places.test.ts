@@ -6,8 +6,10 @@ import {
   buildPlaces,
   computeNetwork,
   linksOfStar,
+  networkServes,
   placeOfStar,
   type CapacityRule,
+  type JumpNetwork,
   type NetworkOptions,
   type PlaceSource,
 } from '../../src/network/places';
@@ -287,5 +289,29 @@ describe('network of places', () => {
     expect(net.links.count).toBe(1);
     expect(net.links.kind[0]).toBe(LinkKind.ALONE);
     expect(linksOfStar(net, 'r', 2)?.links).toEqual([]);
+  });
+});
+
+describe('keeping a network while zooming', () => {
+  const net = (region: number, overflow: JumpNetwork['overflow'] = null, x = 0) =>
+    ({ centre: { x, y: 0, z: 0 }, region, range: 9, overflow }) as unknown as JumpNetwork;
+  const o = { x: 0, y: 0, z: 0 };
+
+  it('serves a smaller radius until its region is 1.5 times the needed one', () => {
+    // computed at radius 160: region 160 + 27
+    const n = net(187);
+    expect(networkServes(n, o, 160)).toBe(true);
+    expect(networkServes(n, o, 120)).toBe(true);
+    // 187 > 1.5 * (97 + 27)
+    expect(networkServes(n, o, 97)).toBe(false);
+  });
+
+  it('does not serve a larger radius, a moved centre or an incomplete network', () => {
+    expect(networkServes(net(47), o, 21)).toBe(false);
+    expect(networkServes(net(47), o, 20)).toBe(true);
+    expect(networkServes(net(187), { x: 30, y: 0, z: 0 }, 150)).toBe(false);
+    expect(networkServes(net(187, 'detail'), o, 120)).toBe(false);
+    expect(networkServes(net(187, 'places'), o, 120)).toBe(false);
+    expect(networkServes(null, o, 20)).toBe(false);
   });
 });
