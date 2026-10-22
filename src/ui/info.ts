@@ -145,7 +145,11 @@ export class InfoPanel {
       btn.type = 'button';
       btn.title = t(KIND_TITLES[l.kind] ?? 'jumpKindCapacity');
       btn.append(el('span', 'jump-name', l.name), el('span', 'jump-dist', formatLy(l.distance)));
-      btn.addEventListener('click', () => l.pick());
+      btn.addEventListener('click', () => {
+        l.pick();
+        // the pick rebuilds the card: keep the keyboard focus in it, on the new star's name
+        this.root.querySelector<HTMLElement>('.info-head h2')?.focus();
+      });
       li.appendChild(btn);
       list.appendChild(li);
     }
@@ -163,7 +167,9 @@ export class InfoPanel {
 
     const head = el('div', 'info-head');
     const titles = el('div');
-    titles.appendChild(el('h2', '', displayName(info)));
+    const title = el('h2', '', displayName(info));
+    title.tabIndex = -1;
+    titles.appendChild(title);
     const sub = info.flags & Flag.SUN ? '' : info.nameEn ? info.designation : '';
     if (sub) titles.appendChild(el('div', 'sub', sub));
     const close = el('button', 'icon-btn', '×');

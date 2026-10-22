@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { Vector3 } from 'three';
 import { describe, expect, it } from 'vitest';
 import { DesigCat, Flag, decodeNode, designationOf, spectralClassOf } from '../../src/data/format';
-import { Octree, selectNodes, selectionComplete, type Manifest } from '../../src/data/octree';
+import { Octree, selectNodes, selectWithMargin, selectionComplete, type Manifest, type OctreeNode } from '../../src/data/octree';
 
 // Fixture written by pipeline/tests/make_js_fixture.py
 const dir = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'data');
@@ -98,6 +98,54 @@ describe('node selection', () => {
     expect(one.length).toBe(2);
     expect(selectionComplete(one, p, 10)).toBe(true);
     expect(selectionComplete([tree.root], p, 10)).toBe(false);
+  });
+
+  it('takes a margin only when all of it fits the budget, never at the cost of the sphere', () => {
+    // three levels: root, 8 children, 64 grandchildren, cube half size 100 around 0
+    let seed = 11;
+    const rnd = () => {
+      seed = (seed * 16807) % 2147483647;
+      return seed / 2147483647;
+    };
+    const nodes: Manifest['nodes'] = [['r', 500, 0, 0xff, 0, 0]];
+    for (let i = 0; i < 8; i++) {
+      nodes.push([`r${i}`, 200 + Math.floor(rnd() * 800), 0, 0xff, 0, 0]);
+      for (let j = 0; j < 8; j++) nodes.push([`r${i}${j}`, 100 + Math.floor(rnd() * 900), 0, 0, 0, 0]);
+    }
+    const tree = new Octree({ ...manifest, root: { center: [0, 0, 0], halfSize: 100 }, nodes });
+    const touching = (sel: OctreeNode[], c: Vector3, r: number) =>
+      sel.filter((n) => n.box.distanceToPoint(c) <= r).map((n) => n.path).sort();
+    let wideCount = 0;
+    let narrowCount = 0;
+    for (let k = 0; k < 300; k++) {
+      const target = new Vector3(rnd() * 160 - 80, rnd() * 160 - 80, rnd() * 160 - 80);
+      const radius = 5 + rnd() * 40;
+      const margin = rnd() * 40;
+      const params = {
+        cameraPos: target.clone().add(new Vector3(rnd() - 0.5, rnd() - 0.5, rnd() - 0.5).setLength(radius * (1 + 3 * rnd()))),
+        target,
+        radius,
+        budget: 500 + Math.floor(rnd() * 20_000),
+        pixelsPerUnitAtUnitDistance: 800,
+      };
+      const plain = selectNodes(tree, params);
+      const { nodes: sel, wide } = selectWithMargin(tree, params, margin);
+      // the nodes that hold stars inside the sphere are the same as without the margin
+      expect(touching(sel, target, radius)).toEqual(touching(plain, target, radius));
+      if (wide) {
+        wideCount++;
+        expect(selectionComplete(sel, target, radius + margin)).toBe(true);
+        expect(selectionComplete(plain, target, radius)).toBe(true);
+      } else {
+        narrowCount++;
+        expect(sel).toEqual(plain);
+      }
+    }
+    expect(wideCount).toBeGreaterThan(30);
+    expect(narrowCount).toBeGreaterThan(30);
+    // no margin: the plain selection
+    const params = { cameraPos: new Vector3(0, 0, 100), target: new Vector3(), radius: 20, budget: 5000, pixelsPerUnitAtUnitDistance: 800 };
+    expect(selectWithMargin(tree, params, 0)).toEqual({ nodes: selectNodes(tree, params), wide: false });
   });
 
   it('selects nothing when the sphere is outside the data cube', () => {

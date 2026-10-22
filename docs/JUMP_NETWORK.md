@@ -17,18 +17,27 @@ This document is the specification the implementation follows.
   network, which is what one sees.
 * A place is represented by its **most luminous shown member** (by `starLogL`): links start and end
   at that star, its luminosity sets the place's capacity.
+* Places closer than **0.1 ly** (about 6,300 AU, `MERGE_DISTANCE`), measured between their
+  representatives, are merged into one place before linking (transitively), again represented by
+  the most luminous member. This covers binaries without a system id in the data (CD-40 407 /
+  CD-40 407 B, 0.004 ly; G 202-59 A / B) and duplicates; with the real data about 170 such
+  places within 130 ly of the Sun. The shortest possible link is therefore 0.1 ly.
 
 ## Capacity: how many links a place wants
 
 * **By luminosity** (default), piecewise linear in log10 L/L☉ of the representative star:
   * log L ≤ −4.5 (brown dwarfs): `jumpFaint` links (default 3);
   * log L = 0 (the Sun): `jumpSun` links (default 7);
-  * log L ≥ 1.5 (Sirius, 25 L☉, and brighter): `jumpBright` links (default 12);
+  * log L ≥ 1.5 (about 30 L☉) and brighter: `jumpBright` links (default 12; Sirius, 18.5 L☉ in
+    the data, gets 11);
   * linear in between, rounded to the nearest integer.
 * **By a numeric attribute** (a user attribute or a built-in one such as known planets; same
   attribute machinery as the data layers): `k = round(jumpFaint + t · (jumpBright − jumpFaint))`
   where `t` (0…1) is the value's position on the attribute's scale (`scalePosition` with
-  `numericScale`, the same range, log and reverse settings as for colours). A place whose
+  `numericScale`: the same range and log settings as for colours). The scale's *reverse* setting
+  is ignored, so a higher value always gives more links and the sliders "lowest value" and
+  "highest value" mean what they say (the built-in temperature and absolute magnitude scales
+  are reversed for the colours). A place whose
   representative has no value takes the value of another member that has one; without any value it
   gets `jumpFaint`. Whole-system attributes are read with `valueGetter`, so they apply to every
   member.
@@ -64,27 +73,38 @@ them apart.
   (`R` = 20, 50, 100 and 200 ly, several directions: no differing link except 1 of 2,063 at 50 ly
   and 1 of 135,000 at 200 ly). It cannot be exactly 0 for every margin, because the connection
   step is not local.
-* Drawn are the links with at least one end within `R`. Their opacity fades towards the edge of the
-  visible sphere like the stars (smoothstep from `0.85 R` to `R`, per fragment, so a link to a
-  star outside the sphere ends at its edge).
+* Drawn are all links of the region. Their opacity fades towards the edge of the visible sphere
+  like the stars (smoothstep from `0.85 R` to `R`, per fragment, around the current view centre),
+  so a link to a star outside the sphere ends at its edge and links outside it are not seen. The
+  view can therefore move by up to `M − jumpRange` (two ranges) between computations without
+  links missing at the leading edge of the sphere.
 * While the network is on, the level-of-detail selection uses the radius `R + M` instead of `R`
   (same point budget), so that the stars just outside the visible sphere are loaded too; they stay
-  invisible because the star shader fades them out at `R`.
+  invisible because the star shader fades them out at `R`. This wider selection is used only when
+  it is complete (every node that touches the region fits the budget, `selectWithMargin`);
+  otherwise the selection is exactly the one for `R` alone, so the network never costs stars inside
+  the visible sphere. (A complete wider selection holds every node that touches the sphere, which is
+  what `R` alone selects then too.) Checked with the real tiles (camera at 2.2 `R`, 800 px, `R`
+  from 20 to 1,000 ly, low and medium detail, two centres): the stars inside `R` are the same with
+  the network on and off; always using `R + M` had cost up to 45 % of them.
 * If the region holds more than 150,000 places or 1.5 million candidate pairs, the network is not
   computed and the settings show a hint to reduce the radius. Measured in a browser (4-core
   container, software rendering): 20 ly about 15 ms, 100 ly 25–35 ms, 150 ly 65–95 ms, 200 ly
   (105,000 places) 150–200 ms, occasionally up to 0.45 s. With the default detail level the
-  limit is reached at about 230 ly.
+  limit is reached at about 230 ly. After such a result the level-of-detail selection goes back to
+  `R` alone (the region's extra stars are of no use) until a setting that changes the region or
+  the shown stars changes, or the view centre has moved by more than `R`; then it tries again.
 * If the point budget cuts the level-of-detail selection inside the region (not every node that
   touches the region is selected), the network is not computed either, because its links would
   change with the camera position; the settings ask to reduce the radius or raise the detail
-  level. With the default detail level this happens beyond about 200 ly, with the phone default
-  (low) beyond about 150 ly.
+  level. With the default detail level this happens beyond about 250 ly (the place limit comes
+  first), with the phone default (low) beyond about 150 ly.
 * Recomputed (throttled, at most every 250 ms and spaced by 4× the last computation time) when the
   view centre has moved by more than 5 % of `R`, when nodes are loaded or evicted, when a setting
   that affects the network changes, and when attributes change (capacity by attribute, hidden
   stars). A computation that took more than 50 ms waits until the view has rested for 300 ms (or
-  the centre has moved by 0.3 `R`), so that moving the view stays smooth.
+  the centre has moved by `min(0.3 R, M − jumpRange)`, where the drawn links stop covering the
+  sphere), so that moving the view stays smooth.
 
 ## Display
 
@@ -96,9 +116,13 @@ them apart.
   automatically when many stars are in view (factor `√(1500 / stars in view)`, at least 0.2), like
   the faint stars, so that dense regions stay readable.
 * The links of the selected star's place are highlighted (accent colour, full opacity); the other
-  links are dimmed to 45 % meanwhile.
+  links are dimmed to 45 % meanwhile, but only while the selected place lies within `R` of the view
+  centre (outside, its links are faded out and nothing would explain the dimming).
 * The info card lists the selected star's links: partner name (or designation) and distance,
-  sorted by distance. Clicking one selects that star and centres the view on it.
+  sorted by distance. Clicking one selects that star and centres the view on it; the keyboard
+  focus moves to the new card's title, so one can walk the network with Tab and Enter.
+* The status line in the settings counts the places inside the visible sphere and their links,
+  with singular forms ("1 star or system in view, 7 links").
 * The legend shows a line sample "Jump link ≤ 10 ly" while the network is on.
 * Keyboard: **J** toggles the network.
 
@@ -108,7 +132,7 @@ them apart.
 |---|---|---|
 | `jumps` | `true` | checkbox "Jump network" |
 | `jumpRange` | `10` | slider 2–25 ly |
-| `jumpFaint`, `jumpSun`, `jumpBright` | `3`, `7`, `12` | sliders 0–20 ("faint stars", "Sun-like stars", "bright stars") |
+| `jumpFaint`, `jumpSun`, `jumpBright` | `3`, `7`, `12` | sliders 0–20 ("faint stars", "Sun-like stars", "bright stars (from about 30 L☉)"; by attribute: "lowest value", "highest value") |
 | `jumpBy` | `''` (luminosity) | select: luminosity or a numeric attribute |
 | `jumpHub` | `1` | slider 0–2 "prefer big stars" |
 | `jumpConnect` | `true` | checkbox "connect everything in range" |

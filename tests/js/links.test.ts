@@ -32,20 +32,21 @@ function attrs(lines: JumpLines) {
 }
 
 describe('jump lines', () => {
-  it('draws the links with an end inside the radius, relative to an origin at the centre', () => {
+  it('draws every link of the region, relative to an origin at the centre', () => {
     const src = chain();
     const net = computeNetwork([src], options);
     // the chain links neighbours 6 ly apart; 1030 is 16 ly from 1014 and stays alone
     expect(net.links.count).toBe(4);
     const lines = new JumpLines();
-    lines.set(net, 5, 'stars');
+    lines.set(net, 'stars');
     expect(lines.group.position.x).toBe(1000);
     const { main } = attrs(lines);
     const pos = main.geometry.getAttribute('position')!;
-    // 996 and 1002 are within 5 ly of 1000: 990-996, 996-1002 and 1002-1008 are drawn, 1008-1014 not
-    expect(pos.count).toBe(6);
+    // also 1008-1014, which lies outside a small visible sphere: the shader fades it out there,
+    // and it shows when the view moves towards it before the next computation
+    expect(pos.count).toBe(8);
     const xs = [...(pos.array as Float32Array)].filter((_, i) => i % 3 === 0).sort((a, b) => a - b);
-    expect(xs).toEqual([-10, -4, -4, 2, 2, 8]);
+    expect(xs).toEqual([-10, -4, -4, 2, 2, 8, 8, 14]);
     expect(main.visible).toBe(true);
   });
 
@@ -53,7 +54,7 @@ describe('jump lines', () => {
     const src = chain();
     const net = computeNetwork([src], options);
     const lines = new JumpLines();
-    lines.set(net, 100, 'stars');
+    lines.set(net, 'stars');
     const col = () => attrs(lines).main.geometry.getAttribute('aColor')!;
     expect(col().itemSize).toBe(4);
     expect(col().normalized).toBe(true);
@@ -84,7 +85,7 @@ describe('jump lines', () => {
     const src = chain();
     const net = computeNetwork([src], options);
     const lines = new JumpLines();
-    lines.set(net, 100, 'stars');
+    lines.set(net, 'stars');
     const place = placeOfStar(net.places, 'r', 2);
     lines.highlight(place);
     const { highlight } = attrs(lines);
@@ -92,7 +93,7 @@ describe('jump lines', () => {
     const hc = highlight.geometry.getAttribute('aColor')!;
     expect(hc.count).toBe(4);
     expect([...(hc.array as Uint8Array).subarray(0, 4)]).toEqual([...JUMP_HIGHLIGHT_RGB, 255]);
-    lines.set(computeNetwork([src], options), 100, 'stars');
+    lines.set(computeNetwork([src], options), 'stars');
     expect(attrs(lines).highlight.visible).toBe(false);
     lines.highlight(-1);
     expect(attrs(lines).highlight.visible).toBe(false);
@@ -105,12 +106,17 @@ describe('jump lines', () => {
     const src = chain();
     const net = computeNetwork([src], options);
     const lines = new JumpLines();
-    lines.set(net, 100, 'stars');
+    lines.set(net, 'stars');
     const opacity = () => ((attrs(lines).main as unknown as { material: ShaderMaterial }).material.uniforms.uOpacity.value as number);
     lines.update(new Vector3(1000, 0, 0), 20, 0.6);
     expect(opacity()).toBeCloseTo(0.6);
     lines.highlight(placeOfStar(net.places, 'r', 2));
     lines.update(new Vector3(1000, 0, 0), 20, 0.6);
+    expect(opacity()).toBeCloseTo(0.6 * JUMP_DIM);
+    // a place outside the visible sphere: its links are faded out, so nothing is dimmed
+    lines.update(new Vector3(1030, 0, 0), 20, 0.6);
+    expect(opacity()).toBeCloseTo(0.6);
+    lines.update(new Vector3(1015, 0, 0), 20, 0.6);
     expect(opacity()).toBeCloseTo(0.6 * JUMP_DIM);
     // a place without links highlights nothing and dims nothing
     lines.highlight(placeOfStar(net.places, 'r', 5));

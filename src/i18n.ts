@@ -173,11 +173,11 @@ const en = {
   jumpBy: 'Number of links by',
   jumpFaint: 'Faint stars (brown dwarfs)',
   jumpSun: 'Sun-like stars',
-  jumpBright: 'Bright stars (from 25 L☉)',
+  jumpBright: 'Bright stars (from about 30 L☉)',
   jumpLow: 'Lowest value',
   jumpHigh: 'Highest value',
   jumpCapacityHint: 'Links a star wants; in between they follow the luminosity. Stars that are full can still be linked so that nobody is left alone.',
-  jumpAttrHint: 'Links grow with the value on the attribute’s scale (range, log and reverse as for the data layers). Stars without a value get the lowest number.',
+  jumpAttrHint: 'Higher values get more links, along the attribute’s scale (range and log as for the data layers, without “Reverse”). Stars without a value get the lowest number.',
   jumpHub: 'Prefer big stars',
   jumpHubHint: '0: nearest neighbours first. Higher: bright stars collect their links before small neighbours link up with each other.',
   jumpConnect: 'Connect everything in range',
@@ -187,7 +187,11 @@ const en = {
   jumpColorUniform: 'Uniform teal',
   jumpColorLength: 'By length',
   jumpOpacity: 'Line opacity',
-  jumpStats: '{links} links between {places} stars and systems',
+  jumpStats: '{places} in view, {links}',
+  jumpStatsLinks: '{n} links',
+  jumpStatsLinksOne: '1 link',
+  jumpStatsPlaces: '{n} stars and systems',
+  jumpStatsPlacesOne: '1 star or system',
   jumpTooMany: 'Too many stars in the region for the jump network (more than {n}). Reduce the visible radius.',
   jumpTooManyPairs: 'Too many star pairs within the jump range. Reduce the jump range or the visible radius.',
   jumpIncomplete: 'At this detail level not all stars of the region are loaded, so the jump network is not shown. Reduce the visible radius or raise the detail level.',
@@ -378,11 +382,11 @@ const de: Record<MessageKey, string> = {
   jumpBy: 'Anzahl der Verbindungen nach',
   jumpFaint: 'Leuchtschwache Sterne (Braune Zwerge)',
   jumpSun: 'Sonnenähnliche Sterne',
-  jumpBright: 'Helle Sterne (ab 25 L☉)',
+  jumpBright: 'Helle Sterne (ab etwa 30 L☉)',
   jumpLow: 'Niedrigster Wert',
   jumpHigh: 'Höchster Wert',
   jumpCapacityHint: 'Gewünschte Verbindungen eines Sterns; dazwischen richten sie sich nach der Leuchtkraft. Auch volle Sterne werden noch verbunden, damit niemand allein bleibt.',
-  jumpAttrHint: 'Die Verbindungen wachsen mit dem Wert auf der Skala des Attributs (Bereich, logarithmisch und umgekehrt wie bei den Datenebenen). Sterne ohne Wert bekommen die niedrigste Anzahl.',
+  jumpAttrHint: 'Höhere Werte bekommen mehr Verbindungen, entlang der Skala des Attributs (Bereich und logarithmisch wie bei den Datenebenen, ohne „Umkehren“). Sterne ohne Wert bekommen die niedrigste Anzahl.',
   jumpHub: 'Große Sterne bevorzugen',
   jumpHubHint: '0: nächste Nachbarn zuerst. Höher: Helle Sterne erhalten ihre Verbindungen, bevor sich kleine Nachbarn untereinander verbinden.',
   jumpConnect: 'Alles in Reichweite verbinden',
@@ -392,7 +396,11 @@ const de: Record<MessageKey, string> = {
   jumpColorUniform: 'Einheitlich türkis',
   jumpColorLength: 'Nach Länge',
   jumpOpacity: 'Deckkraft der Linien',
-  jumpStats: '{links} Verbindungen zwischen {places} Sternen und Systemen',
+  jumpStats: '{places} sichtbar, {links}',
+  jumpStatsLinks: '{n} Verbindungen',
+  jumpStatsLinksOne: '1 Verbindung',
+  jumpStatsPlaces: '{n} Sterne und Systeme',
+  jumpStatsPlacesOne: '1 Stern oder System',
   jumpTooMany: 'Zu viele Sterne in der Umgebung für das Sprungnetz (mehr als {n}). Verkleinere den sichtbaren Radius.',
   jumpTooManyPairs: 'Zu viele Sternpaare innerhalb der Sprungweite. Verkleinere die Sprungweite oder den sichtbaren Radius.',
   jumpIncomplete: 'Bei diesem Detailgrad sind nicht alle Sterne der Umgebung geladen, deshalb wird das Sprungnetz nicht gezeigt. Verkleinere den sichtbaren Radius oder erhöhe den Detailgrad.',
@@ -430,6 +438,14 @@ export function t(key: MessageKey, vars?: Record<string, string | number>): stri
 /** BCP 47 locale of the current language (number formatting). */
 export function locale(): string {
   return current === 'de' ? 'de-DE' : 'en-US';
+}
+
+/** Status line of the jump network, with singular forms. */
+export function jumpStatsText(links: number, places: number): string {
+  return t('jumpStats', {
+    places: places === 1 ? t('jumpStatsPlacesOne') : t('jumpStatsPlaces', { n: formatNumber(places) }),
+    links: links === 1 ? t('jumpStatsLinksOne') : t('jumpStatsLinks', { n: formatNumber(links) }),
+  });
 }
 
 export function formatNumber(x: number, digits = 0): string {

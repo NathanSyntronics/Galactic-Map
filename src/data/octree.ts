@@ -183,6 +183,20 @@ export function selectionComplete(selected: OctreeNode[], center: Vector3, radiu
   return true;
 }
 
+/**
+ * Selection for a sphere plus a margin (the jump network's region). The wider selection is taken
+ * only when it is complete; otherwise the selection is exactly `selectNodes` for the sphere
+ * alone, so the margin never takes points from the visible sphere. (A complete wider selection
+ * holds every node that touches the sphere, which is also what the sphere alone gets then.)
+ */
+export function selectWithMargin(octree: Octree, p: SelectionParams, margin: number): { nodes: OctreeNode[]; wide: boolean } {
+  if (margin > 0) {
+    const wide = selectNodes(octree, { ...p, radius: p.radius + margin });
+    if (selectionComplete(wide, p.target, p.radius + margin)) return { nodes: wide, wide: true };
+  }
+  return { nodes: selectNodes(octree, p), wide: false };
+}
+
 type FetchFn = (url: string, init?: RequestInit) => Promise<Response>;
 
 /** An HTTP error response. */

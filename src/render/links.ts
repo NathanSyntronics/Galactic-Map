@@ -9,7 +9,7 @@ export const JUMP_UNIFORM_RGB: [number, number, number] = [76, 201, 176];
 export const JUMP_LENGTH_PALETTE = 'turbo';
 /** Highlight of the selected star's links (the accent colour). */
 export const JUMP_HIGHLIGHT_RGB: [number, number, number] = [255, 200, 97];
-/** Opacity factor of the other links while a star's links are highlighted. */
+/** Opacity factor of the other links while the links of a place inside the visible sphere are highlighted. */
 export const JUMP_DIM = 0.45;
 
 // Vertices are stored relative to the group's origin (near the view centre). The alpha fades
@@ -77,6 +77,8 @@ export class JumpLines {
   private drawn = new Uint32Array(0);
   private mode: JumpColor = 'stars';
   private highlighted = -1;
+  /** World position of the highlighted place (when it has links). */
+  private readonly highlightPos = new Vector3();
   private readonly tmp = new Vector3();
 
   constructor() {
@@ -91,10 +93,10 @@ export class JumpLines {
   }
 
   /**
-   * Shows a network: the links with at least one end within `drawRadius` of its centre. The
+   * Shows all links of a network; the shader hides what lies outside the visible sphere. The
    * vertices are stored relative to the computation centre (rounded), which becomes the origin.
    */
-  set(net: JumpNetwork | null, drawRadius: number, mode: JumpColor): void {
+  set(net: JumpNetwork | null, mode: JumpColor): void {
     this.net = net;
     this.mode = mode;
     // place indices change with every network: the caller highlights again
@@ -105,20 +107,8 @@ export class JumpLines {
       this.replace(this.lines, null, null);
       return;
     }
-    const { links, places } = net;
-    const pos = places.positions;
     const { x: cx, y: cy, z: cz } = net.centre;
-    const r2 = drawRadius * drawRadius;
-    const inside = (p: number) => {
-      const dx = pos[3 * p] - cx;
-      const dy = pos[3 * p + 1] - cy;
-      const dz = pos[3 * p + 2] - cz;
-      return dx * dx + dy * dy + dz * dz <= r2;
-    };
-    const drawn = new Uint32Array(links.count);
-    let n = 0;
-    for (let k = 0; k < links.count; k++) if (inside(links.a[k]) || inside(links.b[k])) drawn[n++] = k;
-    this.drawn = drawn.slice(0, n);
+    this.drawn = new Uint32Array(net.links.count).map((_, k) => k);
     this.group.position.set(Math.fround(cx), Math.fround(cy), Math.fround(cz));
     this.group.updateMatrix();
     this.replace(this.lines, this.positions(this.drawn), this.colors(this.drawn, null));
@@ -151,6 +141,8 @@ export class JumpLines {
     const sel: number[] = [];
     for (let k = 0; k < net.links.count; k++) if (net.links.a[k] === place || net.links.b[k] === place) sel.push(k);
     const idx = Uint32Array.from(sel);
+    const pos = net.places.positions;
+    this.highlightPos.set(pos[3 * place], pos[3 * place + 1], pos[3 * place + 2]);
     this.replace(this.highlightLines, this.positions(idx), this.colors(idx, JUMP_HIGHLIGHT_RGB));
   }
 
@@ -159,7 +151,9 @@ export class JumpLines {
     const u = this.material.uniforms;
     (u.uCentre.value as Vector3).copy(this.tmp.copy(target).sub(this.group.position));
     u.uRadius.value = radius;
-    u.uOpacity.value = this.highlightLines.visible ? opacity * JUMP_DIM : opacity;
+    // dimmed only while the highlighted place is in the visible sphere, where its links show
+    const dim = this.highlightLines.visible && this.highlightPos.distanceToSquared(target) <= radius * radius;
+    u.uOpacity.value = dim ? opacity * JUMP_DIM : opacity;
     const h = this.highlightMaterial.uniforms;
     (h.uCentre.value as Vector3).copy(u.uCentre.value as Vector3);
     h.uRadius.value = radius;
@@ -171,7 +165,7 @@ export class JumpLines {
 
   /** Releases the geometry (network switched off). */
   clear(): void {
-    this.set(null, 0, this.mode);
+    this.set(null, this.mode);
   }
 
   private positions(idx: Uint32Array): Float32Array {

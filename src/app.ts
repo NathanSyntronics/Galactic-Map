@@ -12,20 +12,21 @@ import {
   Octree,
   isPermanentError,
   retryDelay,
-  selectNodes,
-  selectionComplete,
+  selectWithMargin,
   type Manifest,
   type OctreeNode,
 } from './data/octree';
-import { formatLy, formatNumber, localName, setLang, t, type MessageKey } from './i18n';
+import { formatLy, formatNumber, jumpStatsText, localName, setLang, t, type MessageKey } from './i18n';
 import {
   MAX_PAIRS,
   MAX_PLACES,
+  attributeCapacity,
   computeNetwork,
   jumpMargin,
   linksOfStar,
   placeOfStar,
   type CapacityRule,
+  type JumpNetwork,
   type NetworkOptions,
 } from './network/places';
 import { JumpLines } from './render/links';
@@ -38,7 +39,6 @@ import {
   buildPlan,
   numericScale,
   planetsOf,
-  scalePosition,
   valueGetter,
   type StylePlan,
 } from './render/style';
@@ -101,7 +101,12 @@ export class App {
   /** Time of the last view change; a slow network computation waits until the view rests. */
   private lastViewChange = -Infinity;
   /** The level of detail holds all stars of the network region (not cut by the point budget). */
-  private lodComplete = true;
+  private jumpRegion = false;
+  /**
+   * The last network exceeded the limits: the level of detail goes back to the visible sphere
+   * until a setting changes or the view centre moves by more than the radius.
+   */
+  private jumpBlocked: { kind: 'places' | 'pairs'; centre: Vector3 } | null = null;
   /** Stable number per octree node path (tie-break keys of the network). */
   private readonly nodeOrdinal = new Map<string, number>();
   private readonly labels: LabelLayer;
@@ -320,6 +325,10 @@ export class App {
     this.styleDirty = true;
     // capacities by attribute and hidden stars
     this.jumpDirty = true;
+    if (this.jumpBlocked && s.missingStyle === 'hide') {
+      this.jumpBlocked = null;
+      this.lodDirty = true;
+    }
     this.updateLegend();
     if (!this.info.editing) this.info.rerender(this.nav.target);
   }
@@ -449,6 +458,11 @@ export class App {
     }
     if (has('colorBy', 'sizeBy', 'missingStyle', 'legend', 'lang', 'jumps', 'jumpRange', 'jumpColor')) this.updateLegend();
     if (has('radius', 'quality', 'jumps', 'jumpRange')) this.lodDirty = true;
+    // a new radius, range or set of shown stars may fit the network's limits again
+    if (this.jumpBlocked && has('jumps', 'radius', 'jumpRange', ...VISIBILITY_KEYS)) {
+      this.jumpBlocked = null;
+      this.lodDirty = true;
+    }
     if (has(...JUMP_KEYS, ...VISIBILITY_KEYS)) this.jumpDirty = true;
     if (has('jumpColor')) this.jumpLines.setMode(s.jumpColor);
     if (has('jumps') && !s.jumps) {
@@ -517,22 +531,25 @@ export class App {
     const budget = QUALITY_BUDGET[s.quality];
     const h = this.renderer.domElement.clientHeight || window.innerHeight;
     const pxPerUnit = h / (2 * Math.tan(MathUtils.degToRad(this.camera.fov) / 2));
-    // the jump network also needs the stars just outside the visible sphere (faded out by the shader)
-    const radius = s.jumps ? s.radius + jumpMargin(s.jumpRange) : s.radius;
-    const selected = selectNodes(this.octree, {
-      cameraPos: this.camera.position,
-      target: this.nav.target,
-      radius,
-      budget,
-      pixelsPerUnitAtUnitDistance: pxPerUnit,
-    });
+    const blocked = this.jumpBlocked;
+    if (blocked && blocked.centre.distanceTo(this.nav.target) > s.radius) this.jumpBlocked = null;
+    // the jump network also needs the stars just outside the visible sphere (faded out by the
+    // shader), but only when all of them fit the budget: it never takes stars from the sphere
+    const margin = s.jumps && !this.jumpBlocked ? jumpMargin(s.jumpRange) : 0;
+    const { nodes: selected, wide } = selectWithMargin(
+      this.octree,
+      { cameraPos: this.camera.position, target: this.nav.target, radius: s.radius, budget, pixelsPerUnitAtUnitDistance: pxPerUnit },
+      margin,
+    );
     const before = this.selectedPaths;
     this.selectedPaths = new Set(selected.map((n) => n.path));
-    if (before.size !== this.selectedPaths.size || [...before].some((p) => !this.selectedPaths.has(p))) this.jumpDirty = true;
-    // a network from a budget-cut selection would change with the camera position
-    const complete = selectionComplete(selected, this.nav.target, radius);
-    if (complete !== this.lodComplete) this.jumpDirty = true;
-    this.lodComplete = complete;
+    if (before.size !== this.selectedPaths.size || [...before].some((p) => !this.selectedPaths.has(p))) {
+      this.jumpDirty = true;
+      // labels and the status line (also when no node has to be loaded for the change)
+      this.candidatesDirty = true;
+    }
+    if (wide !== this.jumpRegion) this.jumpDirty = true;
+    this.jumpRegion = wide;
     // keep loading the node of a star picked in the search even if the LOD does not choose it
     const pending = this.pendingSelect ? this.octree.nodes.get(this.pendingSelect.path) : undefined;
     const request = pending && !this.selectedPaths.has(pending.path) ? [...selected, pending] : selected;
@@ -774,18 +791,7 @@ export class App {
   private capacityRule(s: Settings): CapacityRule {
     const info = s.jumpBy ? attributeInfo(s.jumpBy, this.attrs) : null;
     const get = info?.type === 'number' ? valueGetter(s.jumpBy, this.attrs) : null;
-    if (get) {
-      const sc = numericScale(s.jumpBy, this.attrs);
-      return {
-        by: 'position',
-        position: (d, i) => {
-          const v = get(d, i);
-          return typeof v === 'number' ? scalePosition(v, sc) : undefined;
-        },
-        faint: s.jumpFaint,
-        bright: s.jumpBright,
-      };
-    }
+    if (get) return attributeCapacity(get, numericScale(s.jumpBy, this.attrs), s.jumpFaint, s.jumpBright);
     return { by: 'luminosity', faint: s.jumpFaint, sun: s.jumpSun, bright: s.jumpBright };
   }
 
@@ -796,7 +802,6 @@ export class App {
     const t0 = performance.now();
     const centre = this.nav.target;
     const region = s.radius + jumpMargin(s.jumpRange);
-    const sources = this.starfield.visibleNodes().filter((rn) => rn.node.box.distanceToPoint(centre) <= region);
     const wasOverflow = !!this.jumpLines.network?.overflow;
     const opt: NetworkOptions = {
       centre: { x: centre.x, y: centre.y, z: centre.z },
@@ -810,10 +815,22 @@ export class App {
       connect: s.jumpConnect,
       maxCandidates: MAX_PAIRS,
     };
-    // without all stars of the region the links would depend on the camera: not computed
-    const net = this.lodComplete ? computeNetwork(sources, opt) : { ...computeNetwork([], opt), overflow: 'detail' as const };
-    // links with an end inside the sphere; the extra covers view moves until the next computation
-    this.jumpLines.set(net, s.radius * 1.06, s.jumpColor);
+    let net: JumpNetwork;
+    if (this.jumpRegion) {
+      const sources = this.starfield.visibleNodes().filter((rn) => rn.node.box.distanceToPoint(centre) <= region);
+      net = computeNetwork(sources, opt);
+      if (net.overflow === 'places' || net.overflow === 'pairs') {
+        // the region's extra stars are of no use: the level of detail goes back to the sphere
+        this.jumpBlocked = { kind: net.overflow, centre: centre.clone() };
+        this.lodDirty = true;
+      }
+    } else {
+      // without all stars of the region the links would depend on the camera: not computed
+      net = { ...computeNetwork([], opt), overflow: this.jumpBlocked?.kind ?? 'detail' };
+    }
+    // all links of the region: the shader fades them out at the edge of the visible sphere, so
+    // the view can move by up to two jump ranges before links go missing
+    this.jumpLines.set(net, s.jumpColor);
     this.highlightJumps();
     this.lastJump = performance.now();
     this.jumpCost = this.lastJump - t0;
@@ -858,7 +875,7 @@ export class App {
     }
     let nLinks = 0;
     for (let k = 0; k < links.count; k++) if (inside[links.a[k]] || inside[links.b[k]]) nLinks++;
-    this.panel.setJumpStatus(t('jumpStats', { links: formatNumber(nLinks), places: formatNumber(nPlaces) }));
+    this.panel.setJumpStatus(jumpStatsText(nLinks, nPlaces));
   }
 
   /** Display name of star i of a node. */
@@ -880,7 +897,9 @@ export class App {
     const repIndex = places.repIndex[found.place];
     let via: string | null = null;
     if (rep.path !== path || repIndex !== i) {
-      via = info.system ? localName(info.system.nameEn, info.system.nameDe) : this.starName(rep, repIndex);
+      // the system's name, or the star a close neighbour without a system id was merged with
+      const sameSystem = !!info.system && rep.systems.get(repIndex) === info.system.id;
+      via = sameSystem ? localName(info.system!.nameEn, info.system!.nameDe) : this.starName(rep, repIndex);
     }
     return {
       via,
@@ -1105,8 +1124,10 @@ export class App {
       const c = this.nav.target;
       const moved = net ? Math.hypot(c.x - net.centre.x, c.y - net.centre.y, c.z - net.centre.z) : 0;
       if (moved > 0.05 * s.radius) this.jumpDirty = true;
-      // a slow computation waits until the view rests (or has moved far), so that moving stays smooth
-      const ready = this.jumpCost < 50 || now - this.lastViewChange > 300 || moved > 0.3 * s.radius;
+      // a slow computation waits until the view rests, so that moving stays smooth, or until the
+      // drawn links (the region minus one range) no longer cover the visible sphere
+      const slack = Math.min(0.3 * s.radius, jumpMargin(s.jumpRange) - s.jumpRange);
+      const ready = this.jumpCost < 50 || now - this.lastViewChange > 300 || moved > slack;
       // after a pending restyle (shown stars), and spaced so that it takes at most ~20 % of the time
       if (this.jumpDirty && ready && !this.styleDirty && now - this.lastJump >= Math.max(250, 4 * this.jumpCost)) this.recomputeJumps();
       // like the faint stars: the more stars in view, the fainter the lines, so dense regions stay readable

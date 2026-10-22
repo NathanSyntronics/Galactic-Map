@@ -110,7 +110,13 @@ const MIN_CELLS = 1 << 16;
  * sparse boxes). Places are sorted by cell, so the 3 neighbour cells of a row are one contiguous
  * run and every pair of cells is visited once (half stencil). Null when more than `max` pairs.
  */
-function findCandidates(pos: ArrayLike<number>, n: number, range: number, max: number): { grid: Grid; cand: Candidates } | null {
+function findCandidates(
+  pos: ArrayLike<number>,
+  n: number,
+  range: number,
+  max: number,
+  perPlace = 12,
+): { grid: Grid; cand: Candidates } | null {
   let minX = Infinity, minY = Infinity, minZ = Infinity;
   let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
   let valid = 0;
@@ -173,7 +179,7 @@ function findCandidates(pos: ArrayLike<number>, n: number, range: number, max: n
     sz[u] = pos[3 * i + 2];
   }
 
-  let size = Math.min(Math.max(valid * 12, 1024), max + 1);
+  let size = Math.min(Math.max(valid * perPlace, 1024), max + 1);
   let cu = new Uint32Array(size);
   let cv = new Uint32Array(size);
   let m = 0;
@@ -232,6 +238,20 @@ function findCandidates(pos: ArrayLike<number>, n: number, range: number, max: n
   }
   if (m > max) return null;
   return { grid, cand: { count: m, u: cu, v: cv } };
+}
+
+/** Pairs of points (indices a < b) at most `distance` apart, e.g. places to merge. */
+export function closePairs(pos: ArrayLike<number>, n: number, distance: number): { count: number; a: Uint32Array; b: Uint32Array } {
+  const found = findCandidates(pos, n, distance, Infinity, 0)!;
+  const { grid, cand } = found;
+  const a = new Uint32Array(cand.count);
+  const b = new Uint32Array(cand.count);
+  for (let j = 0; j < cand.count; j++) {
+    const p = grid.place[cand.u[j]], q = grid.place[cand.v[j]];
+    a[j] = p < q ? p : q;
+    b[j] = p < q ? q : p;
+  }
+  return { count: cand.count, a, b };
 }
 
 // ------------------------------------------------------------------ sorting

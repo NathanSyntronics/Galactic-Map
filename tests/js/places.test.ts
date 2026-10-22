@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { LinkKind } from '../../src/network/jumps';
 import {
+  MERGE_DISTANCE,
+  attributeCapacity,
   buildPlaces,
   computeNetwork,
   linksOfStar,
@@ -9,7 +11,10 @@ import {
   type NetworkOptions,
   type PlaceSource,
 } from '../../src/network/places';
+import { capacityFromLogL } from '../../src/network/jumps';
 import { source, type Star } from './fixtures/stars';
+
+const capacityOf = (logL: number) => capacityFromLogL(logL, 3, 7, 12);
 
 const ordinals = new Map(['r', 'r0', 'r1', 'r2', 'r3'].map((p, k) => [p, k]));
 const luminosity: CapacityRule = { by: 'luminosity', faint: 3, sun: 7, bright: 12 };
@@ -118,6 +123,78 @@ describe('places', () => {
     expect(p.capacities[placeOfStar(p, 'r', 4)]).toBe(2);
   });
 
+  it('merges places closer than 0.1 ly into one, represented by the most luminous member', () => {
+    expect(MERGE_DISTANCE).toBe(0.1);
+    // a binary without a system id (0.01 ly), a system with a close single star, and a pair
+    // just over the distance
+    const a = source('r', [
+      { x: 0, logL: -1 },
+      { x: 0.01, logL: -0.5 },
+      { x: 5, logL: 0, system: 4 },
+      { x: 5.2, logL: -1, system: 4 },
+      { x: 20, logL: 0 },
+      { x: 20.15, logL: 0 },
+    ]);
+    const b = source('r0', [{ x: 5.05, logL: 1 }]);
+    for (const order of [
+      [a, b],
+      [b, a],
+    ]) {
+      const p = buildPlaces(order, base);
+      expect(p.count).toBe(4);
+      const bin = placeOfStar(p, 'r', 0);
+      expect(placeOfStar(p, 'r', 1)).toBe(bin);
+      expect(p.repIndex[bin]).toBe(1);
+      expect(p.positions[3 * bin]).toBe(Math.fround(0.01));
+      // the system and a bright star 0.05 ly from its representative: one place, led by that star
+      const sys = placeOfStar(p, 'r', 2);
+      expect(placeOfStar(p, 'r', 3)).toBe(sys);
+      expect(placeOfStar(p, 'r0', 0)).toBe(sys);
+      expect(p.sources[p.repSource[sys]].data.path).toBe('r0');
+      expect(p.capacities[sys]).toBe(capacityOf(1));
+      expect(p.system[sys]).toBe(-1);
+      expect(placeOfStar(p, 'r', 4)).not.toBe(placeOfStar(p, 'r', 5));
+    }
+    const net = computeNetwork([a, b], netOptions());
+    for (let k = 0; k < net.links.count; k++) expect(net.links.length[k]).toBeGreaterThan(MERGE_DISTANCE);
+    expect(linksOfStar(net, 'r', 0)).toEqual(linksOfStar(net, 'r', 1));
+  });
+
+  it('takes the attribute value of another star of a merged place', () => {
+    const a = source('r', [
+      { x: 0, logL: 0 },
+      { x: 0.05, logL: -2 },
+    ]);
+    const rule: CapacityRule = { by: 'position', position: (_d, i) => (i === 1 ? 1 : undefined), faint: 2, bright: 10 };
+    const p = buildPlaces([a], { ...base, capacity: rule });
+    expect(p.count).toBe(1);
+    expect(p.repIndex[0]).toBe(0);
+    expect(p.capacities[0]).toBe(10);
+  });
+
+  it('gives higher attribute values more links, also on a reversed colour scale', () => {
+    const a = source('r', [
+      { x: 0, logL: 0 },
+      { x: 20, logL: 0 },
+      { x: 40, logL: 0 },
+      { x: 60, logL: 0 },
+    ]);
+    const values = [3000, 10000, 30000, undefined];
+    for (const reverse of [false, true]) {
+      const scale = { min: 2000, max: 40000, log: true, reverse };
+      const p = buildPlaces([a], { ...base, capacity: attributeCapacity((_d, i) => values[i], scale, 3, 12) });
+      const caps = [0, 1, 2, 3].map((i) => p.capacities[placeOfStar(p, 'r', i)]);
+      expect(caps[0]).toBeLessThan(caps[1]);
+      expect(caps[1]).toBeLessThan(caps[2]);
+      // no value: the lowest number
+      expect(caps[3]).toBe(3);
+    }
+    // the ends of the scale give the lowest and the highest number
+    const lin = attributeCapacity((_d, i) => [0, 10][i], { min: 0, max: 10 }, 3, 12);
+    const p = buildPlaces([source('r', [{ x: 0, logL: 0 }, { x: 20, logL: 0 }])], { ...base, capacity: lin });
+    expect([p.capacities[0], p.capacities[1]]).toEqual([3, 12]);
+  });
+
   it('stops at maxPlaces', () => {
     const a = source(
       'r',
@@ -133,7 +210,7 @@ describe('places', () => {
   it('reports too many candidate pairs', () => {
     const a = source(
       'r',
-      Array.from({ length: 30 }, (_, i) => ({ x: i * 0.1, logL: 0 })),
+      Array.from({ length: 30 }, (_, i) => ({ x: i * 0.2, logL: 0 })),
     );
     const net = computeNetwork([a], netOptions({ maxCandidates: 100 }));
     expect(net.overflow).toBe('pairs');

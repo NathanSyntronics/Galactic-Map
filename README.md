@@ -109,12 +109,15 @@ site's dataset* returns to it.
 The jump network links stars that are at most the *jump range* apart (10 ly by default). It is
 specified in [`docs/JUMP_NETWORK.md`](docs/JUMP_NETWORK.md):
 * **Places.** A multiple system counts as one place; its members are never linked to each other.
-  Only the stars that are shown take part, so hiding brown dwarfs or stars without a value
-  changes the network. A place is represented by its most luminous shown star.
+  Stars closer than 0.1 ly (about 6,300 AU) to each other count as one place too, which covers
+  binaries the catalogues do not mark as a system. Only the stars that are shown take part, so
+  hiding brown dwarfs or stars without a value changes the network. A place is represented by its
+  most luminous shown star.
 * **Capacity.** Each place wants a number of links. By default it follows the luminosity:
-  3 for brown dwarfs (log L ≤ −4.5), 7 for Sun-like stars, 12 for stars from 25 L☉ (Sirius) up,
-  linear in log L in between. It can instead follow a numeric attribute (yours or catalogue data)
-  on the attribute's colour scale.
+  3 for brown dwarfs (log L ≤ −4.5), 7 for Sun-like stars, 12 for stars from about 30 L☉ up
+  (log L ≥ 1.5), linear in log L in between (Sirius, 18.5 L☉, gets 11). It can instead follow a
+  numeric attribute (yours or catalogue data) along the range of the attribute's colour scale;
+  a higher value always gives more links, even when the colour scale is reversed.
 * **Which links.** All pairs within the range are candidates.
   1. They are taken in order of the distance, weighted by `(kSun² / (k₁ · k₂))^h`, where `k₁` and
      `k₂` are the two capacities and `h` is *prefer big stars*. A link is accepted while both
@@ -127,15 +130,18 @@ specified in [`docs/JUMP_NETWORK.md`](docs/JUMP_NETWORK.md):
   the order in which the data arrived.
 * **Region.** The network is computed from the stars within the visible radius plus a margin of
   three jump ranges around the view centre, so links inside the visible sphere do not change
-  when the view moves. More than 150,000 places or 1.5 million candidate pairs are not
-  computed, and neither is a region whose stars are not all loaded at the chosen detail level
-  (the settings then ask for a smaller radius); with the default detail level this allows radii
-  up to about 200 ly. The default view (20 ly) takes about 15 ms, 100 ly about 30 ms, 200 ly
-  about 0.2 s; a slow computation waits until the view rests.
+  when the view moves. The stars of the margin are loaded only when all of them fit the detail
+  level's point budget, so the network never thins out the stars in the visible sphere. More
+  than 150,000 places or 1.5 million candidate pairs are not computed, and neither is a region
+  whose stars do not all fit the detail level (the settings then ask for a smaller radius); with
+  the default detail level this allows radii up to about 230 ly. The default view (20 ly) takes
+  about 15 ms, 100 ly about 30 ms, 200 ly about 0.2 s; a slow computation waits until the view
+  rests.
 * **Display.** Lines in the stars' colours (or one teal, or coloured by length) end at the edge
   of the visible sphere, fading out like the stars, and get fainter when many stars are in
-  view. The selected star's links are highlighted (the others dimmed), and its info card lists
-  them with distances; a click on one goes there. **J** switches the network on and off.
+  view. The selected star's links are highlighted (the others dimmed while it is inside the
+  visible sphere), and its info card lists them with distances; a click on one (or Enter) goes
+  there and keeps the keyboard focus in the card. **J** switches the network on and off.
 
 Settings (section *Jump network*): jump range (2–25 ly), number of links by luminosity or by an
 attribute, links of faint, Sun-like and bright stars (0–20), prefer big stars (0–2), connect

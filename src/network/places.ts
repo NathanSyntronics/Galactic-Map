@@ -5,7 +5,8 @@
  */
 import type { NodeData } from '../data/format';
 import { starLogL } from '../render/starfield';
-import { capacityFromLogL, capacityFromPosition, computeJumpLinks, linksOfPlace, type JumpLinks, type PlaceLink } from './jumps';
+import { scalePosition } from '../render/style';
+import { capacityFromLogL, capacityFromPosition, closePairs, computeJumpLinks, linksOfPlace, type JumpLinks, type PlaceLink } from './jumps';
 
 /** Stars of one loaded octree node. */
 export interface PlaceSource {
@@ -26,6 +27,28 @@ export type CapacityRule =
       faint: number;
       bright: number;
     };
+
+/**
+ * Capacity by a numeric attribute: the value's position on the scale's range (and log setting).
+ * The colour scale's reverse flag is ignored, so a higher value always gives more links.
+ */
+export function attributeCapacity(
+  value: (data: NodeData, i: number) => unknown,
+  scale: { min: number; max: number; log?: boolean },
+  faint: number,
+  bright: number,
+): CapacityRule {
+  const sc = { min: scale.min, max: scale.max, log: scale.log };
+  return {
+    by: 'position',
+    position: (d, i) => {
+      const v = value(d, i);
+      return typeof v === 'number' ? scalePosition(v, sc) : undefined;
+    },
+    faint,
+    bright,
+  };
+}
 
 export interface PlaceOptions {
   centre: { x: number; y: number; z: number };
@@ -48,7 +71,7 @@ export interface PlaceSet {
   /** Representative star: index into `sources` and the star's index in its node. */
   repSource: Int32Array;
   repIndex: Int32Array;
-  /** System id of each place, -1 for a single star. */
+  /** System id of each place's representative, -1 for a star without one. */
   system: Float64Array;
   sources: PlaceSource[];
   /** Place of every star by node path (-1: not part of the network). */
@@ -63,13 +86,18 @@ const KEY_SHIFT = 2 ** 24;
 export const MAX_PLACES = 150_000;
 /** More candidate pairs than this are not computed (about 0.2 µs each). */
 export const MAX_PAIRS = 1_500_000;
+/** Places closer than this (light years, about 6,300 AU) are one place: binaries without a system id, duplicates. */
+export const MERGE_DISTANCE = 0.1;
 
 /** Margin around the visible sphere whose stars take part, so links inside it do not depend on the view. */
 export function jumpMargin(range: number): number {
   return 3 * range;
 }
 
-/** Groups the shown stars within `radius` of the centre into places. */
+/**
+ * Groups the shown stars within `radius` of the centre into places: by system, then places
+ * closer than MERGE_DISTANCE are merged.
+ */
 export function buildPlaces(sources: PlaceSource[], opt: PlaceOptions): PlaceSet {
   const { x: cx, y: cy, z: cz } = opt.centre;
   const r2 = opt.radius * opt.radius;
@@ -106,7 +134,7 @@ export function buildPlaces(sources: PlaceSource[], opt: PlaceOptions): PlaceSet
 
   const sysPlace = new Map<number, number>();
   /** Members (source, index pairs) of system places, only needed for attribute fallbacks. */
-  const members = new Map<number, number[]>();
+  let members = new Map<number, number[]>();
   const starPlace = new Map<string, Int32Array>();
   let overflow = false;
 
@@ -159,23 +187,90 @@ export function buildPlaces(sources: PlaceSource[], opt: PlaceOptions): PlaceSet
     }
   }
 
-  const positions = new Float64Array(3 * n);
+  const repPositions = (): Float64Array => {
+    const out = new Float64Array(3 * n);
+    for (let k = 0; k < n; k++) {
+      const p = sources[repSource[k]].data.positions;
+      const i = repIndex[k];
+      out[3 * k] = p[3 * i];
+      out[3 * k + 1] = p[3 * i + 1];
+      out[3 * k + 2] = p[3 * i + 2];
+    }
+    return out;
+  };
+  let positions = repPositions();
+
+  // places closer than MERGE_DISTANCE become one, represented by the most luminous member
+  const close = overflow || n < 2 ? null : closePairs(positions, n, MERGE_DISTANCE);
+  if (close && close.count > 0) {
+    const parent = new Int32Array(n);
+    for (let k = 0; k < n; k++) parent[k] = k;
+    const root = (k: number): number => {
+      while (parent[k] !== k) k = parent[k] = parent[parent[k]];
+      return k;
+    };
+    for (let j = 0; j < close.count; j++) {
+      const a = root(close.a[j]), b = root(close.b[j]);
+      if (a !== b) parent[Math.max(a, b)] = Math.min(a, b);
+    }
+    // new place numbers in the order of the old ones
+    const newOf = new Int32Array(n);
+    const rootNew = new Int32Array(n).fill(-1);
+    const groupSize = new Int32Array(n);
+    let m = 0;
+    for (let k = 0; k < n; k++) {
+      const r = root(k);
+      if (rootNew[r] < 0) rootNew[r] = m++;
+      newOf[k] = rootNew[r];
+      groupSize[newOf[k]]++;
+    }
+    const nSource = new Int32Array(m);
+    const nIndex = new Int32Array(m);
+    const nLogL = new Float64Array(m).fill(-Infinity);
+    const nKey = new Float64Array(m).fill(Infinity);
+    const nSystem = new Float64Array(m);
+    const nMembers = new Map<number, number[]>();
+    for (let k = 0; k < n; k++) {
+      const j = newOf[k];
+      const key = nodeKeys[repSource[k]] + repIndex[k];
+      if (nKey[j] === Infinity || repLogL[k] > nLogL[j] || (repLogL[k] === nLogL[j] && key < nKey[j])) {
+        nSource[j] = repSource[k];
+        nIndex[j] = repIndex[k];
+        nLogL[j] = repLogL[k];
+        nKey[j] = key;
+        nSystem[j] = system[k];
+      }
+      // all stars of a merged place, for attribute fallbacks
+      if (byPosition && (groupSize[j] > 1 || members.has(k))) {
+        const own = members.get(k) ?? [repSource[k], repIndex[k]];
+        const list = nMembers.get(j);
+        if (list) list.push(...own);
+        else nMembers.set(j, [...own]);
+      }
+    }
+    for (const own of starPlace.values()) for (let i = 0; i < own.length; i++) if (own[i] >= 0) own[i] = newOf[own[i]];
+    repSource = nSource;
+    repIndex = nIndex;
+    repLogL = nLogL;
+    system = nSystem;
+    members = nMembers;
+    n = m;
+    positions = repPositions();
+  }
+
   const capacities = new Int32Array(n);
   const keys = new Float64Array(n);
   const rule = opt.capacity;
   for (let k = 0; k < n; k++) {
     const d = sources[repSource[k]].data;
     const i = repIndex[k];
-    positions[3 * k] = d.positions[3 * i];
-    positions[3 * k + 1] = d.positions[3 * i + 1];
-    positions[3 * k + 2] = d.positions[3 * i + 2];
     keys[k] = nodeKeys[repSource[k]] + i;
     if (rule.by === 'luminosity') {
       capacities[k] = capacityFromLogL(repLogL[k], rule.faint, rule.sun, rule.bright);
       continue;
     }
     let t = rule.position(d, i);
-    if (t === undefined && system[k] >= 0) {
+    if (t === undefined && members.has(k)) {
       // another member's value: the most luminous member that has one
       const m = members.get(k) ?? [];
       let bestL = -Infinity;

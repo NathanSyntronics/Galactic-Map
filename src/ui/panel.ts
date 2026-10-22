@@ -328,7 +328,8 @@ export class SettingsPanel {
       if (byAttr) {
         // the scale controls are already in the data layers when the map is coloured or sized by it
         const shown = [s().colorBy, s().sizeBy].some((id) => id === by.id);
-        if (!shown) box.appendChild(this.scaleControls(by.id, false));
+        // without 'reverse': a higher value always gives more links
+        if (!shown) box.appendChild(this.scaleControls(by.id, false, false));
       }
       const count = (v: number) => String(v);
       box.appendChild(
@@ -368,7 +369,7 @@ export class SettingsPanel {
   }
 
   /** Palette, range, log and reverse of a numeric attribute. */
-  private scaleControls(id: string, withPalette = true): HTMLElement {
+  private scaleControls(id: string, withPalette = true, withReverse = true): HTMLElement {
     const wrap = el('div', 'scale-controls');
     const sc = this.attrs.scale(id);
     const defaults = builtin(id)?.scale ?? {};
@@ -426,7 +427,7 @@ export class SettingsPanel {
       flags.appendChild(l);
     };
     flag('log', 'logScale');
-    flag('reverse', 'reverseScale');
+    if (withReverse) flag('reverse', 'reverseScale');
     wrap.appendChild(flags);
     return wrap;
   }
