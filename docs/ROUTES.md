@@ -56,9 +56,12 @@ around the straight line from start to destination:
   waypoints inside the visible sphere are labelled by the usual label logic.
 * **Only the route when zoomed out:** while a route is shown and the visible radius is larger than
   `3 · jumpRange`, the general network is not drawn (and not computed); zoomed in, the network is
-  drawn as usual with the route on top.
+  drawn as usual with the route on top. With *radius follows zoom* (the default) zooming out
+  enlarges the visible radius, so this happens by zooming alone; with a fixed radius only the
+  radius slider changes it.
 * **Route box** (bottom left, above the legend; full width on phones): start → destination,
   status (loading, computing, result: number of jumps, total distance, straight-line distance),
   buttons for: swap, mode, the list of waypoints (name, jump length; a click selects the star and
   centres the view on it), **show whole route** (centres the view on the route and zooms out so it
-  fits) and remove.
+  fits; it only moves the camera, and the visible radius follows when it follows the zoom) and
+  remove.

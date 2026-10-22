@@ -7,6 +7,8 @@ export interface Settings {
   lang: Lang;
   /** Radius of the visibility sphere around the view centre, in light years. */
   radius: number;
+  /** The radius follows the zoom: camera distance / AUTO_RADIUS_RATIO. */
+  autoRadius: boolean;
   labels: boolean;
   /** Maximum number of labels on screen. */
   labelCount: number;
@@ -50,6 +52,7 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   lang: 'en',
   radius: 20,
+  autoRadius: true,
   labels: true,
   labelCount: 30,
   labelDesignations: true,
@@ -107,6 +110,28 @@ export const QUALITY_BUDGET: Record<Quality, number> = {
 export const RADIUS_MIN = 2;
 export const RADIUS_MAX = 50_000;
 
+/** Camera distance per light year of radius in the default view (44 ly for 20 ly). */
+export const AUTO_RADIUS_RATIO = 2.2;
+/** While the radius follows the zoom, it changes once it is off by more than this fraction. */
+export const AUTO_RADIUS_STEP = 0.01;
+
+/** Visible radius for a camera distance (radius follows zoom), to three significant digits. */
+export function radiusForDistance(distance: number): number {
+  const r = Math.min(Math.max(distance / AUTO_RADIUS_RATIO, RADIUS_MIN), RADIUS_MAX);
+  return Number(r.toPrecision(3));
+}
+
+/** Camera distance that shows a radius (radius follows zoom). */
+export function distanceForRadius(radius: number): number {
+  return radius * AUTO_RADIUS_RATIO;
+}
+
+/** The radius for a new camera distance, or null while it is within AUTO_RADIUS_STEP of the current one. */
+export function followZoom(radius: number, distance: number): number | null {
+  const r = radiusForDistance(distance);
+  return Math.abs(r - radius) > AUTO_RADIUS_STEP * radius ? r : null;
+}
+
 export const STAR_SIZE_MIN = 0.2;
 export const STAR_SIZE_MAX = 12;
 const STAR_SIZE_SPAN = Math.log(STAR_SIZE_MAX / STAR_SIZE_MIN);
@@ -130,6 +155,8 @@ export function starSizeText(size: number): string {
 }
 
 const STORAGE_KEY = 'galactic-map:settings:v1';
+/** Settings are written this long after the last change (the radius changes while zooming). */
+export const SAVE_DELAY_MS = 400;
 /** Marker of the stored format that holds only the values that differ from the defaults. */
 const STORED_FORMAT = 2;
 /**
@@ -143,6 +170,7 @@ type Listener = (s: Settings, changed: (keyof Settings)[]) => void;
 export class SettingsStore {
   private state: Settings;
   private listeners: Listener[] = [];
+  private saveTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     this.state = { ...DEFAULT_SETTINGS, ...loadStored() };
@@ -150,6 +178,11 @@ export class SettingsStore {
       this.state.quality = 'low';
       this.state.labelCount = 25;
     }
+    // a pending change is written before the page goes away
+    window.addEventListener('pagehide', () => this.flush());
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') this.flush();
+    });
   }
 
   get(): Readonly<Settings> {
@@ -160,12 +193,22 @@ export class SettingsStore {
     const changed = (Object.keys(patch) as (keyof Settings)[]).filter((k) => patch[k] !== this.state[k]);
     if (changed.length === 0) return;
     this.state = { ...this.state, ...patch };
+    // written once the changes pause, not on every step of a zoom
+    if (this.saveTimer !== null) clearTimeout(this.saveTimer);
+    this.saveTimer = setTimeout(() => this.flush(), SAVE_DELAY_MS);
+    for (const l of this.listeners) l(this.state, changed);
+  }
+
+  /** Writes a pending change now. */
+  flush(): void {
+    if (this.saveTimer === null) return;
+    clearTimeout(this.saveTimer);
+    this.saveTimer = null;
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(storedForm(this.state)));
     } catch {
       // storage unavailable (private mode etc.) – settings simply are not persisted
     }
-    for (const l of this.listeners) l(this.state, changed);
   }
 
   reset(): void {

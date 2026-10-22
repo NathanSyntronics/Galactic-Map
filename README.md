@@ -34,7 +34,8 @@ An interactive 3-D map of the Sun's stellar neighbourhood, built from real star 
   whole system ("Epsilon Lyrae"; its members keep their own names, "Epsilon² Lyrae A", or take
   the title with their letter, "40 Eridani A").
 * **Explore by mouse, touch or keyboard.** Only stars within an adjustable radius around the
-  view centre are shown (20 ly by default). Move the view centre and new stars stream in.
+  view centre are shown (20 ly by default). The radius follows the zoom, so zooming out shows a
+  larger region. Move the view centre and new stars stream in.
 * **Your own data on the map.** Give stars attributes of your own (a faction, an economy value,
   a colour …), edit them on the map or as a CSV file, and colour or size the stars by them or by
   catalogue data such as the number of known exoplanets or the spectral class.
@@ -62,7 +63,9 @@ to the open settings panel, or on the backdrop of a dialog, closes it; that clic
 or deselect a star, and a drag still turns the view.
 
 The settings panel (☰) controls:
-* the visible radius;
+* the visible radius, and whether it follows the zoom (on by default: radius = camera distance
+  / 2.2, the framing of the start view; the radius slider then moves the camera; switched off,
+  the radius stays where it is);
 * brown dwarfs (off by default) and white dwarfs;
 * a maximum distance uncertainty;
 * labels, star size (0.2× to 12×), brightness and colour saturation;

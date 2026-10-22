@@ -93,8 +93,10 @@ them apart.
   20 ly about 15 ms, 100 ly 25–35 ms, 150 ly 65–95 ms, 200 ly (105,000 places) 150–200 ms,
   occasionally up to 0.45 s. With the default detail level the limit is reached at about 230 ly.
   After such a result the level-of-detail selection goes back to `R` alone (the region's extra
-  stars are of no use) until a setting that changes the region or the shown stars changes, or the
-  view centre has moved by more than `R`; then it tries again.
+  stars are of no use) until the network is switched on again, the jump range or the shown stars
+  change, the radius drops below 90 % of the one that failed (not on every step of a zoom: each try
+  loads the whole region and computes in vain), or the view centre has moved by more than `R`;
+  then it tries again.
 * If the point budget cuts the level-of-detail selection inside the region (not every node that
   touches the region is selected), the network is not computed either, because its links would
   change with the camera position; the settings ask to reduce the radius or raise the detail
@@ -106,6 +108,15 @@ them apart.
   stars). A computation that took more than 50 ms waits until the view has rested for 300 ms (or
   the centre has moved by `min(0.3 R, M − jumpRange)`, where the drawn links stop covering the
   sphere), so that moving the view stays smooth.
+* **Zooming.** The radius follows the zoom by default (radius = camera distance / 2.2, updated in
+  steps of 1 %). While the radius changes (and for 300 ms after) and the drawn links still cover
+  the visible sphere (`offset + R ≤ R₀ + M − jumpRange`, `R₀` the radius of the last
+  computation), no computation runs at all, however fast: zooming in never needs one, zooming
+  out only once the sphere grows beyond the drawn links (and then a slow one still waits for the
+  view to rest). Measured in a browser (software rendering): a 6 s wheel zoom out and back in
+  around 40 ly ran no computation instead of 17 of about 25 ms; a 3 s zoom out from 20 to 59 ly ran
+  two; zooming from 150 ly out past the limit (235 ly) and back to 150 ly ran none during the zoom
+  and one after it.
 
 ## Display
 

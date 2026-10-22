@@ -1,9 +1,17 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  AUTO_RADIUS_RATIO,
   DEFAULT_SETTINGS,
+  RADIUS_MAX,
+  RADIUS_MIN,
+  SAVE_DELAY_MS,
   STAR_SIZE_MAX,
   STAR_SIZE_MIN,
+  SettingsStore,
+  distanceForRadius,
+  followZoom,
   parseStored,
+  radiusForDistance,
   sliderToStarSize,
   starSizeText,
   starSizeToSlider,
@@ -90,5 +98,128 @@ describe('star size slider', () => {
     expect(starSizeText(0.85)).toBe('0.85×');
     expect(starSizeText(8)).toBe('8.0×');
     expect(starSizeText(12)).toBe('12.0×');
+  });
+});
+
+describe('radius follows zoom', () => {
+  it('is on by default and matches the default view (radius 20 ly at 44 ly distance)', () => {
+    expect(DEFAULT_SETTINGS.autoRadius).toBe(true);
+    expect(AUTO_RADIUS_RATIO).toBe(2.2);
+    expect(radiusForDistance(44)).toBe(20);
+    expect(distanceForRadius(20)).toBeCloseTo(44, 10);
+  });
+
+  it('clamps to the radius range and keeps three significant digits', () => {
+    expect(radiusForDistance(0.5)).toBe(RADIUS_MIN);
+    expect(radiusForDistance(1e7)).toBe(RADIUS_MAX);
+    expect(radiusForDistance(100)).toBe(45.5);
+    expect(radiusForDistance(12345)).toBe(5610);
+    expect(radiusForDistance(7)).toBe(3.18);
+  });
+
+  it('maps a radius set on the slider to a distance that gives the same radius back', () => {
+    // the slider rounds to two significant digits
+    for (const r of [2, 2.5, 9.9, 20, 47, 130, 1200, 50_000]) expect(radiusForDistance(distanceForRadius(r))).toBe(r);
+    for (const r of [2, 20, 130, 50_000]) expect(followZoom(r, distanceForRadius(r))).toBeNull();
+  });
+
+  it('changes the radius only when it is off by more than 1 %', () => {
+    expect(followZoom(20, 44.3)).toBeNull();
+    expect(followZoom(20, 43.7)).toBeNull();
+    expect(followZoom(20, 45)).toBe(20.5);
+    expect(followZoom(20, 43)).toBe(19.5);
+    // closer than the smallest radius allows: stays at the minimum
+    expect(followZoom(RADIUS_MIN, 1)).toBeNull();
+  });
+
+  it('follows a continuous zoom in small, regular steps', () => {
+    let radius = 20;
+    let changes = 0;
+    let maxStep = 0;
+    // zoom out from 44 to 4400 ly in 0.2 % steps (about 2,300 frames), then back in
+    const frames: number[] = [];
+    for (let d = 44; d < 4400; d *= 1.002) frames.push(d);
+    for (let d = 4400; d > 44; d /= 1.002) frames.push(d);
+    for (const d of frames) {
+      const r = followZoom(radius, d);
+      if (r === null) continue;
+      maxStep = Math.max(maxStep, Math.abs(Math.log(r / radius)));
+      radius = r;
+      changes++;
+    }
+    // about one change per 1 % of zoom, never a jump
+    expect(changes).toBeGreaterThan(600);
+    expect(changes).toBeLessThan(1000);
+    expect(maxStep).toBeLessThan(0.02);
+    expect(Math.abs(radius / 20 - 1)).toBeLessThan(0.0151);
+  });
+});
+
+describe('settings store', () => {
+  let writes: string[];
+  let handlers: Record<string, () => void>;
+  beforeEach(() => {
+    vi.useFakeTimers();
+    writes = [];
+    handlers = {};
+    const items = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => items.get(k) ?? null,
+      setItem: (k: string, v: string) => {
+        items.set(k, v);
+        writes.push(v);
+      },
+      removeItem: (k: string) => items.delete(k),
+    });
+    vi.stubGlobal('window', { addEventListener: (type: string, fn: () => void) => (handlers[type] = fn) });
+    vi.stubGlobal('document', {
+      visibilityState: 'visible',
+      addEventListener: (type: string, fn: () => void) => (handlers[type] = fn),
+    });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('writes the settings once the changes pause, not on every change', () => {
+    const store = new SettingsStore();
+    const seen: number[] = [];
+    store.subscribe((s) => seen.push(s.radius));
+    // a zoom: 60 radius changes, one per frame
+    for (let k = 1; k <= 60; k++) {
+      store.set({ radius: 20 + k });
+      vi.advanceTimersByTime(16);
+    }
+    expect(seen.length).toBe(60);
+    expect(writes.length).toBe(0);
+    vi.advanceTimersByTime(SAVE_DELAY_MS);
+    expect(writes.length).toBe(1);
+    expect(JSON.parse(writes[0])).toEqual({ v: 2, radius: 80 });
+    vi.advanceTimersByTime(5000);
+    expect(writes.length).toBe(1);
+  });
+
+  it('writes a pending change when the page is hidden or left', () => {
+    const store = new SettingsStore();
+    store.set({ grid: false });
+    (document as { visibilityState: string }).visibilityState = 'hidden';
+    handlers.visibilitychange();
+    expect(writes.map((w) => JSON.parse(w))).toEqual([{ v: 2, grid: false }]);
+    store.set({ grid: true });
+    handlers.pagehide();
+    expect(writes.length).toBe(2);
+    expect(JSON.parse(writes[1])).toEqual({ v: 2 });
+    // nothing pending: nothing written
+    handlers.pagehide();
+    vi.advanceTimersByTime(SAVE_DELAY_MS * 2);
+    expect(writes.length).toBe(2);
+  });
+
+  it('reads back what it wrote', () => {
+    const store = new SettingsStore();
+    store.set({ autoRadius: false, radius: 130 });
+    store.flush();
+    expect(new SettingsStore().get()).toMatchObject({ autoRadius: false, radius: 130 });
   });
 });

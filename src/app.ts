@@ -42,7 +42,15 @@ import {
   valueGetter,
   type StylePlan,
 } from './render/style';
-import { QUALITY_BUDGET, RADIUS_MAX, RADIUS_MIN, SettingsStore, type Settings } from './settings';
+import {
+  QUALITY_BUDGET,
+  RADIUS_MAX,
+  RADIUS_MIN,
+  SettingsStore,
+  distanceForRadius,
+  followZoom,
+  type Settings,
+} from './settings';
 import { AttributesDialog } from './ui/attributes-dialog';
 import { InfoPanel, displayName, type JumpListing, type StarInfo } from './ui/info';
 import { Legend } from './ui/legend';
@@ -100,13 +108,17 @@ export class App {
   private jumpCost = 0;
   /** Time of the last view change; a slow network computation waits until the view rests. */
   private lastViewChange = -Infinity;
+  /** Time of the last radius change (zoom while the radius follows it). */
+  private lastRadiusChange = -Infinity;
   /** The level of detail holds all stars of the network region (not cut by the point budget). */
   private jumpRegion = false;
   /**
    * The last network exceeded the limits: the level of detail goes back to the visible sphere
-   * until a setting changes or the view centre moves by more than the radius.
+   * until a setting changes, the radius shrinks by 10 % or the view centre moves by more than the radius.
    */
-  private jumpBlocked: { kind: 'places' | 'pairs'; centre: Vector3 } | null = null;
+  private jumpBlocked: { kind: 'places' | 'pairs'; centre: Vector3; radius: number } | null = null;
+  /** The radius is being set from the zoom (radius follows zoom), not by the user. */
+  private followingZoom = false;
   /** Stable number per octree node path (tie-break keys of the network). */
   private readonly nodeOrdinal = new Map<string, number>();
   private readonly labels: LabelLayer;
@@ -463,8 +475,16 @@ export class App {
     }
     if (has('colorBy', 'sizeBy', 'missingStyle', 'legend', 'lang', 'jumps', 'jumpRange', 'jumpColor')) this.updateLegend();
     if (has('radius', 'quality', 'jumps', 'jumpRange')) this.lodDirty = true;
-    // a new radius, range or set of shown stars may fit the network's limits again
-    if (this.jumpBlocked && has('jumps', 'radius', 'jumpRange', ...VISIBILITY_KEYS)) {
+    if (has('radius')) {
+      // radius follows zoom: a radius set by the user (slider, reset, link) moves the camera instead
+      if (s.autoRadius && !this.followingZoom) this.nav.setDistance(distanceForRadius(s.radius));
+      // like a view change: a slow network computation waits until the radius rests
+      this.lastViewChange = this.lastRadiusChange = performance.now();
+    }
+    // a new range or set of shown stars may fit the network's limits again, and so may a clearly
+    // smaller radius (not every step of a zoom: each try loads the region and computes in vain)
+    const blocked = this.jumpBlocked;
+    if (blocked && (has('jumps', 'jumpRange', ...VISIBILITY_KEYS) || (has('radius') && s.radius < 0.9 * blocked.radius))) {
       this.jumpBlocked = null;
       this.lodDirty = true;
     }
@@ -834,7 +854,7 @@ export class App {
       net = computeNetwork(sources, opt);
       if (net.overflow === 'places' || net.overflow === 'pairs') {
         // the region's extra stars are of no use: the level of detail goes back to the sphere
-        this.jumpBlocked = { kind: net.overflow, centre: centre.clone() };
+        this.jumpBlocked = { kind: net.overflow, centre: centre.clone(), radius: s.radius };
         this.lodDirty = true;
       }
     } else {
@@ -934,7 +954,8 @@ export class App {
 
   private pickSearch(hit: SearchHit): void {
     const s = this.store.get();
-    const dist = MathUtils.clamp(this.nav.distance, 3, Math.max(s.radius * 1.8, 10));
+    // a fixed radius: close enough to see the sphere; radius follows zoom: the zoom stays
+    const dist = MathUtils.clamp(this.nav.distance, 3, s.autoRadius ? Infinity : Math.max(s.radius * 1.8, 10));
     this.nav.flyTo(hit.pos, dist);
     const data = this.loader?.get(hit.path);
     if (data) {
@@ -958,7 +979,23 @@ export class App {
 
   private goToSun(): void {
     const s = this.store.get();
-    this.nav.flyTo(new Vector3(0, 0, 0), MathUtils.clamp(s.radius * 2.2, 5, 150_000));
+    // the default framing of the sphere (which the radius keeps by itself while it follows the zoom)
+    const d = s.autoRadius ? this.nav.distance : distanceForRadius(s.radius);
+    this.nav.flyTo(new Vector3(0, 0, 0), MathUtils.clamp(d, 5, 150_000));
+  }
+
+  /** Radius follows zoom: the radius tracks the camera distance in steps of about 1 %. */
+  private radiusFollowsZoom(): void {
+    const s = this.store.get();
+    if (!s.autoRadius) return;
+    const r = followZoom(s.radius, this.nav.distance);
+    if (r === null) return;
+    this.followingZoom = true;
+    try {
+      this.store.set({ radius: r });
+    } finally {
+      this.followingZoom = false;
+    }
   }
 
   private shortcut(key: string, e: KeyboardEvent): void {
@@ -1095,7 +1132,7 @@ export class App {
       this.nav.setView(galacticToWorld(c[0], c[1], c[2]), galacticToWorld(o[0], o[1], o[2]));
     } else if (initial) {
       const R = this.store.get().radius;
-      const d = MathUtils.clamp(R * 2.2, 5, 150_000);
+      const d = MathUtils.clamp(distanceForRadius(R), 5, 150_000);
       const el2 = MathUtils.degToRad(28);
       // camera behind the Sun, looking towards the Galactic Centre (+X), slightly from above
       this.nav.setView(new Vector3(0, 0, 0), new Vector3(-Math.cos(el2) * d, Math.sin(el2) * d, d * 0.12));
@@ -1121,6 +1158,7 @@ export class App {
     const dt = Math.min((now - this.lastTime) / 1000, 0.1);
     this.lastTime = now;
     this.nav.update(dt);
+    this.radiusFollowsZoom();
 
     const s = this.store.get();
     const dist = this.nav.distance;
@@ -1161,7 +1199,11 @@ export class App {
       // a slow computation waits until the view rests, so that moving stays smooth, or until the
       // drawn links (the region minus one range) no longer cover the visible sphere
       const slack = Math.min(0.3 * s.radius, jumpMargin(s.jumpRange) - s.jumpRange);
-      const ready = this.jumpCost < 50 || now - this.lastViewChange > 300 || moved > slack;
+      // while the radius changes (a zoom) and the drawn links still cover the sphere, any
+      // computation waits until it rests: zooming in never needs one, zooming out only beyond them
+      const covered = !!net && moved + s.radius <= net.region - s.jumpRange;
+      const zooming = covered && now - this.lastRadiusChange < 300;
+      const ready = !zooming && (this.jumpCost < 50 || now - this.lastViewChange > 300 || moved > slack);
       // after a pending restyle (shown stars), and spaced so that it takes at most ~20 % of the time
       if (this.jumpDirty && ready && !this.styleDirty && now - this.lastJump >= Math.max(250, 4 * this.jumpCost)) this.recomputeJumps();
       // like the faint stars: the more stars in view, the fainter the lines, so dense regions stay readable

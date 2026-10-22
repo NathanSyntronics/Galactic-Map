@@ -142,6 +142,7 @@ export class SettingsPanel {
       () => `${formatNumber(s().radius, s().radius < 10 ? 1 : 0)} ${t('ly')}`,
     );
     b.appendChild(radiusRow);
+    b.appendChild(this.checkbox('autoRadius', () => s().autoRadius, (v) => this.store.set({ autoRadius: v })));
     b.appendChild(el('p', 'hint', t('radiusHint')));
     const sunBtn = el('button', 'btn', `☉ ${t('goToSun')}`);
     sunBtn.addEventListener('click', () => this.onGoToSun());
@@ -499,14 +500,36 @@ export class SettingsPanel {
     input.max = String(max);
     input.step = String(step);
     input.value = String(get());
+    // the thumb is not moved under the user's hand (a value can also change from elsewhere, like
+    // the radius while it follows the zoom)
+    let busy = false;
+    let dragging = false;
+    input.addEventListener('pointerdown', () => {
+      dragging = true;
+      const up = () => {
+        dragging = false;
+        window.removeEventListener('pointerup', up);
+        window.removeEventListener('pointercancel', up);
+      };
+      window.addEventListener('pointerup', up);
+      window.addEventListener('pointercancel', up);
+    });
+    // released (also when the pointerup went elsewhere)
+    input.addEventListener('change', () => (dragging = false));
     input.addEventListener('input', () => {
-      set(Number(input.value));
+      busy = true;
+      try {
+        set(Number(input.value));
+      } finally {
+        busy = false;
+      }
       value.textContent = display();
     });
     wrap.append(head, input);
     this.syncers.push(() => {
-      if (document.activeElement !== input) input.value = String(get());
-      value.textContent = display();
+      if (!busy && !dragging) input.value = String(get());
+      const text = display();
+      if (value.textContent !== text) value.textContent = text;
     });
     return wrap;
   }

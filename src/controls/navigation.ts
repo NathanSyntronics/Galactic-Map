@@ -122,6 +122,21 @@ export class Navigation {
     };
   }
 
+  /** Sets the camera distance at once, keeping the view centre and direction (a running flight keeps its target). */
+  setDistance(distance: number): void {
+    const c = this.controls;
+    const d = MathUtils.clamp(distance, c.minDistance, c.maxDistance);
+    const offset = this.tmp.copy(this.camera.position).sub(c.target);
+    if (offset.lengthSq() < 1e-12) offset.set(0, 0, 1);
+    offset.setLength(d);
+    this.camera.position.copy(c.target).add(offset);
+    if (this.flight) {
+      this.flight.fromDist = d;
+      this.flight.toDist = d;
+    }
+    this.onChange();
+  }
+
   /** Jump without animation. */
   setView(target: Vector3, offset: Vector3): void {
     this.flight = null;

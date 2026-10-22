@@ -12,7 +12,8 @@ const en = {
   display: 'Display',
   language: 'Language',
   radius: 'Visible radius',
-  radiusHint: 'Stars within this distance of the view centre are shown.',
+  radiusHint: 'Stars within this distance of the view centre are shown. While it follows the zoom, zooming out shows a larger region.',
+  autoRadius: 'Radius follows zoom',
   qualityHint: 'How many stars may be loaded at once. This only matters for large view radii (from about 200 ly); the faintest stars are left out first.',
   labels: 'Show names',
   labelCount: 'Number of labels',
@@ -89,7 +90,7 @@ const en = {
 <li><b>Shift</b>: faster</li>
 <li><b>H</b>: back to the Sun · <b>L</b>: names · <b>G</b>: grid · <b>J</b>: jump network · <b>/</b>: search · <b>Esc</b>: deselect</li>
 </ul>
-<p>The view centre is the point the camera orbits around. Only stars inside the visible radius around it are shown; move the centre to explore further.</p>
+<p>The view centre is the point the camera orbits around. Only stars inside the visible radius around it are shown; move the centre to explore further. The radius follows the zoom: zooming out shows a larger region (this can be switched off in the settings).</p>
 <p>The grid lies parallel to the galactic plane. 0° points towards the Galactic Centre, 90° in the direction of Galactic rotation.</p>
 <p>The jump network links stars up to the jump range apart (9 ly by default); brighter stars get more links. A star's info card lists its links; click one to go there.</p>
 <p>The empty search field lists the last three stars you picked from the search. A click next to the settings or a dialog closes it.</p>`,
@@ -223,7 +224,8 @@ const de: Record<MessageKey, string> = {
   display: 'Darstellung',
   language: 'Sprache',
   radius: 'Sichtbarer Radius',
-  radiusHint: 'Gezeigt werden Sterne bis zu dieser Entfernung vom Blickpunkt.',
+  radiusHint: 'Gezeigt werden Sterne bis zu dieser Entfernung vom Blickpunkt. Solange er dem Zoom folgt, zeigt Herauszoomen einen größeren Bereich.',
+  autoRadius: 'Radius folgt dem Zoom',
   qualityHint: 'Wie viele Sterne gleichzeitig geladen werden dürfen. Das wirkt erst bei großem Sichtradius (ab etwa 200 Lj); die leuchtschwächsten Sterne fallen zuerst weg.',
   labels: 'Namen anzeigen',
   labelCount: 'Anzahl der Beschriftungen',
@@ -300,7 +302,7 @@ const de: Record<MessageKey, string> = {
 <li><b>Umschalt</b>: schneller</li>
 <li><b>H</b>: zurück zur Sonne · <b>L</b>: Namen · <b>G</b>: Gitter · <b>J</b>: Sprungnetz · <b>/</b>: Suche · <b>Esc</b>: Auswahl aufheben</li>
 </ul>
-<p>Der Blickpunkt ist der Punkt, um den sich die Kamera dreht. Angezeigt werden nur Sterne innerhalb des sichtbaren Radius um ihn; verschiebe den Blickpunkt, um weiter zu erkunden.</p>
+<p>Der Blickpunkt ist der Punkt, um den sich die Kamera dreht. Angezeigt werden nur Sterne innerhalb des sichtbaren Radius um ihn; verschiebe den Blickpunkt, um weiter zu erkunden. Der Radius folgt dem Zoom: Herauszoomen zeigt einen größeren Bereich (abschaltbar in den Einstellungen).</p>
 <p>Das Gitter liegt parallel zur galaktischen Ebene. 0° zeigt zum Galaktischen Zentrum, 90° in Richtung der galaktischen Rotation.</p>
 <p>Das Sprungnetz verbindet Sterne bis zur Sprungweite (standardmäßig 9 Lj); hellere Sterne bekommen mehr Verbindungen. Die Infokarte eines Sterns listet seine Verbindungen auf; ein Klick darauf führt dorthin.</p>
 <p>Das leere Suchfeld zeigt die drei zuletzt über die Suche gewählten Sterne. Ein Klick neben die Einstellungen oder einen Dialog schließt sie.</p>`,
