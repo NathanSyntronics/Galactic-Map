@@ -112,6 +112,26 @@ The attributes are stored in the browser (localStorage). A site can ship a datas
 as `public/user/attributes.csv`: visitors see it until they change something, and *Back to the
 site's dataset* returns to it.
 
+**Example factions.** This repository ships such a dataset: four factions (attribute *Faction*,
+whole system; the capitals also have *Capital* = `yes`). Choose *Colour by → Faction* to see
+them; with the jump network's *Line colour → Star colours* the links take the faction colours too.
+
+| Faction | Capital | Systems | Colour |
+|---|---|---|---|
+| Commonwealth of Sol | Sun | 90 | blue |
+| League of Vega | Vega | 60 | orange |
+| Realm of Arcturus | Arcturus | 40 | red |
+| Pact of Pollux | Pollux | 20 | green |
+
+The territories follow the jump network with the default settings. They grow from their capitals
+along its links, all at once: a faction claims the places (systems or single stars) that are
+linked to its territory, nearest to its capital first, until it has its size, and a place belongs
+to one faction at most. So every territory is one connected part of the network. Text values are
+coloured in alphabetical order, so the names set the colours: the Sun and Vega, which share the
+longest border, get blue and orange, which stay distinct with red-green colour blindness.
+`npm run factions` (`tools/make-factions.mjs`) recomputes them from the star data in
+`public/data/` and checks that the app's CSV import finds every row.
+
 ### Jump network
 
 The jump network links stars that are at most the *jump range* apart (9 ly by default). It is
@@ -179,6 +199,7 @@ under **CC BY-SA 4.0**. The rest of the code is under the MIT licence.
 pipeline/   Python: download catalogues → cross-match → positions → physics → systems
             → names → LOD octree (public/data/)
 src/        TypeScript + three.js web app
+tools/      make-factions.mjs – the example factions (public/user/attributes.csv)
 docs/       DATA_FORMAT.md – the binary format shared by both sides
 ```
 
@@ -238,6 +259,7 @@ cd ..
 npm install
 npm run dev        # http://localhost:5173
 npm run build      # static site in dist/
+npm run factions   # example factions from the star data (public/user/attributes.csv)
 ```
 
 Tests: `npm test` (decoder, cross-checked against a fixture written by the Python writer)
