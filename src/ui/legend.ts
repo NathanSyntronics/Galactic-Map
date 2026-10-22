@@ -1,6 +1,7 @@
 import type { AttributeStore } from '../data/attributes';
 import { formatNumber, t, type MessageKey } from '../i18n';
 import { JUMP_LENGTH_PALETTE, JUMP_UNIFORM_RGB } from '../render/links';
+import { ROUTE_CSS } from '../render/route';
 import {
   MISSING_COLOR,
   SIZE_LUMINOSITY,
@@ -53,13 +54,16 @@ export class Legend {
     parent.appendChild(this.root);
   }
 
-  /** `jumpTooMany`: the jump network is on but not shown (too many stars). */
-  update(s: Settings, store: AttributeStore, jumpTooMany = false): void {
+  /**
+   * `jumpTooMany`: the jump network is on but not shown (too many stars). `route.shown`: a route
+   * is drawn; `route.only`: only the route, the network is hidden while zoomed out.
+   */
+  update(s: Settings, store: AttributeStore, jumpTooMany = false, route = { shown: false, only: false }): void {
     this.root.replaceChildren();
     const color = s.colorBy ? attributeInfo(s.colorBy, store) : null;
     const size = s.sizeBy !== SIZE_LUMINOSITY && s.sizeBy !== SIZE_UNIFORM ? attributeInfo(s.sizeBy, store) : null;
     const layers = !!color || size?.type === 'number';
-    const show = s.legend && (layers || s.jumps);
+    const show = s.legend && (layers || s.jumps || route.shown);
     this.root.classList.toggle('hidden', !show);
     if (!show) return;
 
@@ -103,9 +107,19 @@ export class Legend {
       list.appendChild(this.swatch(MISSING_COLOR, t('noValue')));
       this.root.appendChild(list);
     }
+    if (route.shown) {
+      const row = el('div', 'legend-jump legend-route');
+      const line = el('span', 'legend-line');
+      line.style.background = ROUTE_CSS;
+      row.append(line, el('span', '', t('legendRoute')));
+      this.root.appendChild(row);
+    }
     if (s.jumps) {
       const row = el('div', 'legend-jump');
-      if (jumpTooMany) {
+      if (route.only) {
+        row.classList.add('dim');
+        row.textContent = t('legendJumpHidden');
+      } else if (jumpTooMany) {
         row.classList.add('warn');
         row.textContent = t('legendJumpTooMany');
       } else {

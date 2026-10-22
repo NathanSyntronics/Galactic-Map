@@ -414,6 +414,14 @@ export class NodeLoader {
     return this.failures.get(path)?.gaveUp === true;
   }
 
+  /** Forgets the transient failures of a node, so that it is fetched again while wanted (a retry asked for by the user). */
+  retry(path: string): void {
+    const f = this.failures.get(path);
+    if (!f || f.permanent) return;
+    this.failures.delete(path);
+    this.refill();
+  }
+
   loadedPoints(): number {
     let n = 0;
     for (const d of this.loaded.values()) n += d.count;

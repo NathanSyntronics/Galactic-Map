@@ -29,9 +29,11 @@ import {
   type JumpNetwork,
   type NetworkOptions,
 } from './network/places';
+import { ROUTE_STORAGE_KEY, RoutePlanner, parseStoredRoute, type RouteEnd, type RouteResult, type StoredRoute, type Waypoint } from './network/planner';
 import { JumpLines } from './render/links';
 import { DropLines, Marker, PolarGrid } from './render/overlays';
-import { Starfield, apparentMag, starLogL } from './render/starfield';
+import { RouteLine, fitDistance } from './render/route';
+import { Starfield, apparentMag, computeStyle, starLogL } from './render/starfield';
 import {
   SIZE_LUMINOSITY,
   SIZE_UNIFORM,
@@ -56,6 +58,7 @@ import { InfoPanel, displayName, type JumpListing, type StarInfo } from './ui/in
 import { Legend } from './ui/legend';
 import { LabelLayer, type LabelCandidate } from './ui/labels';
 import { SettingsPanel } from './ui/panel';
+import { RouteBox, type RouteNames } from './ui/route-box';
 import { SearchBox, SearchIndex, type SearchHit, type SearchTuple } from './ui/search';
 
 interface DownloadsApi {
@@ -79,6 +82,39 @@ function parseStarKey(key: string): { path: string; i: number } {
 const VISIBILITY_KEYS: (keyof Settings)[] = ['showBrownDwarfs', 'showWhiteDwarfs', 'maxDistErr', 'colorBy', 'sizeBy', 'missingStyle'];
 /** Settings that change the jump network. */
 const JUMP_KEYS: (keyof Settings)[] = ['jumps', 'jumpRange', 'jumpFaint', 'jumpSun', 'jumpBright', 'jumpBy', 'jumpHub', 'jumpConnect', 'radius'];
+/** Settings that change the route (besides hiding stars without a value of the data layers). */
+const ROUTE_KEYS: (keyof Settings)[] = [
+  'jumpRange',
+  'jumpFaint',
+  'jumpSun',
+  'jumpBright',
+  'jumpBy',
+  'jumpHub',
+  'jumpConnect',
+  'showBrownDwarfs',
+  'showWhiteDwarfs',
+  'maxDistErr',
+  'missingStyle',
+];
+/** The route is computed again this long after the last change of a setting (sliders change continuously). */
+const ROUTE_DELAY_MS = 400;
+
+function readStoredRoute(): StoredRoute | null {
+  try {
+    return parseStoredRoute(localStorage.getItem(ROUTE_STORAGE_KEY));
+  } catch {
+    return null;
+  }
+}
+
+function saveRoute(r: StoredRoute): void {
+  try {
+    if (r.from || r.to) localStorage.setItem(ROUTE_STORAGE_KEY, JSON.stringify(r));
+    else localStorage.removeItem(ROUTE_STORAGE_KEY);
+  } catch {
+    // storage unavailable: the route is simply not kept
+  }
+}
 
 export class App {
   private readonly store = new SettingsStore();
@@ -101,6 +137,18 @@ export class App {
   private readonly dropLines = new DropLines();
   private readonly selMarker = new Marker(0xffc861, 30);
   private readonly jumpLines = new JumpLines();
+  private readonly planner: RoutePlanner<OctreeNode>;
+  private readonly routeLine = new RouteLine();
+  private readonly routeBox: RouteBox;
+  /** Nodes the route planner waits for (requested in addition to the view's). */
+  private routeNodes: OctreeNode[] = [];
+  /** The route drawn: the planner's last result. */
+  private route: RouteResult | null = null;
+  /**
+   * A route is drawn and the visible radius is larger than three jump ranges: only the route is
+   * drawn, the jump network is neither drawn nor computed (docs/ROUTES.md).
+   */
+  private routeOnly = false;
   /** The jump network needs to be recomputed. */
   private jumpDirty = true;
   private lastJump = -Infinity;
@@ -173,7 +221,14 @@ export class App {
       () => this.stylePlan,
     );
 
-    this.scene.add(this.grid.group, this.dropLines.lines, this.jumpLines.group, this.starfield.group, this.selMarker.points);
+    this.scene.add(
+      this.grid.group,
+      this.dropLines.lines,
+      this.jumpLines.group,
+      this.routeLine.group,
+      this.starfield.group,
+      this.selMarker.points,
+    );
 
     this.labels = new LabelLayer(container);
 
@@ -209,8 +264,47 @@ export class App {
     this.info.onClose = () => this.select(null);
     this.info.onFlyTo = (info) => this.nav.flyTo(info.pos);
     this.info.jumpsOf = (info) => this.jumpListing(info);
+    this.info.onRoute = (info, end) => this.planner.setEnd(end, this.routeEnd(info));
 
-    this.legend = new Legend(container);
+    // bottom left: the route box above the legend
+    const stack = el('div', 'bottom-left');
+    container.appendChild(stack);
+    this.routeBox = new RouteBox(stack);
+    this.legend = new Legend(stack);
+    this.planner = new RoutePlanner<OctreeNode>(
+      {
+        root: () => this.octree?.root ?? null,
+        node: (path) => this.octree?.nodes.get(path),
+        want: (nodes) => {
+          this.routeNodes = nodes;
+          this.lodDirty = true;
+        },
+        data: (path) => this.loader?.get(path),
+        failed: (path) => this.loader?.hasFailed(path) ?? false,
+        retry: (path) => this.loader?.retry(path),
+        options: () => {
+          const s = this.store.get();
+          return { range: s.jumpRange, hub: s.jumpHub, kSun: s.jumpSun, connect: s.jumpConnect, capacity: this.capacityRule(s) };
+        },
+        style: (data, colors, sizes) => computeStyle(data, this.store.get(), this.stylePlan, colors, sizes),
+        nodeKey: (path) => this.nodeOrdinal.get(path) ?? 0,
+        find: async (designation) => {
+          await this.loadSearch();
+          const e = this.searchIndex.find(designation);
+          return e && e[9] === designation ? { path: e[2], index: e[3] } : null;
+        },
+        save: saveRoute,
+      },
+      readStoredRoute(),
+    );
+    this.planner.onChange = () => this.routeChanged();
+    this.routeBox.onSwap = () => this.planner.swap();
+    this.routeBox.onMode = (mode) => this.planner.setMode(mode);
+    this.routeBox.onRemove = () => this.planner.clear();
+    this.routeBox.onRetry = () => this.planner.retry();
+    this.routeBox.onShowAll = () => this.showWholeRoute();
+    this.routeBox.onPick = (k) => this.pickWaypoint(k);
+
     this.updateLegend();
     this.attrs.subscribe((kind) => this.attributesChanged(kind));
     this.attrs.onSaveError = () => {
@@ -245,6 +339,7 @@ export class App {
     this.resize();
     this.applySettings(this.store.get());
     this.applyHash(true);
+    this.routeChanged();
   }
 
   async start(): Promise<void> {
@@ -267,6 +362,8 @@ export class App {
     };
     this.loader.onFailed = (node) => this.nodeFailed(node);
     this.lodDirty = true;
+    // a route kept from the last visit
+    this.planner.invalidate();
     this.loop();
     if (!AttributeStore.readStored()) void this.loadSiteData();
   }
@@ -342,6 +439,8 @@ export class App {
     this.styleDirty = true;
     // capacities by attribute and hidden stars
     this.jumpDirty = true;
+    this.planner.styleChanged();
+    if (s.jumpBy || s.missingStyle === 'hide') this.planner.invalidate(ROUTE_DELAY_MS);
     if (this.jumpBlocked && s.missingStyle === 'hide') {
       this.jumpBlocked = null;
       this.lodDirty = true;
@@ -467,6 +566,7 @@ export class App {
     if (has('lang')) {
       this.search.updateTexts();
       this.info.rerender(this.nav.target);
+      this.routeBox.updateTexts();
       this.refreshChrome();
     }
     if (has('colorBy', 'sizeBy', 'missingStyle')) this.stylePlan = buildPlan(s, this.attrs);
@@ -489,6 +589,10 @@ export class App {
       this.lodDirty = true;
     }
     if (has(...JUMP_KEYS, ...VISIBILITY_KEYS)) this.jumpDirty = true;
+    // the route: the shown stars and the network settings (data layers hide stars only with 'hide')
+    if (has(...VISIBILITY_KEYS)) this.planner.styleChanged();
+    if (has(...ROUTE_KEYS) || (s.missingStyle === 'hide' && has('colorBy', 'sizeBy'))) this.planner.invalidate(ROUTE_DELAY_MS);
+    if (has('jumpRange')) this.routeChanged();
     if (has('jumpColor')) this.jumpLines.setMode(s.jumpColor);
     if (has('jumps') && !s.jumps) {
       this.jumpLines.clear();
@@ -507,7 +611,7 @@ export class App {
     u.uBrightness.value = s.brightness;
     this.grid.visible = s.grid;
     this.dropLines.lines.visible = s.dropLines && s.labels;
-    this.jumpLines.visible = s.jumps;
+    this.jumpLines.visible = s.jumps && !this.routeOnly;
   }
 
   private refreshChrome(): void {
@@ -523,7 +627,8 @@ export class App {
 
   private updateLegend(): void {
     const s = this.store.get();
-    this.legend.update(s, this.attrs, s.jumps && !!this.jumpLines.network?.overflow);
+    const tooMany = s.jumps && !this.routeOnly && !!this.jumpLines.network?.overflow;
+    this.legend.update(s, this.attrs, tooMany, { shown: this.routeLine.shown, only: this.routeOnly });
   }
 
   // ------------------------------------------------------------------ data
@@ -541,6 +646,7 @@ export class App {
     if (this.pendingSelect && this.pendingSelect.path === node.path) {
       this.select(this.starInfo(data, this.pendingSelect.index));
     }
+    this.planner.nodeArrived();
   }
 
   /** A node could not be loaded even after retries. */
@@ -548,6 +654,7 @@ export class App {
     this.candidatesDirty = true; // status line
     if (node.path === 'r') this.showLoadError('loadError');
     if (this.pendingSelect?.path === node.path) this.pendingSelect = null;
+    this.planner.nodeArrived();
   }
 
   private updateLod(): void {
@@ -560,7 +667,7 @@ export class App {
     if (blocked && blocked.centre.distanceTo(this.nav.target) > s.radius) this.jumpBlocked = null;
     // the jump network also needs the stars just outside the visible sphere (faded out by the
     // shader), but only when all of them fit the budget: it never takes stars from the sphere
-    const margin = s.jumps && !this.jumpBlocked ? jumpMargin(s.jumpRange) : 0;
+    const margin = s.jumps && !this.routeOnly && !this.jumpBlocked ? jumpMargin(s.jumpRange) : 0;
     const { nodes: selected, wide } = selectWithMargin(
       this.octree,
       { cameraPos: this.camera.position, target: this.nav.target, radius: s.radius, budget, pixelsPerUnitAtUnitDistance: pxPerUnit },
@@ -575,10 +682,13 @@ export class App {
     }
     if (wide !== this.jumpRegion) this.jumpDirty = true;
     this.jumpRegion = wide;
-    // keep loading the node of a star picked in the search even if the LOD does not choose it
+    // keep loading the node of a star picked in the search even if the LOD does not choose it,
+    // and the nodes of a route's corridor (after the view's)
+    const extra: OctreeNode[] = [];
     const pending = this.pendingSelect ? this.octree.nodes.get(this.pendingSelect.path) : undefined;
-    const request = pending && !this.selectedPaths.has(pending.path) ? [...selected, pending] : selected;
-    this.loader.request(request, budget * 2);
+    if (pending && !this.selectedPaths.has(pending.path)) extra.push(pending);
+    for (const n of this.routeNodes) if (!this.selectedPaths.has(n.path) && n !== pending) extra.push(n);
+    this.loader.request(extra.length ? [...selected, ...extra] : selected, budget * 2);
     this.starfield.setVisible(this.selectedPaths);
   }
 
@@ -679,6 +789,7 @@ export class App {
         size: h.size,
       });
     }
+    this.routeCandidates(cands, target, r2);
     // Keep the selected star labelled even if it is outside the candidate set.
     if (this.selected && !cands.some((c) => c.key === this.selected!.key)) {
       cands.push({
@@ -694,6 +805,61 @@ export class App {
     this.inView = inView;
     // only the view-dependent values: rebuilding the card here would swallow clicks on its buttons
     if (this.selected) this.info.updateView(this.nav.target);
+  }
+
+  /**
+   * Route labels: the waypoints inside the visible sphere become candidates (with a priority
+   * bonus, by the usual rules otherwise); start and destination are always labelled.
+   */
+  private routeCandidates(cands: LabelCandidate[], target: Vector3, r2: number): void {
+    const ends = [this.planner.from, this.planner.to].filter((e): e is RouteEnd => !!e);
+    if (!this.route && !ends.length) return;
+    const byKey = new Map(cands.map((c) => [c.key, c]));
+    for (const w of this.route?.waypoints ?? []) {
+      const dx = w.pos.x - target.x;
+      const dy = w.pos.y - target.y;
+      const dz = w.pos.z - target.z;
+      if (dx * dx + dy * dy + dz * dz > r2) continue;
+      const key = `${w.data.path}:${w.index}`;
+      const c = byKey.get(key) ?? this.candidateOf(w.data, w.index);
+      c.route = true;
+      if (!byKey.has(key)) {
+        byKey.set(key, c);
+        cands.push(c);
+      }
+    }
+    for (const e of ends) {
+      const key = `${e.path}:${e.index}`;
+      const c = byKey.get(key);
+      if (c) {
+        c.pinned = true;
+        continue;
+      }
+      const pinned: LabelCandidate = { key, pos: new Vector3(e.pos.x, e.pos.y, e.pos.z), text: this.routeNames.end(e), rank: 0, logL: 0, pinned: true };
+      byKey.set(key, pinned);
+      cands.push(pinned);
+    }
+  }
+
+  /** Label candidate of star i of a node. */
+  private candidateOf(d: NodeData, i: number): LabelCandidate {
+    const name = d.names.get(i);
+    const sun = (d.flags[i] & Flag.SUN) !== 0;
+    const sys = d.systems.get(i);
+    const sysInfo = sys !== undefined ? d.systemInfo.get(sys) : undefined;
+    const p = d.positions;
+    return {
+      key: `${d.path}:${i}`,
+      pos: new Vector3(p[3 * i], p[3 * i + 1], p[3 * i + 2]),
+      text: this.starName(d, i),
+      rank: sun ? 0 : (name?.rank ?? 99),
+      logL: starLogL(d, i),
+      sun,
+      sys,
+      sysName: sysInfo?.nameEn ? localName(sysInfo.nameEn, sysInfo.nameDe) : undefined,
+      appMag: apparentMag(d, i),
+      size: this.starfield.get(d.path)?.sizes[i],
+    };
   }
 
   private updateStatus(): void {
@@ -886,6 +1052,7 @@ export class App {
   private updateJumpStatus(): void {
     const s = this.store.get();
     const net = this.jumpLines.network;
+    if (s.jumps && this.routeOnly) return this.panel.setJumpStatus(t('jumpRouteOnly', { r: formatLy(3 * s.jumpRange) }));
     if (!s.jumps || !net) return this.panel.setJumpStatus('');
     if (net.overflow === 'places') return this.panel.setJumpStatus(t('jumpTooMany', { n: formatNumber(MAX_PLACES) }), true);
     if (net.overflow === 'pairs') return this.panel.setJumpStatus(t('jumpTooManyPairs'), true);
@@ -921,7 +1088,7 @@ export class App {
   /** The info card's list of the links of a star's place. */
   private jumpListing(info: StarInfo): JumpListing | null {
     const net = this.jumpLines.network;
-    if (!this.store.get().jumps || !net || net.overflow) return null;
+    if (!this.store.get().jumps || this.routeOnly || !net || net.overflow) return null;
     const { path, i } = parseStarKey(info.key);
     const found = linksOfStar(net, path, i);
     if (!found) return null;
@@ -975,6 +1142,81 @@ export class App {
       if (n) out.push(n);
     }
     return out;
+  }
+
+  // ------------------------------------------------------------------ route
+
+  /** A star of the info card as a route end. */
+  private routeEnd(info: StarInfo): RouteEnd {
+    const { path, i } = parseStarKey(info.key);
+    return {
+      designation: info.designation,
+      nameEn: info.nameEn,
+      nameDe: info.nameDe,
+      sun: (info.flags & Flag.SUN) !== 0,
+      path,
+      index: i,
+      pos: { x: info.pos.x, y: info.pos.y, z: info.pos.z },
+    };
+  }
+
+  /** Names in the route box: the chosen stars; waypoints by their system's name when it has one. */
+  private readonly routeNames: RouteNames = {
+    end: (e) => (e.sun ? t('theSun') : e.nameEn ? localName(e.nameEn, e.nameDe) : e.designation),
+    waypoint: (w: Waypoint) => {
+      const sys = w.data.systems.get(w.index);
+      const info = sys !== undefined ? w.data.systemInfo.get(sys) : undefined;
+      return info?.nameEn ? localName(info.nameEn, info.nameDe) : this.starName(w.data, w.index);
+    },
+  };
+
+  /** The planner's ends, status or route changed. */
+  private routeChanged(): void {
+    const p = this.planner;
+    if (p.route !== this.route) {
+      this.route = p.route;
+      this.routeLine.set(this.route ? this.route.waypoints.map((w) => w.pos) : null, this.route?.found ?? true);
+      this.updateLegend();
+    }
+    // start and destination labels
+    this.candidatesDirty = true;
+    const s = this.store.get();
+    this.routeBox.update({ from: p.from, to: p.to, mode: p.mode, status: p.status, route: p.route, range: s.jumpRange }, this.routeNames);
+  }
+
+  /** Centres the view on the route and zooms out until it fits (the camera only). */
+  private showWholeRoute(): void {
+    const ext = this.routeLine.extent;
+    if (!ext) return;
+    const d = fitDistance(ext.radius, this.camera.fov, this.camera.aspect);
+    this.nav.flyTo(ext.centre, MathUtils.clamp(d, 3, 150_000));
+  }
+
+  /** A waypoint picked in the route box: select it and centre the view on it. */
+  private pickWaypoint(k: number): void {
+    const w = this.route?.waypoints[k];
+    if (!w) return;
+    const info = this.starInfo(w.data, w.index);
+    this.select(info);
+    const s = this.store.get();
+    // radius following the zoom: close enough to see the jump network around it
+    const dist = s.autoRadius
+      ? Math.min(this.nav.distance, distanceForRadius(Math.min(20, 3 * s.jumpRange)))
+      : MathUtils.clamp(this.nav.distance, 3, Math.max(s.radius * 1.8, 10));
+    this.nav.flyTo(info.pos, dist);
+  }
+
+  /** Switches between the jump network and the route alone (zoomed out). */
+  private setRouteOnly(only: boolean): void {
+    this.routeOnly = only;
+    const s = this.store.get();
+    this.jumpLines.visible = s.jumps && !only;
+    // the network region is loaded (or no longer) and the network computed for the current view
+    this.lodDirty = true;
+    if (!only) this.jumpDirty = true;
+    this.updateLegend();
+    this.updateJumpStatus();
+    this.info.updateJumps();
   }
 
   private goToSun(): void {
@@ -1148,6 +1390,7 @@ export class App {
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.labels.resize(w, h, Math.min(window.devicePixelRatio, 2));
+    this.routeLine.setResolution(w, h);
     this.lodDirty = true;
     this.candidatesDirty = true;
   }
@@ -1164,6 +1407,9 @@ export class App {
     const dist = this.nav.distance;
     this.camera.near = Math.max(dist * 1e-4, 1e-4);
     this.camera.far = dist + s.radius * 4 + 1000;
+    // the route is drawn whole, however far it reaches
+    const ext = this.routeLine.extent;
+    if (ext) this.camera.far = Math.max(this.camera.far, this.camera.position.distanceTo(ext.centre) + ext.radius + 100);
     this.camera.updateProjectionMatrix();
     // labels and picking need this frame's camera matrix
     this.camera.updateMatrixWorld();
@@ -1191,7 +1437,9 @@ export class App {
       this.lastLod = now;
       this.updateLod();
     }
-    if (s.jumps && this.octree) {
+    const routeOnly = this.routeLine.shown && s.radius > 3 * s.jumpRange;
+    if (routeOnly !== this.routeOnly) this.setRouteOnly(routeOnly);
+    if (s.jumps && !this.routeOnly && this.octree) {
       const net = this.jumpLines.network;
       const c = this.nav.target;
       const moved = net ? Math.hypot(c.x - net.centre.x, c.y - net.centre.y, c.z - net.centre.z) : 0;
@@ -1217,6 +1465,7 @@ export class App {
       this.updateStatus();
     }
 
+    this.routeLine.update(u.uScale.value, this.renderer.getPixelRatio());
     this.grid.update(this.nav.target, s.radius, (ly) => formatLy(ly), s.lang, t('galacticCentre'));
 
     this.labels.draw({

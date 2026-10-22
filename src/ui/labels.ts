@@ -19,6 +19,10 @@ export interface LabelCandidate {
   appMag?: number;
   /** Symbol radius of the star's sprite in light years (before the star size setting). */
   size?: number;
+  /** Start or destination of the route: always labelled, wherever it is. */
+  pinned?: boolean;
+  /** A waypoint of the route: labelled by the usual rules, with a higher priority. */
+  route?: boolean;
 }
 
 export interface Rect {
@@ -59,6 +63,13 @@ const MERGE_PX = 18;
 const SUB_COMPONENT = /(\s[A-H])[a-c]$/;
 const COMPONENT = /\s[A-H][a-c]?$/;
 const COMPONENT_PARTS = /^(.*\S)\s([A-H])[a-c]?$/;
+
+/** Label priority bonus of route waypoints and of the route's start and destination. */
+export const ROUTE_BONUS = 2;
+export const PINNED_BONUS = 500;
+
+/** Text colour of the route's start and destination: a light tint of the route colour. */
+const ROUTE_LABEL = '#ffa6ec';
 
 const FONT_SELECTED = '600 13px system-ui, sans-serif';
 const FONT_NAME = '12px system-ui, sans-serif';
@@ -139,6 +150,8 @@ export function labelScore(c: LabelCandidate, distToCamera: number): number {
   score += c.rank < RANK_BONUS.length ? RANK_BONUS[c.rank] : 0;
   score += skyBonus(c.appMag);
   if (c.sun) score += 100;
+  if (c.route) score += ROUTE_BONUS;
+  if (c.pinned) score += PINNED_BONUS;
   return score;
 }
 
@@ -228,8 +241,9 @@ const inside = (r: Rect, b: { w: number; h: number }) => r.x >= 0 && r.y >= 0 &&
 /**
  * Places labels in the given (priority) order, each at the first of its anchors that does not
  * overlap a box in `placed` and lies within `bounds` (the viewport, if given); labels without a
- * free anchor are dropped (the selected star's label is always shown). At most `maxLabels`
- * labels, a third of them catalogue designations. Adds the boxes of the placed labels to `placed`.
+ * free anchor are dropped (the labels of the selected star and of pinned stars are always shown).
+ * At most `maxLabels` labels, a third of them catalogue designations (the always shown ones
+ * included, but never dropped). Adds the boxes of the placed labels to `placed`.
  */
 export function placeLabels(
   items: ScreenLabel[],
@@ -248,17 +262,18 @@ export function placeLabels(
   for (const it of items) {
     const named = it.c.rank < 99;
     const selected = it.c.key === opts.selectedKey;
-    if (!selected) {
+    const always = selected || !!it.c.pinned;
+    if (!always) {
       if (count >= opts.maxLabels) continue;
       if (!named && designationCount >= maxDesignations) continue;
     }
-    const font = selected ? FONT_SELECTED : named ? FONT_NAME : FONT_DESIGNATION;
+    const font = selected ? FONT_SELECTED : named || it.c.pinned ? FONT_NAME : FONT_DESIGNATION;
     const tw = opts.measure(font, it.text);
     const options = anchors(it.x, it.y, tw, it.gap ?? 0);
     const bounds = opts.bounds;
     let a = options.find((o) => (!bounds || inside(o.r, bounds)) && !overlapsAny(o.r, opts.placed));
     if (!a) {
-      if (!selected) continue;
+      if (!always) continue;
       a = options[0];
     }
     opts.placed.push(a.r);
@@ -341,12 +356,12 @@ export class LabelLayer {
 
     // Star labels are placed first; grid labels only take the space that is left.
     let stars: PlacedLabel[] = [];
-    if (opts.enabled || this.selectedKey !== null) {
+    if (opts.enabled || this.selectedKey !== null || this.candidates.some((c) => c.pinned)) {
       const scored: ScreenLabel[] = [];
       for (const c of this.candidates) {
         const selected = c.key === this.selectedKey;
-        if (!opts.enabled && !selected) continue;
-        const fade = c.sun || selected ? 1 : 1 - smoothstep(radius * 0.85, radius, c.pos.distanceTo(target));
+        if (!opts.enabled && !selected && !c.pinned) continue;
+        const fade = c.sun || selected || c.pinned ? 1 : 1 - smoothstep(radius * 0.85, radius, c.pos.distanceTo(target));
         if (fade <= 0.02) continue;
         const s = this.project(c.pos, camera, w, h);
         if (!s) continue;
@@ -395,13 +410,16 @@ export class LabelLayer {
       ctx.strokeText(it.text, l.tx, l.ty);
       ctx.fillStyle = selected
         ? '#ffd27a'
-        : it.c.sun
-          ? '#fff1b8'
-          : named
-            ? 'rgba(232, 238, 250, 0.95)'
-            : 'rgba(160, 178, 205, 0.85)';
+        : it.c.pinned
+          ? ROUTE_LABEL
+          : it.c.sun
+            ? '#fff1b8'
+            : named
+              ? 'rgba(232, 238, 250, 0.95)'
+              : 'rgba(160, 178, 205, 0.85)';
       ctx.fillText(it.text, l.tx, l.ty);
-      if (!it.c.sun && named) this.labelledPositions.push(it.c.pos);
+      // height lines only inside the visible sphere (a pinned route end may lie far outside)
+      if (!it.c.sun && named && (!it.c.pinned || it.c.pos.distanceTo(opts.target) <= radius)) this.labelledPositions.push(it.c.pos);
     }
     ctx.globalAlpha = 1;
   }

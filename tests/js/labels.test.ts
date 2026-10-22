@@ -10,6 +10,7 @@ import {
   sharedName,
   skyBonus,
   spriteGap,
+  ROUTE_BONUS,
   type LabelCandidate,
   type Rect,
   type ScreenLabel,
@@ -156,6 +157,21 @@ describe('label placement', () => {
     expect(out.map((l) => l.item.text)).toEqual(['Altair']);
   });
 
+  it('always places the route\'s start and destination, beyond the label limit', () => {
+    const blocker: Rect = { x: 0, y: 0, w: 400, h: 400 };
+    const pinned = item('Betelgeuse', 210, 210);
+    pinned.c.pinned = true;
+    const designation = item('Gaia DR3 1', 230, 230, 99);
+    designation.c.pinned = true;
+    const out = placeLabels([item('Vega', 200, 200), pinned, designation], {
+      maxLabels: 0,
+      selectedKey: null,
+      measure,
+      placed: [blocker],
+    });
+    expect(out.map((l) => l.item.text)).toEqual(['Betelgeuse', 'Gaia DR3 1']);
+  });
+
   it('keeps labels inside the viewport', () => {
     // a star at the right edge: its label goes to the left
     const out = placeLabels([item('Procyon', 395, 100)], { maxLabels: 10, selectedKey: null, measure, placed: [], bounds: { w: 400, h: 300 } });
@@ -211,5 +227,15 @@ describe('label priority', () => {
     const pollux: LabelCandidate = { key: 'x', pos: new Vector3(), text: 'Pollux', rank: 0, logL: 1.57, appMag: 1.23 };
     expect(labelScore(sirius, 110)).toBeGreaterThan(labelScore(pollux, 110));
     expect(labelScore(procyon, 110)).toBeGreaterThan(labelScore(pollux, 110));
+  });
+
+  it('prefers route waypoints a little and the route\'s ends above everything but the selection', () => {
+    const star: LabelCandidate = { key: 'a', pos: new Vector3(), text: 'A', rank: 99, logL: -1 };
+    const waypoint: LabelCandidate = { ...star, key: 'w', route: true };
+    const end: LabelCandidate = { ...star, key: 'e', pinned: true };
+    const sun: LabelCandidate = { ...star, key: 's', rank: 0, logL: 0, sun: true };
+    expect(labelScore(waypoint, 10) - labelScore(star, 10)).toBe(ROUTE_BONUS);
+    expect(labelScore(waypoint, 10)).toBeLessThan(labelScore({ ...star, rank: 0 }, 10));
+    expect(labelScore(end, 1000)).toBeGreaterThan(labelScore(sun, 1));
   });
 });

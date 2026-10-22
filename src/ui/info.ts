@@ -66,6 +66,8 @@ export class InfoPanel {
   onClose: () => void = () => {};
   onFlyTo: (info: StarInfo) => void = () => {};
   onManageAttributes: () => void = () => {};
+  /** "Route from here" / "Route to here". */
+  onRoute: (info: StarInfo, end: 'from' | 'to') => void = () => {};
   /** Jump links of a star (null: the network is off or the star is not part of it). */
   jumpsOf: (info: StarInfo) => JumpListing | null = () => null;
   /** True while the attribute form is open (the card is then not rebuilt by data changes). */
@@ -244,6 +246,11 @@ export class InfoPanel {
     const fly = el('button', 'btn', t('flyTo'));
     fly.addEventListener('click', () => this.onFlyTo(info));
     actions.appendChild(fly);
+    for (const end of ['from', 'to'] as const) {
+      const btn = el('button', 'btn route-btn', t(end === 'from' ? 'routeFromHere' : 'routeToHere'));
+      btn.addEventListener('click', () => this.onRoute(info, end));
+      actions.appendChild(btn);
+    }
     if (!(info.flags & Flag.SUN)) {
       const a = el('a', 'btn subtle', t('openSimbad'));
       a.href = `https://simbad.cds.unistra.fr/simbad/sim-id?Ident=${encodeURIComponent(info.designation)}`;

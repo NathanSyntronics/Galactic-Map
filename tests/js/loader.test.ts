@@ -240,6 +240,31 @@ describe('NodeLoader', () => {
     expect(failed).toEqual(['r']); // reported once
   });
 
+  it('fetches a given-up node again at once when asked to retry', async () => {
+    const net = flaky(MAX_ATTEMPTS, () => 503);
+    const { loader, loaded, failed } = makeLoader(net.fetchFn);
+    loader.request([octree.root], 1e6);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(failed).toEqual(['r']);
+    loader.retry('r');
+    expect(loader.hasFailed('r')).toBe(false);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(net.count()).toBe(MAX_ATTEMPTS + 1);
+    expect(loaded).toEqual(['r']);
+  });
+
+  it('does not retry permanent errors, even when asked to', async () => {
+    const net = flaky(100, () => 404);
+    const { loader, failed } = makeLoader(net.fetchFn);
+    loader.request([octree.root], 1e6);
+    await vi.advanceTimersByTimeAsync(60_000);
+    loader.retry('r');
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(net.count()).toBe(1);
+    expect(failed).toEqual(['r']);
+    expect(loader.hasFailed('r')).toBe(true);
+  });
+
   it('does not retry permanent errors', async () => {
     const net = flaky(100, () => 404);
     const { loader, failed } = makeLoader(net.fetchFn);
