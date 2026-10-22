@@ -52,6 +52,17 @@ export class SettingsPanel {
   private readonly jumpBox = el('div', 'jumps');
   /** Link count or the reason why there is no network (kept across rebuilds). */
   private readonly jumpStatus = el('p', 'hint jump-status');
+  /**
+   * Transparent layer over the map and the other controls while the panel is open: a press
+   * anywhere outside the panel only closes it (no star pick, no rotation). It stays until that
+   * press has ended, so that its release and click land nowhere either.
+   */
+  private readonly scrim = el('div', 'panel-scrim');
+  /** Pointers of the press that closed the panel, still down. */
+  private readonly held = new Set<number>();
+  private releaseTimer = 0;
+  /** A wheel turned over the scrim (the app zooms the map with it). */
+  onScrimWheel: (e: WheelEvent) => void = () => {};
 
   constructor(
     parent: HTMLElement,
@@ -62,8 +73,53 @@ export class SettingsPanel {
     this.root.id = 'settings-panel';
     this.body = el('div', 'panel-body');
     this.root.appendChild(this.body);
-    parent.appendChild(this.root);
+    this.scrim.setAttribute('aria-hidden', 'true');
+    parent.append(this.scrim, this.root);
+    this.setupScrim();
     this.render();
+  }
+
+  private setupScrim(): void {
+    const s = this.scrim;
+    s.addEventListener('pointerdown', (e) => {
+      // a new gesture: forget pointers whose release was never seen
+      if (e.isPrimary) this.held.clear();
+      this.held.add(e.pointerId);
+      window.clearTimeout(this.releaseTimer);
+      try {
+        s.setPointerCapture(e.pointerId);
+      } catch {
+        // the pointer is already gone
+      }
+      this.toggle(false);
+    });
+    const up = (e: PointerEvent) => {
+      if (!this.held.delete(e.pointerId) || this.held.size) return;
+      // the click of a tap follows the release; a drag has none
+      window.clearTimeout(this.releaseTimer);
+      this.releaseTimer = window.setTimeout(() => this.releaseScrim(), 400);
+    };
+    s.addEventListener('pointerup', up);
+    s.addEventListener('pointercancel', up);
+    s.addEventListener('lostpointercapture', up);
+    s.addEventListener('click', () => {
+      if (!this.held.size) this.releaseScrim();
+    });
+    s.addEventListener('contextmenu', (e) => e.preventDefault());
+    s.addEventListener(
+      'wheel',
+      (e) => {
+        e.preventDefault();
+        this.onScrimWheel(e);
+      },
+      { passive: false },
+    );
+  }
+
+  private releaseScrim(): void {
+    window.clearTimeout(this.releaseTimer);
+    this.held.clear();
+    if (!this.isOpen) this.scrim.classList.remove('active');
   }
 
   /**
@@ -95,6 +151,14 @@ export class SettingsPanel {
   toggle(open?: boolean): void {
     const isOpen = open ?? !this.root.classList.contains('open');
     this.root.classList.toggle('open', isOpen);
+    if (isOpen) {
+      this.held.clear();
+      window.clearTimeout(this.releaseTimer);
+      this.scrim.classList.add('active');
+    } else if (!this.held.size) {
+      // closed by its own button or a key: no press to wait for
+      this.releaseScrim();
+    }
   }
 
   get isOpen(): boolean {

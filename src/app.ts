@@ -100,6 +100,9 @@ const ROUTE_KEYS: (keyof Settings)[] = [
 ];
 /** The route is computed again this long after the last change of a setting (sliders change continuously). */
 const ROUTE_DELAY_MS = 400;
+/** Two taps within this time and 30 px make a double-tap. */
+const DOUBLE_TAP_MS = 350;
+
 
 function readStoredRoute(): StoredRoute | null {
   try {
@@ -254,18 +257,17 @@ export class App {
     helpBtn.addEventListener('click', () => this.showHelp());
     this.helpBtn = helpBtn;
     top.appendChild(helpBtn);
-    // a press on the top bar outside the settings panel closes the panel (the control still acts)
-    top.addEventListener('pointerdown', (e) => {
-      if (this.panel.isOpen && !this.menuBtn.contains(e.target as Node)) this.panel.toggle(false);
-    });
 
+    // while it is open, a press anywhere beside the panel only closes it; the wheel still zooms
     this.panel = new SettingsPanel(container, this.store, this.attrs);
+    this.panel.onScrimWheel = (e) => this.renderer.domElement.dispatchEvent(new WheelEvent('wheel', e));
     this.panel.onManageAttributes = () => this.showAttributes();
     this.panel.onGoToSun = () => this.goToSun();
     this.panel.onHelp = () => this.showHelp();
     this.panel.onAbout = () => this.showAbout();
 
     this.info = new InfoPanel(container, this.attrs);
+    this.catchSecondTap(this.info.root);
     this.info.onManageAttributes = () => this.showAttributes();
     this.info.onClose = () => this.select(null);
     this.info.onFlyTo = (info) => this.nav.flyTo(info.pos);
@@ -275,6 +277,7 @@ export class App {
     // bottom left: the route box above the legend
     const stack = el('div', 'bottom-left');
     container.appendChild(stack);
+    this.catchSecondTap(stack);
     this.routeBox = new RouteBox(stack);
     this.legend = new Legend(stack);
     this.planner = new RoutePlanner<OctreeNode>(
@@ -795,7 +798,7 @@ export class App {
         size,
       });
     }
-    this.routeCandidates(cands, target, r2);
+    this.routeCandidates(cands);
     // Keep the selected star labelled even if it is outside the candidate set.
     if (this.selected && !cands.some((c) => c.key === this.selected!.key)) {
       cands.push({
@@ -814,18 +817,15 @@ export class App {
   }
 
   /**
-   * Route labels: the waypoints inside the visible sphere become candidates (with a priority
-   * bonus, by the usual rules otherwise); start and destination are always labelled.
+   * Route labels: every waypoint is a candidate, also outside the visible sphere (the route is
+   * drawn there too), ahead of all other stars (see labelScore); start and destination are always
+   * labelled.
    */
-  private routeCandidates(cands: LabelCandidate[], target: Vector3, r2: number): void {
+  private routeCandidates(cands: LabelCandidate[]): void {
     const ends = [this.planner.from, this.planner.to].filter((e): e is RouteEnd => !!e);
     if (!this.route && !ends.length) return;
     const byKey = new Map(cands.map((c) => [c.key, c]));
     for (const w of this.route?.waypoints ?? []) {
-      const dx = w.pos.x - target.x;
-      const dy = w.pos.y - target.y;
-      const dz = w.pos.z - target.z;
-      if (dx * dx + dy * dy + dz * dz > r2) continue;
       const key = `${w.data.path}:${w.index}`;
       const c = byKey.get(key) ?? this.candidateOf(w.data, w.index);
       c.route = true;
@@ -884,25 +884,29 @@ export class App {
 
   private setupPointer(): void {
     const dom = this.renderer.domElement;
-    // a tap is a single pointer that went down and up without moving; pinches never count
+    // a tap is a single pointer that went down and up without moving; pinches never count.
+    // Times are those of the input events (e.timeStamp), not of their handling: the page can be
+    // busy for a moment after a tap (card, labels), which must not break a double-tap.
     const taps = new TapDetector(6, 600);
+    // a double-tap: the second press starts within DOUBLE_TAP_MS of the first tap's release, near it
+    let secondTap = false;
     dom.addEventListener('pointerdown', (e) => {
-      taps.down(e.pointerId, e.clientX, e.clientY, performance.now(), e.isPrimary);
+      taps.down(e.pointerId, e.clientX, e.clientY, e.timeStamp, e.isPrimary);
+      if (e.isPrimary) {
+        secondTap =
+          e.timeStamp - this.lastTap.time < DOUBLE_TAP_MS &&
+          Math.hypot(e.clientX - this.lastTap.x, e.clientY - this.lastTap.y) < 30;
+      }
     });
     dom.addEventListener('pointercancel', (e) => taps.cancel(e.pointerId));
     dom.addEventListener('pointerup', (e) => {
-      if (!taps.up(e.pointerId, e.clientX, e.clientY, performance.now())) return;
-      // with the settings panel open, a tap on the map only closes the panel (a drag still rotates)
-      if (this.panel.isOpen) {
-        this.panel.toggle(false);
-        this.lastTap = { time: 0, x: 0, y: 0 };
-        return;
-      }
+      if (!taps.up(e.pointerId, e.clientX, e.clientY, e.timeStamp)) return;
+      // (while the settings panel is open, its scrim catches every press beside it)
       const hit = this.pickAt(e.clientX, e.clientY, e.pointerType === 'touch' ? 22 : 14);
-      const now = performance.now();
-      const isDouble =
-        now - this.lastTap.time < 350 && Math.hypot(e.clientX - this.lastTap.x, e.clientY - this.lastTap.y) < 30;
-      this.lastTap = { time: now, x: e.clientX, y: e.clientY };
+      const isDouble = secondTap;
+      secondTap = false;
+      // after a double-tap the next tap starts a new pair
+      this.lastTap = isDouble ? { time: 0, x: 0, y: 0 } : { time: e.timeStamp, x: e.clientX, y: e.clientY };
       if (hit) {
         this.select(hit);
         if (isDouble) this.nav.flyTo(hit.pos);
@@ -911,6 +915,55 @@ export class App {
       }
     });
     dom.addEventListener('contextmenu', (e) => e.preventDefault());
+  }
+
+  /**
+   * The card (and on phones the route box above it) opens right over the tapped star: the second
+   * tap of a double-tap then lands on it. Such a press (by its input time, close to the first tap)
+   * is caught there and flies to the selected star, like a double-tap on the map.
+   */
+  private catchSecondTap(el: HTMLElement): void {
+    let caught: number | null = null;
+    let swallowClick = false;
+    const isSecondTap = (e: PointerEvent) =>
+      e.isPrimary &&
+      !!this.selected &&
+      e.timeStamp - this.lastTap.time < DOUBLE_TAP_MS &&
+      Math.hypot(e.clientX - this.lastTap.x, e.clientY - this.lastTap.y) < 30;
+    el.addEventListener(
+      'pointerdown',
+      (e) => {
+        if (!isSecondTap(e)) return;
+        caught = e.pointerId;
+        e.preventDefault();
+        e.stopPropagation();
+      },
+      { capture: true },
+    );
+    el.addEventListener(
+      'pointerup',
+      (e) => {
+        if (caught !== e.pointerId) return;
+        caught = null;
+        swallowClick = true;
+        e.preventDefault();
+        e.stopPropagation();
+        this.lastTap = { time: 0, x: 0, y: 0 };
+        if (this.selected) this.nav.flyTo(this.selected.pos);
+      },
+      { capture: true },
+    );
+    el.addEventListener('pointercancel', () => (caught = null), { capture: true });
+    el.addEventListener(
+      'click',
+      (e) => {
+        if (!swallowClick) return;
+        swallowClick = false;
+        e.preventDefault();
+        e.stopPropagation();
+      },
+      { capture: true },
+    );
   }
 
   private pickAt(clientX: number, clientY: number, radiusPx: number): StarInfo | null {

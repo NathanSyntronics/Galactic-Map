@@ -245,14 +245,19 @@ describe('label priority', () => {
     expect(labelScore(procyon, 110)).toBeGreaterThan(labelScore(pollux, 110));
   });
 
-  it('prefers route waypoints a little and the route\'s ends above everything but the selection', () => {
+  it('labels route waypoints before all other stars, named ones first, and the route\'s ends above everything', () => {
     const star: LabelCandidate = { key: 'a', pos: new Vector3(), text: 'A', rank: 99, logL: -1 };
     const waypoint: LabelCandidate = { ...star, key: 'w', route: true };
+    const namedWaypoint: LabelCandidate = { ...waypoint, key: 'n', rank: 4 };
     const end: LabelCandidate = { ...star, key: 'e', pinned: true };
     const sun: LabelCandidate = { ...star, key: 's', rank: 0, logL: 0, sun: true };
+    const bright: LabelCandidate = { ...star, key: 'b', rank: 0, logL: 4 };
     expect(labelScore(waypoint, 10) - labelScore(star, 10)).toBe(ROUTE_BONUS);
-    expect(labelScore(waypoint, 10)).toBeLessThan(labelScore({ ...star, rank: 0 }, 10));
-    expect(labelScore(end, 1000)).toBeGreaterThan(labelScore(sun, 1));
+    // a faint, far waypoint without a name still comes before the Sun and bright named stars nearby
+    expect(labelScore(waypoint, 1000)).toBeGreaterThan(labelScore(sun, 1));
+    expect(labelScore(waypoint, 1000)).toBeGreaterThan(labelScore(bright, 1));
+    expect(labelScore(namedWaypoint, 10)).toBeGreaterThan(labelScore(waypoint, 10));
+    expect(labelScore(end, 1000)).toBeGreaterThan(labelScore(namedWaypoint, 1));
   });
 });
 

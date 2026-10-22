@@ -21,7 +21,10 @@ export interface LabelCandidate {
   size?: number;
   /** Start or destination of the route: always labelled, wherever it is. */
   pinned?: boolean;
-  /** A waypoint of the route: labelled by the usual rules, with a higher priority. */
+  /**
+   * A waypoint of the route: a candidate wherever it is (the route is drawn whole), labelled ahead
+   * of all other stars, but like them only where its label overlaps no other.
+   */
   route?: boolean;
 }
 
@@ -64,8 +67,13 @@ const SUB_COMPONENT = /(\s[A-H])[a-c]$/;
 const COMPONENT = /\s[A-H][a-c]?$/;
 const COMPONENT_PARTS = /^(.*\S)\s([A-H])[a-c]?$/;
 
-/** Label priority bonus of route waypoints and of the route's start and destination. */
-export const ROUTE_BONUS = 2;
+/**
+ * Label priority bonus of route waypoints (above the Sun's 100: waypoints come before all other
+ * stars), the extra bonus of named waypoints (before catalogue designations), and the bonus of the
+ * route's start and destination.
+ */
+export const ROUTE_BONUS = 200;
+export const ROUTE_NAMED_BONUS = 50;
 export const PINNED_BONUS = 500;
 
 /** Text colour of the route's start and destination: a light tint of the route colour. */
@@ -156,7 +164,7 @@ export function starPriority(logL: number, distToCamera: number, rank: number, a
 /** Label priority of a candidate: the star's, plus the route bonuses. */
 export function labelScore(c: LabelCandidate, distToCamera: number): number {
   let score = starPriority(c.logL, distToCamera, c.rank, c.appMag, c.sun);
-  if (c.route) score += ROUTE_BONUS;
+  if (c.route) score += ROUTE_BONUS + (c.rank < 99 ? ROUTE_NAMED_BONUS : 0);
   if (c.pinned) score += PINNED_BONUS;
   return score;
 }
@@ -328,7 +336,8 @@ const inside = (r: Rect, b: { w: number; h: number }) => r.x >= 0 && r.y >= 0 &&
  * overlap a box in `placed` and lies within `bounds` (the viewport, if given); labels without a
  * free anchor are dropped (the labels of the selected star and of pinned stars are always shown).
  * At most `maxLabels` labels, a third of them catalogue designations (the always shown ones
- * included, but never dropped). Adds the boxes of the placed labels to `placed`.
+ * included, but never dropped; route waypoints count, but are not limited to the third). Adds the
+ * boxes of the placed labels to `placed`.
  */
 export function placeLabels(
   items: ScreenLabel[],
@@ -350,7 +359,7 @@ export function placeLabels(
     const always = selected || !!it.c.pinned;
     if (!always) {
       if (count >= opts.maxLabels) continue;
-      if (!named && designationCount >= maxDesignations) continue;
+      if (!named && !it.c.route && designationCount >= maxDesignations) continue;
     }
     const font = selected ? FONT_SELECTED : named || it.c.pinned ? FONT_NAME : FONT_DESIGNATION;
     const tw = opts.measure(font, it.text);
@@ -446,7 +455,8 @@ export class LabelLayer {
       for (const c of this.candidates) {
         const selected = c.key === this.selectedKey;
         if (!opts.enabled && !selected && !c.pinned) continue;
-        const fade = c.sun || selected || c.pinned ? 1 : 1 - smoothstep(radius * 0.85, radius, c.pos.distanceTo(target));
+        // the route is drawn whole: its labels do not fade at the edge of the sphere
+        const fade = c.sun || selected || c.pinned || c.route ? 1 : 1 - smoothstep(radius * 0.85, radius, c.pos.distanceTo(target));
         if (fade <= 0.02) continue;
         const s = this.project(c.pos, camera, w, h);
         if (!s) continue;
@@ -503,8 +513,9 @@ export class LabelLayer {
               ? 'rgba(232, 238, 250, 0.95)'
               : 'rgba(160, 178, 205, 0.85)';
       ctx.fillText(it.text, l.tx, l.ty);
-      // height lines only inside the visible sphere (a pinned route end may lie far outside)
-      if (!it.c.sun && named && (!it.c.pinned || it.c.pos.distanceTo(opts.target) <= radius)) this.labelledPositions.push(it.c.pos);
+      // height lines only inside the visible sphere (route stars may lie far outside)
+      const outside = (it.c.pinned || it.c.route) && it.c.pos.distanceTo(opts.target) > radius;
+      if (!it.c.sun && named && !outside) this.labelledPositions.push(it.c.pos);
     }
     ctx.globalAlpha = 1;
   }

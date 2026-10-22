@@ -71,10 +71,12 @@ around the straight line from start to destination:
 * Small markers at the waypoints (rings, so the star stays visible; they shrink to 4 px when zoomed
   out), larger ones at start and destination (also at a destination the partial route of an
   unreachable one does not reach); start and destination are always labelled (also
-  with names switched off, in a tint of the route colour); waypoints inside the visible sphere are
-  label candidates by the usual label logic (also without a name, with their designation) with a
-  small priority bonus. The labels of start and destination are never merged into the label of
-  another member of their system (e.g. the selected one).
+  with names switched off, in a tint of the route colour). Every waypoint is a label candidate,
+  also outside the visible sphere (the route is drawn there too), and waypoints are labelled
+  before all other stars, named ones before catalogue designations; labels still never overlap, so
+  zoomed out only some of them show. Route labels do not fade at the edge of the visible sphere.
+  The labels of start and destination are never merged into the label of another member of their
+  system (e.g. the selected one).
 * **Only the route when zoomed out:** while a route is shown and the visible radius is larger than
   `3 · jumpRange`, the general network is not drawn (and not computed); zoomed in, the network is
   drawn as usual with the route on top. With *radius follows zoom* (the default) zooming out

@@ -218,6 +218,22 @@ select {
 
 /* ---------------------------------------------------------------- settings panel */
 
+/* while the panel is open: catches every press beside it (above the map and the other controls) */
+.panel-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 9;
+  display: none;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.panel-scrim.active {
+  display: block;
+}
+
 .panel {
   position: absolute;
   top: 0;
@@ -1163,8 +1179,8 @@ label.check input {
     display: none;
   }
 
-  /* beside the open panel only the map shows, so a tap there closes the panel and never lands
-     on the route box or the card underneath (their buttons sit in that narrow strip) */
+  /* beside the open panel only a narrow strip of the map shows: the route box and the card
+     would show only as slivers there */
   .panel.open ~ .info-card,
   .panel.open ~ .bottom-left {
     visibility: hidden;

@@ -63,9 +63,11 @@ The search finds stars by name or catalogue designation; while the field is empt
 last three stars picked from the search (newest first, kept in the browser). One picked before the
 star catalogue has loaded says *Loading…* and is carried out when it arrives, unless you type or
 pick something else first; if the catalogue cannot be loaded, the list says so and the next click
-into the field tries again. A click or tap next to the open settings panel, or on the backdrop of
-a dialog, closes it; that click does not select or deselect a star, and a drag still turns the
-view. On a phone the route box and the star card step aside while the panel is open, so that such
+into the field tries again. Any press beside the open settings panel (a click, a tap, even one that
+moves a little) only closes the panel: it selects no star and does not turn the view; the mouse
+wheel still zooms. A click on the backdrop of a dialog closes the dialog. Beside an open star card
+a tap selects the tapped star directly. A double-tap flies to a star also where the card opens
+right over it: the second tap lands on the card and is taken as the double-tap. On a phone the route box and the star card step aside while the panel is open, so that such
 a tap never lands on one of their buttons; while a star card is open, the route box moves to the
 top of the screen in short form (start, destination, status), so that it is not hidden under the
 card. A click anywhere on the bright disc of a large star (at large star sizes) selects that star.
