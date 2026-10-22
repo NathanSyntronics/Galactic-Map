@@ -6,6 +6,7 @@
 import type { NodeData } from '../data/format';
 import { starLogL } from '../render/starfield';
 import { scalePosition } from '../render/style';
+import { segmentDistance2 } from './capsule';
 import { capacityFromLogL, capacityFromPosition, closePairs, computeJumpLinks, linksOfPlace, type JumpLinks, type PlaceLink } from './jumps';
 
 /** Stars of one loaded octree node. */
@@ -54,6 +55,8 @@ export interface PlaceOptions {
   centre: { x: number; y: number; z: number };
   /** Only stars within this distance of the centre take part. */
   radius: number;
+  /** Other end of a segment from the centre: then the stars within `radius` of the segment take part (a route corridor). */
+  to?: { x: number; y: number; z: number };
   capacity: CapacityRule;
   /** Stable number per node path, for the tie-break key of a star. */
   nodeKey: (path: string) => number;
@@ -95,12 +98,13 @@ export function jumpMargin(range: number): number {
 }
 
 /**
- * Groups the shown stars within `radius` of the centre into places: by system, then places
- * closer than MERGE_DISTANCE are merged.
+ * Groups the shown stars within `radius` of the centre (or of the segment centre–to) into places:
+ * by system, then places closer than MERGE_DISTANCE are merged.
  */
 export function buildPlaces(sources: PlaceSource[], opt: PlaceOptions): PlaceSet {
   const { x: cx, y: cy, z: cz } = opt.centre;
   const r2 = opt.radius * opt.radius;
+  const to = opt.to;
   const max = opt.maxPlaces ?? Infinity;
   const nodeKeys = sources.map((s) => opt.nodeKey(s.data.path) * KEY_SHIFT);
   const byPosition = opt.capacity.by === 'position';
@@ -145,10 +149,14 @@ export function buildPlaces(sources: PlaceSource[], opt: PlaceOptions): PlaceSet
     let own: Int32Array | null = null;
     for (let i = 0; i < d.count; i++) {
       if (!(sizes[i] > 0)) continue;
-      const dx = p[3 * i] - cx;
-      const dy = p[3 * i + 1] - cy;
-      const dz = p[3 * i + 2] - cz;
-      if (dx * dx + dy * dy + dz * dz > r2) continue;
+      if (to) {
+        if (!(segmentDistance2(p[3 * i], p[3 * i + 1], p[3 * i + 2], opt.centre, to) <= r2)) continue;
+      } else {
+        const dx = p[3 * i] - cx;
+        const dy = p[3 * i + 1] - cy;
+        const dz = p[3 * i + 2] - cz;
+        if (dx * dx + dy * dy + dz * dz > r2) continue;
+      }
       if (!own) {
         own = new Int32Array(d.count).fill(-1);
         starPlace.set(d.path, own);

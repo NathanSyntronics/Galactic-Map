@@ -200,7 +200,9 @@ pipeline/   Python: download catalogues → cross-match → positions → physic
             → names → LOD octree (public/data/)
 src/        TypeScript + three.js web app
 tools/      make-factions.mjs – the example factions (public/user/attributes.csv)
+            bench-route.mjs – benchmark of the route search (synthetic and Sun–Betelgeuse corridors)
 docs/       DATA_FORMAT.md – the binary format shared by both sides
+            JUMP_NETWORK.md, ROUTES.md – specifications of the jump network and route planning
 ```
 
 ### Merging the catalogues
@@ -260,6 +262,7 @@ npm install
 npm run dev        # http://localhost:5173
 npm run build      # static site in dist/
 npm run factions   # example factions from the star data (public/user/attributes.csv)
+npm run bench:route  # route search benchmark (see docs/ROUTES.md, Measurements)
 ```
 
 Tests: `npm test` (decoder, cross-checked against a fixture written by the Python writer)
