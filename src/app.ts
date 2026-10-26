@@ -1,6 +1,6 @@
 import { Color, MathUtils, Matrix4, PerspectiveCamera, Scene, Vector3, WebGLRenderer } from 'three';
 import { Navigation } from './controls/navigation';
-import { SPRITE_CORE, pickScore } from './controls/pick';
+import { LABELLED_RADIUS, PRECISE_PX, SPRITE_CORE, labelledWins, pickScore } from './controls/pick';
 import { TapDetector } from './controls/tap';
 import { AttributeStore } from './data/attributes';
 import { Flag, designationOf, type NodeData } from './data/format';
@@ -58,7 +58,7 @@ import {
 import { AttributesDialog } from './ui/attributes-dialog';
 import { InfoPanel, displayName, type JumpListing, type StarInfo } from './ui/info';
 import { Legend } from './ui/legend';
-import { LabelLayer, TopK, namedCandidateLimit, onScreen, starPriority, type LabelCandidate } from './ui/labels';
+import { LabelLayer, TopK, labelUnder, labelledStarNear, namedCandidateLimit, onScreen, starPriority, type LabelCandidate } from './ui/labels';
 import { SettingsPanel } from './ui/panel';
 import { RouteBox, type RouteNames } from './ui/route-box';
 import { SearchBox, SearchIndex, type SearchHit, type SearchTuple } from './ui/search';
@@ -776,6 +776,7 @@ export class App {
       const p = d.positions;
       cands.push({
         key: `${d.path}:${i}`,
+        ref: { data: d, index: i },
         pos: new Vector3(p[3 * i], p[3 * i + 1], p[3 * i + 2]),
         text: sun ? t('theSun') : localName(name!.en, name!.de),
         rank: sun ? 0 : name!.rank,
@@ -791,6 +792,7 @@ export class App {
       const p = d.positions;
       cands.push({
         key: `${d.path}:${i}`,
+        ref: { data: d, index: i },
         pos: new Vector3(p[3 * i], p[3 * i + 1], p[3 * i + 2]),
         text: designationOf(d, i),
         rank: 99,
@@ -841,7 +843,16 @@ export class App {
         c.pinned = true;
         continue;
       }
-      const pinned: LabelCandidate = { key, pos: new Vector3(e.pos.x, e.pos.y, e.pos.z), text: this.routeNames.end(e), rank: 0, logL: 0, pinned: true };
+      const data = this.loader?.get(e.path);
+      const pinned: LabelCandidate = {
+        key,
+        ref: data && e.index < data.count ? { data, index: e.index } : undefined,
+        pos: new Vector3(e.pos.x, e.pos.y, e.pos.z),
+        text: this.routeNames.end(e),
+        rank: 0,
+        logL: 0,
+        pinned: true,
+      };
       byKey.set(key, pinned);
       cands.push(pinned);
     }
@@ -856,6 +867,7 @@ export class App {
     const p = d.positions;
     return {
       key: `${d.path}:${i}`,
+      ref: { data: d, index: i },
       pos: new Vector3(p[3 * i], p[3 * i + 1], p[3 * i + 2]),
       text: this.starName(d, i),
       rank: sun ? 0 : (name?.rank ?? 99),
@@ -983,7 +995,9 @@ export class App {
     const scale = u.uScale.value as number;
     const minPx = u.uMinPx.value as number;
     const maxPx = u.uMaxPx.value as number;
-    let best: { d: number; data: NodeData; i: number } | null = null;
+    let best: { d: number; dist: number; data: NodeData; i: number } | null = null;
+    // stars within the pick radius (a crowded view lets labelled stars win)
+    let nearby = 0;
     for (const rn of this.starfield.visibleNodes()) {
       const d = rn.data;
       const p = d.positions;
@@ -1005,11 +1019,30 @@ export class App {
         if (dist > radiusPx && dist > (SPRITE_CORE * maxPx) / (2 * pr)) continue;
         // clip w is the view depth
         const core = (SPRITE_CORE * spritePx(rn.sizes[i], s.starSize, scale, cw, minPx, maxPx)) / (2 * pr);
+        if (dist <= radiusPx) nearby++;
         const score = pickScore({ dist, core, named: d.names.has(i), logL: starLogL(d, i) }, radiusPx);
-        if (score !== null && (!best || score < best.d)) best = { d: score, data: d, i };
+        if (score !== null && (!best || score < best.d)) best = { d: score, dist, data: d, i };
       }
     }
-    return best ? this.starInfo(best.data, best.i) : null;
+    const usual = best ? this.starInfo(best.data, best.i) : null;
+    // Labelled stars first: a click on a name picks its star; in crowded views the labelled star
+    // near the pointer is what the user aims at, even where fainter stars lie closer.
+    const touch = radiusPx > 16;
+    const near = labelledStarNear(this.labels.hits, mx, my, LABELLED_RADIUS[touch ? 'touch' : 'mouse']);
+    // right on a labelled star's dot: that star, even under another star's name
+    if (near && near.dist <= PRECISE_PX[touch ? 'touch' : 'mouse']) return this.labelStar(near.hit.c) ?? usual;
+    const onText = labelUnder(this.labels.hits, mx, my, touch ? 6 : 2);
+    if (onText) return this.labelStar(onText.c) ?? usual;
+    if (near && near.hit.c.key !== usual?.key && labelledWins(near.dist, best && { dist: best.dist, disc: best.d <= -1e6 }, touch, nearby)) {
+      return this.labelStar(near.hit.c) ?? usual;
+    }
+    return usual;
+  }
+
+  /** The star of a label, if its data is at hand. */
+  private labelStar(c: LabelCandidate): StarInfo | null {
+    if (this.selected && c.key === this.selected.key) return this.selected;
+    return c.ref ? this.starInfo(c.ref.data, c.ref.index) : null;
   }
 
   private starInfo(d: NodeData, i: number): StarInfo {

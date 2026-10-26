@@ -26,3 +26,30 @@ export function pickScore(c: PickCandidate, radiusPx: number): number | null {
   if (c.core > radiusPx && c.dist <= c.core) return -1e6 - c.core;
   return c.dist - (c.named ? 4 : 0) - c.logL;
 }
+
+/** Labelled stars win within this radius of the pointer (CSS px), wider for fingers. */
+export const LABELLED_RADIUS = { mouse: 18, touch: 30 };
+/** A click this close to another star's centre (CSS px) still picks that star, where it is not crowded. */
+export const PRECISE_PX = { mouse: 4, touch: 6 };
+/** More stars than this within the pick radius make a view crowded. */
+export const CROWDED = 3;
+
+/**
+ * Whether the nearest labelled star wins over the star the usual rules chose. In crowded views
+ * the labelled star is what a user aims at, even if faint stars lie closer to the pointer. The
+ * usual choice stays when it is a hit on a large star's visible disc, or, where the view is not
+ * crowded (`nearby` stars within the pick radius), a precise click right on another star that is
+ * clearly nearer than the labelled one.
+ */
+export function labelledWins(
+  labelledDist: number,
+  usual: { dist: number; disc: boolean } | null,
+  touch: boolean,
+  nearby = 1,
+): boolean {
+  if (!usual) return true;
+  if (usual.disc) return false;
+  if (nearby > CROWDED) return true;
+  const precise = PRECISE_PX[touch ? 'touch' : 'mouse'];
+  return !(usual.dist <= precise && usual.dist < 0.5 * labelledDist);
+}

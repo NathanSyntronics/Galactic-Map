@@ -71,6 +71,10 @@ right over it: the second tap lands on the card and is taken as the double-tap. 
 a tap never lands on one of their buttons; while a star card is open, the route box moves to the
 top of the screen in short form (start, destination, status), so that it is not hidden under the
 card. A click anywhere on the bright disc of a large star (at large star sizes) selects that star.
+Labelled stars come first when picking: a click on a star's name selects that star, and in
+crowded views (zoomed out, many stars under the pointer) a labelled star within 18 px (30 px by
+touch) wins over the fainter stars around it; where the view is not crowded, a click right on
+another star still picks that one.
 
 The settings are kept in the browser, but only the values you changed: phones and narrow windows
 start with fewer stars and labels, and those defaults are never stored, so the same browser in a

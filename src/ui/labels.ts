@@ -1,9 +1,12 @@
 import { PerspectiveCamera, Vector3 } from 'three';
+import type { NodeData } from '../data/format';
 import type { GridLabel } from '../render/overlays';
 
 export interface LabelCandidate {
   /** Unique key, e.g. "r07:12". */
   key: string;
+  /** The star in the node data (for selecting it by its label). */
+  ref?: { data: NodeData; index: number };
   /** World position. */
   pos: Vector3;
   text: string;
@@ -48,6 +51,40 @@ export interface ScreenLabel {
   merged?: string[];
   /** Extra distance (CSS px) of the label from the star, beside a large sprite. */
   gap?: number;
+}
+
+/** A label drawn in the last frame: its star's screen position and its text box (CSS px). */
+export interface LabelHit {
+  c: LabelCandidate;
+  x: number;
+  y: number;
+  rect: Rect;
+}
+
+/** The label whose text box (grown by `pad`) contains the point; the nearest box centre wins. */
+export function labelUnder(hits: readonly LabelHit[], x: number, y: number, pad: number): LabelHit | null {
+  let best: LabelHit | null = null;
+  let bestD = Infinity;
+  for (const h of hits) {
+    const r = h.rect;
+    if (x < r.x - pad || x > r.x + r.w + pad || y < r.y - pad || y > r.y + r.h + pad) continue;
+    const d = Math.hypot(x - (r.x + r.w / 2), y - (r.y + r.h / 2));
+    if (d < bestD) {
+      best = h;
+      bestD = d;
+    }
+  }
+  return best;
+}
+
+/** The labelled star nearest to the point, within `radius` CSS px. */
+export function labelledStarNear(hits: readonly LabelHit[], x: number, y: number, radius: number): { hit: LabelHit; dist: number } | null {
+  let best: { hit: LabelHit; dist: number } | null = null;
+  for (const h of hits) {
+    const d = Math.hypot(x - h.x, y - h.y);
+    if (d <= radius && (!best || d < best.dist)) best = { hit: h, dist: d };
+  }
+  return best;
 }
 
 export interface PlacedLabel {
@@ -389,6 +426,8 @@ export class LabelLayer {
   selectedKey: string | null = null;
   /** World positions of the stars that received a label in the last draw. */
   readonly labelledPositions: Vector3[] = [];
+  /** The star labels drawn in the last frame (for picking by label). */
+  hits: LabelHit[] = [];
 
   constructor(parent: HTMLElement) {
     this.canvas = document.createElement('canvas');
@@ -446,6 +485,7 @@ export class LabelLayer {
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
     this.labelledPositions.length = 0;
+    this.hits = [];
     const placed: Rect[] = [];
 
     // Star labels are placed first; grid labels only take the space that is left.
@@ -475,6 +515,7 @@ export class LabelLayer {
         placed,
         bounds: { w, h },
       });
+      this.hits = stars.map((l) => ({ c: l.item.c, x: l.item.x, y: l.item.y, rect: l.rect }));
     }
 
     if (opts.grid) {
