@@ -46,6 +46,12 @@ jobs:
         working-directory: pipeline
         run: python -m galmap.build --out ../public/data
 
+      # Galaxies (docs/GALAXIES.md). Without them the map still works (stars only).
+      - name: Build galaxy data
+        working-directory: pipeline
+        continue-on-error: true
+        run: python -m galmap.galaxies --out ../public/data
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
