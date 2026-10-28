@@ -12,10 +12,13 @@ import {
   NodeLoader,
   Octree,
   isPermanentError,
+  nodeKeyOf,
   retryDelay,
   selectWithMargin,
+  type FetchRows,
   type Manifest,
   type OctreeNode,
+  type SubManifest,
 } from './data/octree';
 import { formatLy, formatNumber, jumpStatsText, localName, setLang, t, type MessageKey } from './i18n';
 import {
@@ -31,6 +34,7 @@ import {
   type JumpNetwork,
   type NetworkOptions,
 } from './network/places';
+import { boxIntersectsCapsule } from './network/capsule';
 import { ROUTE_STORAGE_KEY, RoutePlanner, parseStoredRoute, type RouteEnd, type RouteResult, type StoredRoute, type Waypoint } from './network/planner';
 import { JumpLines } from './render/links';
 import { DropLines, Marker, PolarGrid } from './render/overlays';
@@ -177,7 +181,6 @@ export class App {
   /** The radius is being set from the zoom (radius follows zoom), not by the user. */
   private followingZoom = false;
   /** Stable number per octree node path (tie-break keys of the network). */
-  private readonly nodeOrdinal = new Map<string, number>();
   private readonly labels: LabelLayer;
   private readonly panel: SettingsPanel;
   private readonly info: InfoPanel;
@@ -212,7 +215,9 @@ export class App {
   private readonly viewProj = new Matrix4();
 
   constructor(private readonly container: HTMLElement) {
-    this.baseUrl = `${import.meta.env.BASE_URL}data/`;
+    // the star data may live elsewhere (object storage for large datasets, docs/SCALING.md)
+    const dataUrl = (import.meta.env.VITE_DATA_URL as string | undefined) || `${import.meta.env.BASE_URL}data/`;
+    this.baseUrl = dataUrl.endsWith('/') ? dataUrl : `${dataUrl}/`;
     setLang(this.store.get().lang);
     document.title = t('appTitle');
 
@@ -285,6 +290,11 @@ export class App {
       {
         root: () => this.octree?.root ?? null,
         node: (path) => this.octree?.nodes.get(path),
+        reach: async (path) => void (await this.reachNode(path)),
+        expand: async (a, b, r) => {
+          const oct = this.octree;
+          if (oct) await oct.expandWhere((n) => boxIntersectsCapsule(n.box, a, b, r), this.fetchRows);
+        },
         want: (nodes) => {
           this.routeNodes = nodes;
           this.lodDirty = true;
@@ -297,7 +307,7 @@ export class App {
           return { range: s.jumpRange, hub: s.jumpHub, kSun: s.jumpSun, connect: s.jumpConnect, capacity: this.capacityRule(s) };
         },
         style: (data, colors, sizes) => computeStyle(data, this.store.get(), this.stylePlan, colors, sizes),
-        nodeKey: (path) => this.nodeOrdinal.get(path) ?? 0,
+        nodeKey: (path) => this.nodeKey(path),
         // an exact lookup (find() would also take other spellings); a failed index load is reported
         find: async (designation) => {
           if (!(await this.loadSearch())) throw new Error('search index unavailable');
@@ -364,8 +374,11 @@ export class App {
       return;
     }
     this.octree = new Octree(this.manifest);
-    let k = 0;
-    for (const path of this.octree.nodes.keys()) this.nodeOrdinal.set(path, k++);
+    // nodes of a sub-manifest (large datasets): the selection can look below the node now
+    this.octree.onAdded = () => {
+      this.lodDirty = true;
+      this.planner.nodeArrived();
+    };
     this.loader = new NodeLoader(this.baseUrl, this.manifest.packs);
     this.loader.onLoaded = (node, data) => this.nodeLoaded(node, data);
     this.loader.onEvicted = (path) => {
@@ -756,7 +769,10 @@ export class App {
     // keep loading the node of a star picked in the search even if the LOD does not choose it,
     // and the nodes of a route's corridor (after the view's)
     const extra: OctreeNode[] = [];
+    // descendants of selected nodes that are listed in sub-manifests not loaded yet
+    for (const n of selected) if (Octree.hasUnloaded(n)) this.loadSub(n);
     const pending = this.pendingSelect ? this.octree.nodes.get(this.pendingSelect.path) : undefined;
+    if (this.pendingSelect && !pending) void this.reachNode(this.pendingSelect.path);
     if (pending && !this.selectedPaths.has(pending.path)) extra.push(pending);
     for (const n of this.routeNodes) if (!this.selectedPaths.has(n.path) && n !== pending) extra.push(n);
     this.loader.request(extra.length ? [...selected, ...extra] : selected, budget * 2);
@@ -1149,7 +1165,7 @@ export class App {
       centre: { x: centre.x, y: centre.y, z: centre.z },
       radius: region,
       capacity: this.capacityRule(s),
-      nodeKey: (path) => this.nodeOrdinal.get(path) ?? 0,
+      nodeKey: (path) => this.nodeKey(path),
       maxPlaces: MAX_PLACES,
       range: s.jumpRange,
       hub: s.jumpHub,
@@ -1272,9 +1288,49 @@ export class App {
       this.select(this.starInfo(data, hit.index));
     } else if (this.loader && !this.loader.hasFailed(hit.path)) {
       this.pendingSelect = hit;
-      const node = this.octree?.nodes.get(hit.path);
-      // make sure the node gets loaded even if the LOD would not choose it yet
-      if (node && this.loader) this.loader.request([...this.lodSelectedNodes(), node], QUALITY_BUDGET[s.quality] * 2);
+      // make sure the node gets loaded even if the LOD would not choose it yet (in a large
+      // dataset its row may first have to come from a sub-manifest)
+      void this.reachNode(hit.path).then((node) => {
+        if (node && this.loader && this.pendingSelect === hit) this.loader.request([...this.lodSelectedNodes(), node], QUALITY_BUDGET[s.quality] * 2);
+      });
+    }
+  }
+
+  /** Stable key of a node for the jump network's tie-breaks (see nodeKeyOf). */
+  private nodeKey(path: string): number {
+    const n = this.octree?.nodes.get(path);
+    return n ? nodeKeyOf(n) : 0;
+  }
+
+  /** Rows of a sub-manifest (m/<path>.json). */
+  private fetchRows: FetchRows = async (file) => {
+    const url = `${this.baseUrl}${file}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new HttpError(res.status, url);
+    return ((await res.json()) as SubManifest).nodes;
+  };
+
+  /** Sub-manifests that failed, by node path: not asked for again before this time. */
+  private readonly subRetryAt = new Map<string, number>();
+
+  /** Loads a node's sub-manifest (after a failure, again after a pause). */
+  private loadSub(node: OctreeNode): void {
+    if (!this.octree) return;
+    if ((this.subRetryAt.get(node.path) ?? 0) > performance.now()) return;
+    this.octree.loadSub(node, this.fetchRows).catch((err: unknown) => {
+      console.warn('sub-manifest unavailable', node.sub, err);
+      this.subRetryAt.set(node.path, performance.now() + 10_000);
+    });
+  }
+
+  /** Makes sure the node of a path is known (loading sub-manifests on the way). */
+  private async reachNode(path: string): Promise<OctreeNode | undefined> {
+    if (!this.octree) return undefined;
+    try {
+      return await this.octree.reach(path, this.fetchRows);
+    } catch (err) {
+      console.warn('node unavailable', path, err);
+      return undefined;
     }
   }
 

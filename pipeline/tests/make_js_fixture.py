@@ -35,3 +35,20 @@ df["planets"] = df["planets"].fillna(0).astype(int)
 systems = pd.DataFrame([dict(system_id=7, name_en="Sirius", name_de=None, members=2, cx=-5.03, cy=-1.87, cz=-1.34, designation="HIP 32349")])
 write_dataset(df, systems, OUT, sources=[{"key": "fixture", "title": "test fixture"}], params={}, capacity=4096)
 print("wrote", OUT)
+
+# a dataset with sub-manifests (manifest version 2) for tests/js/octree-sub.test.ts: only the
+# manifests are kept (the test reads no star data)
+import shutil  # noqa: E402
+
+import numpy as np  # noqa: E402
+
+from galmap.synthetic import make  # noqa: E402
+
+SUB = OUT.parent / "sub"
+shutil.rmtree(SUB, ignore_errors=True)
+stars = make(6000, seed=4)
+m = write_dataset(stars, None, SUB, sources=[{"key": "fixture", "title": "test fixture"}], params={}, capacity=40, subtree_nodes=30)
+shutil.rmtree(SUB / "n")
+for f in ("search.json", "systems.json"):
+    (SUB / f).unlink()
+print("wrote", SUB, m["nodeCount"], "nodes,", len(list((SUB / "m").glob("*.json"))), "sub-manifests")

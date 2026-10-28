@@ -11,7 +11,7 @@ import { AttributeStore } from '../src/data/attributes';
 import { toCsv } from '../src/data/csv';
 import { decodeNode, designationOf, type NodeData } from '../src/data/format';
 import { NO_LOOKUP, importCsv, type ImportReport, type StarResolver } from '../src/data/importer';
-import { Octree, type Manifest } from '../src/data/octree';
+import { Octree, nodeKeyOf, type Manifest, type SubManifest } from '../src/data/octree';
 import { MAX_PAIRS, MAX_PLACES, computeNetwork, jumpMargin, placeOfStar, type JumpNetwork, type PlaceSource } from '../src/network/places';
 import { computeStyle } from '../src/render/starfield';
 import { valueGetter } from '../src/render/style';
@@ -70,16 +70,25 @@ const REGION = 100;
 
 interface Data {
   sources: PlaceSource[];
-  nodeOrdinal: Map<string, number>;
+  /** Tie-break key of each node, as the app's (nodeKeyOf). */
+  nodeKeys: Map<string, number>;
 }
 
 /** Decodes every node whose cube reaches into the region and styles it with the default settings. */
 function loadRegion(dataDir: string, centre: Vector3, radius: number): Data {
   const manifest = JSON.parse(readFileSync(join(dataDir, 'manifest.json'), 'utf8')) as Manifest;
   const octree = new Octree(manifest);
-  const nodeOrdinal = new Map<string, number>();
-  let k = 0;
-  for (const path of octree.nodes.keys()) nodeOrdinal.set(path, k++);
+  // large datasets: the nodes of the region's sub-manifests too
+  for (let more = true; more; ) {
+    more = false;
+    for (const node of [...octree.nodes.values()]) {
+      if (!Octree.hasUnloaded(node) || node.box.distanceToPoint(centre) > radius) continue;
+      octree.addSub(node, (JSON.parse(readFileSync(join(dataDir, node.sub!), 'utf8')) as SubManifest).nodes);
+      more = true;
+    }
+  }
+  const nodeKeys = new Map<string, number>();
+  for (const node of octree.nodes.values()) nodeKeys.set(node.path, nodeKeyOf(node));
   const packs = new Map<number, Buffer>();
   const sources: PlaceSource[] = [];
   const plan = { color: null, size: null, missing: DEFAULT_SETTINGS.missingStyle };
@@ -94,7 +103,7 @@ function loadRegion(dataDir: string, centre: Vector3, radius: number): Data {
     computeStyle(data, DEFAULT_SETTINGS, plan, colors, sizes);
     sources.push({ data, sizes, colors });
   }
-  return { sources, nodeOrdinal };
+  return { sources, nodeKeys };
 }
 
 /** The jump network with the default settings, as the app computes it (without the app's size limits). */
@@ -104,7 +113,7 @@ function defaultNetwork(data: Data, centre: Vector3, radius: number): JumpNetwor
     centre: { x: centre.x, y: centre.y, z: centre.z },
     radius,
     capacity: { by: 'luminosity', faint: s.jumpFaint, sun: s.jumpSun, bright: s.jumpBright },
-    nodeKey: (path) => data.nodeOrdinal.get(path) ?? 0,
+    nodeKey: (path) => data.nodeKeys.get(path) ?? 0,
     // the large regions hold far more places than the app computes at once
     maxPlaces: Math.max(MAX_PLACES, 5_000_000),
     range: s.jumpRange,

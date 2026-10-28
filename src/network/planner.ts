@@ -47,6 +47,13 @@ export interface PlannerHost<N extends CorridorNode> {
   /** Root of the octree; null until the catalogue is loaded. */
   root(): N | null;
   node(path: string): N | undefined;
+  /**
+   * Large datasets list some nodes in sub-manifests: `expand` loads those of every node that
+   * touches the capsule a–b of radius r, `reach` those on the way to a node. Optional (complete
+   * trees need neither).
+   */
+  expand?(a: Vec3, b: Vec3, r: number): Promise<void>;
+  reach?(path: string): Promise<void>;
   /** Nodes the route needs loaded besides those of the view (replaces the previous list). */
   want(nodes: N[]): void;
   /** Decoded data of a loaded node. */
@@ -391,6 +398,8 @@ export class RoutePlanner<N extends CorridorNode> {
 
     const plan = await planRoute<CorridorNet>({ from: from.pos, to: to.pos, range: opt.range, mode, signal }, async (c) => {
       if (searchStart) stats.searchMs += now() - searchStart;
+      await this.host.expand?.(from.pos, to.pos, c.networkWidth);
+      if (signal.aborted) return { refused: 'cancelled' };
       const nodes = nodesInCapsule<CorridorNode>(root, from.pos, to.pos, c.networkWidth) as N[];
       const bytes = nodes.reduce((s, n) => s + n.bytes, 0);
       if (bytes > MAX_CORRIDOR_BYTES) return { refused: 'data' };
@@ -493,6 +502,7 @@ export class RoutePlanner<N extends CorridorNode> {
       stats.loadMs += now() - t;
     };
     const check = async (path: string, index: number): Promise<RouteEnd | null> => {
+      await this.host.reach?.(path);
       const node = this.host.node(path);
       if (!node) return null;
       await load([node]);
@@ -503,6 +513,7 @@ export class RoutePlanner<N extends CorridorNode> {
     // near the stored position: finds every star (the name index holds only the named ones)
     const nearby = async (): Promise<RouteEnd | null> => {
       const r = locateRadius(end.pos);
+      await this.host.expand?.(end.pos, end.pos, r);
       const nodes = nodesInCapsule<CorridorNode>(root, end.pos, end.pos, r) as N[];
       await load(nodes);
       if (signal.aborted) return null;

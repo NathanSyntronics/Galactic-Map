@@ -4,6 +4,7 @@
  * objects or DOM; the star sources are plain arrays (Starfield's rendered nodes fit).
  */
 import type { NodeData } from '../data/format';
+import { NODE_KEY_SHIFT } from '../data/octree';
 import { starLogL } from '../render/starfield';
 import { scalePosition } from '../render/style';
 import { segmentDistance2 } from './capsule';
@@ -83,7 +84,8 @@ export interface PlaceSet {
   overflow: boolean;
 }
 
-const KEY_SHIFT = 2 ** 24;
+/** Keys of stars: nodeKey * KEY_SHIFT + index (see nodeKeyOf in data/octree.ts). */
+const KEY_SHIFT = NODE_KEY_SHIFT;
 
 /** More places than this are not computed (keeps a computation well below 0.5 s). */
 export const MAX_PLACES = 150_000;

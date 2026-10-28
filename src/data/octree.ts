@@ -11,8 +11,15 @@ export interface SourceInfo {
   used?: number;
 }
 
+/**
+ * A node row: [path, count, bytes, childMask, packIndex, byteOffset], and in manifest version 2
+ * optionally the file of a sub-manifest that lists the node's descendants (m/<path>.json).
+ */
+export type NodeRow = [string, number, number, number, number, number, (string | null)?];
+
 export interface Manifest {
   format: string;
+  /** 1, or 2 with sub-manifests (docs/SCALING.md). */
   version: number;
   generated: string;
   units: string;
@@ -20,13 +27,19 @@ export interface Manifest {
   root: { center: [number, number, number]; halfSize: number };
   capacity: number;
   starCount: number;
+  /** All nodes, including those in sub-manifests. */
   nodeCount: number;
   packs: string[];
-  /** [path, count, bytes, childMask, packIndex, byteOffset] */
-  nodes: [string, number, number, number, number, number][];
+  nodes: NodeRow[];
   sources: SourceInfo[];
   params?: Record<string, unknown>;
   stats?: Record<string, unknown>;
+}
+
+/** A sub-manifest (m/<path>.json): the rows of a node's descendants. */
+export interface SubManifest {
+  path: string;
+  nodes: NodeRow[];
 }
 
 export interface OctreeNode {
@@ -36,6 +49,10 @@ export interface OctreeNode {
   bytes: number;
   pack: number;
   offset: number;
+  /** Bit i set: child i exists (it may not be loaded yet, see `sub`). */
+  childMask: number;
+  /** File of the sub-manifest that lists the descendants while they are not loaded, else null. */
+  sub: string | null;
   /** Galactic-frame cube. */
   galCenter: [number, number, number];
   halfSize: number;
@@ -48,52 +65,146 @@ export interface OctreeNode {
   children: OctreeNode[];
 }
 
+/** Bits of a node key for the star index (keys are nodeKey * 2^13 + index, capacity <= 8192). */
+export const NODE_KEY_SHIFT = 2 ** 13;
+
+/**
+ * A stable number of a node, for the tie-break keys of the jump network: from its place in the
+ * packs, which the writer fills in a fixed order (pre-order of the tree for a single bucket). It
+ * does not depend on which sub-manifests are loaded or in which order.
+ */
+export function nodeKeyOf(node: { pack: number; offset: number }): number {
+  return node.pack * 2 ** 24 + node.offset / 8;
+}
+
+export type FetchRows = (file: string) => Promise<NodeRow[]>;
+
 export class Octree {
   readonly root: OctreeNode;
   readonly nodes = new Map<string, OctreeNode>();
+  /** Sub-manifests being loaded, by node path. */
+  private readonly loading = new Map<string, Promise<OctreeNode[]>>();
+  /** Called with the nodes a sub-manifest added. */
+  onAdded: (nodes: OctreeNode[]) => void = () => {};
 
   constructor(readonly manifest: Manifest) {
     const entries = new Map(manifest.nodes.map((n) => [n[0], n]));
-    const rootEntry = entries.get('r');
-    if (!rootEntry) throw new Error('manifest has no root node');
-    const build = (path: string, parent: OctreeNode | null, center: [number, number, number], half: number): OctreeNode => {
-      const e = entries.get(path)!;
-      const worldCenter = new Vector3(center[0], center[2], -center[1]);
-      const node: OctreeNode = {
-        path,
-        level: path.length - 1,
-        count: e[1],
-        bytes: e[2],
-        pack: e[4],
-        offset: e[5],
-        galCenter: center,
-        halfSize: half,
-        box: new Box3(
-          worldCenter.clone().subScalar(half),
-          worldCenter.clone().addScalar(half),
-        ),
-        worldCenter,
-        radius: half * Math.sqrt(3),
-        parent,
-        children: [],
-      };
-      this.nodes.set(path, node);
-      const mask = e[3];
-      for (let i = 0; i < 8; i++) {
-        if (!(mask & (1 << i))) continue;
-        const childPath = path + i;
-        if (!entries.has(childPath)) continue;
-        const h = half / 2;
-        const c: [number, number, number] = [
-          center[0] + (i & 1 ? h : -h),
-          center[1] + (i & 2 ? h : -h),
-          center[2] + (i & 4 ? h : -h),
-        ];
-        node.children.push(build(childPath, node, c, h));
-      }
-      return node;
+    if (!entries.get('r')) throw new Error('manifest has no root node');
+    this.root = this.build(entries, 'r', null, manifest.root.center, manifest.root.halfSize);
+  }
+
+  private build(
+    entries: Map<string, NodeRow>,
+    path: string,
+    parent: OctreeNode | null,
+    center: [number, number, number],
+    half: number,
+    added?: OctreeNode[],
+  ): OctreeNode {
+    const e = entries.get(path)!;
+    const worldCenter = new Vector3(center[0], center[2], -center[1]);
+    const node: OctreeNode = {
+      path,
+      level: path.length - 1,
+      count: e[1],
+      bytes: e[2],
+      pack: e[4],
+      offset: e[5],
+      childMask: e[3],
+      sub: e[6] || null,
+      galCenter: center,
+      halfSize: half,
+      box: new Box3(worldCenter.clone().subScalar(half), worldCenter.clone().addScalar(half)),
+      worldCenter,
+      radius: half * Math.sqrt(3),
+      parent,
+      children: [],
     };
-    this.root = build('r', null, manifest.root.center, manifest.root.halfSize);
+    this.nodes.set(path, node);
+    added?.push(node);
+    if (!node.sub) this.buildChildren(entries, node, added);
+    return node;
+  }
+
+  private buildChildren(entries: Map<string, NodeRow>, node: OctreeNode, added?: OctreeNode[]): void {
+    for (let i = 0; i < 8; i++) {
+      if (!(node.childMask & (1 << i))) continue;
+      const childPath = node.path + i;
+      if (!entries.has(childPath)) continue;
+      const h = node.halfSize / 2;
+      const c = node.galCenter;
+      const center: [number, number, number] = [c[0] + (i & 1 ? h : -h), c[1] + (i & 2 ? h : -h), c[2] + (i & 4 ? h : -h)];
+      node.children.push(this.build(entries, childPath, node, center, h, added));
+    }
+  }
+
+  /** Adds the descendants of a node from its sub-manifest's rows; returns the new nodes. */
+  addSub(node: OctreeNode, rows: NodeRow[]): OctreeNode[] {
+    if (!node.sub) return [];
+    const added: OctreeNode[] = [];
+    node.sub = null;
+    this.buildChildren(new Map(rows.map((r) => [r[0], r])), node, added);
+    this.onAdded(added);
+    return added;
+  }
+
+  /** Loads a node's sub-manifest (once, also when asked again while it loads). */
+  loadSub(node: OctreeNode, fetchRows: FetchRows): Promise<OctreeNode[]> {
+    if (!node.sub) return Promise.resolve([]);
+    let p = this.loading.get(node.path);
+    if (!p) {
+      const file = node.sub;
+      p = fetchRows(file).then(
+        (rows) => {
+          this.loading.delete(node.path);
+          return this.addSub(node, rows);
+        },
+        (err: unknown) => {
+          this.loading.delete(node.path);
+          throw err;
+        },
+      );
+      this.loading.set(node.path, p);
+    }
+    return p;
+  }
+
+  /** True while the node's descendants are listed in a sub-manifest that is not loaded. */
+  static hasUnloaded(node: OctreeNode): boolean {
+    return node.sub !== null && node.childMask !== 0;
+  }
+
+  /**
+   * Loads the sub-manifests of every node for which `wants` is true, also those that the loaded
+   * ones reveal, until the tree is complete where `wants` holds (route corridors).
+   */
+  async expandWhere(wants: (node: OctreeNode) => boolean, fetchRows: FetchRows): Promise<void> {
+    for (;;) {
+      const todo: OctreeNode[] = [];
+      const stack = [this.root];
+      while (stack.length) {
+        const n = stack.pop()!;
+        if (!wants(n)) continue;
+        if (Octree.hasUnloaded(n)) todo.push(n);
+        else stack.push(...n.children);
+      }
+      if (!todo.length) return;
+      await Promise.all(todo.map((n) => this.loadSub(n, fetchRows)));
+    }
+  }
+
+  /** The node of a path, loading the sub-manifests on the way to it; undefined if there is none. */
+  async reach(path: string, fetchRows: FetchRows): Promise<OctreeNode | undefined> {
+    for (;;) {
+      const have = this.nodes.get(path);
+      if (have) return have;
+      // the deepest loaded ancestor
+      let p = path.slice(0, -1);
+      while (p.length > 1 && !this.nodes.has(p)) p = p.slice(0, -1);
+      const anc = this.nodes.get(p);
+      if (!anc || !Octree.hasUnloaded(anc)) return undefined;
+      await this.loadSub(anc, fetchRows);
+    }
   }
 }
 
@@ -176,6 +287,8 @@ export function selectNodes(octree: Octree, p: SelectionParams): OctreeNode[] {
 export function selectionComplete(selected: OctreeNode[], center: Vector3, radius: number): boolean {
   const set = new Set(selected);
   for (const node of selected) {
+    // descendants not known yet (their sub-manifest is loading): cannot be complete
+    if (Octree.hasUnloaded(node) && sphereIntersectsBox(center, radius, node.box)) return false;
     for (const child of node.children) {
       if (!set.has(child) && sphereIntersectsBox(center, radius, child.box)) return false;
     }
