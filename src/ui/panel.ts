@@ -1,6 +1,6 @@
-import type { AttributeStore, PaletteId } from '../data/attributes';
+import { attrName, type AttributeStore, type PaletteId } from '../data/attributes';
 import { parseNumber } from '../data/csv';
-import { t, formatNumber, numberText, type MessageKey } from '../i18n';
+import { getLang, t, formatNumber, numberText, type MessageKey } from '../i18n';
 import {
   BUILTIN_ATTRIBUTES,
   COLOR_TEMPERATURE,
@@ -327,7 +327,7 @@ export class SettingsPanel {
     const colorOpts: Option[] = [[COLOR_TEMPERATURE, t('colorTemperature')]];
     const colorGroups: OptGroup[] = [
       [t('builtinGroup'), BUILTIN_ATTRIBUTES.filter((a) => a.id !== '@teff').map((a) => [a.id, t(a.label)] as Option)],
-      [t('userGroup'), defs.map((d) => [d.id, d.name] as Option)],
+      [t('userGroup'), defs.map((d) => [d.id, attrName(d, getLang())] as Option)],
     ];
     box.appendChild(
       this.dynSelect(t('colorBy'), colorOpts, colorGroups, () => this.store.get().colorBy, (v) => this.store.set({ colorBy: v })),
@@ -342,7 +342,7 @@ export class SettingsPanel {
     ];
     const sizeGroups: OptGroup[] = [
       [t('builtinGroup'), BUILTIN_ATTRIBUTES.filter((a) => a.type === 'number' && a.id !== '@lum').map((a) => [a.id, t(a.label)] as Option)],
-      [t('userGroup'), defs.filter((d) => d.type === 'number').map((d) => [d.id, d.name] as Option)],
+      [t('userGroup'), defs.filter((d) => d.type === 'number').map((d) => [d.id, attrName(d, getLang())] as Option)],
     ];
     box.appendChild(
       this.dynSelect(t('sizeBy'), sizeOpts, sizeGroups, () => this.store.get().sizeBy, (v) => this.store.set({ sizeBy: v })),
@@ -397,7 +397,7 @@ export class SettingsPanel {
       const defs = this.attrs.defs;
       const groups: OptGroup[] = [
         [t('builtinGroup'), BUILTIN_ATTRIBUTES.filter((a) => a.type === 'number' && a.id !== '@lum').map((a) => [a.id, t(a.label)] as Option)],
-        [t('userGroup'), defs.filter((d) => d.type === 'number').map((d) => [d.id, d.name] as Option)],
+        [t('userGroup'), defs.filter((d) => d.type === 'number').map((d) => [d.id, attrName(d, getLang())] as Option)],
       ];
       box.appendChild(this.dynSelect(t('jumpBy'), [['', t('sizeLuminosity')]], groups, () => s().jumpBy, (v) => set({ jumpBy: v })));
       const by = s().jumpBy ? attributeInfo(s().jumpBy, this.attrs) : null;

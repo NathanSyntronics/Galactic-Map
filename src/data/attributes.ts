@@ -1,4 +1,12 @@
+import type { Lang } from '../settings';
 import { DesignationMap, canonicalDesignation } from './designation';
+
+/** The languages of the app, in which attribute names and text values can be given. */
+export const LANGS: readonly Lang[] = ['en', 'de'];
+
+export function isLang(s: string): s is Lang {
+  return (LANGS as readonly string[]).includes(s);
+}
 
 /** number: measured or counted values; text: categories and notes; color: '#rrggbb' per star. */
 export type AttrType = 'number' | 'text' | 'color';
@@ -10,6 +18,64 @@ export interface AttributeDef {
   type: AttrType;
   /** A value stored under a system's primary star applies to every member of the system. */
   system: boolean;
+  /** The name in the app's languages; where none is given, `name` is shown. */
+  labels?: Partial<Record<Lang, string>>;
+  /**
+   * Text values in the app's languages: value as stored -> language -> how it is shown. Values are
+   * stored once (in `name`'s spelling); the labels only change what is shown and typed.
+   */
+  valueLabels?: Record<string, Partial<Record<Lang, string>>>;
+}
+
+/** The attribute's name in a language. */
+export function attrName(def: AttributeDef, lang: Lang): string {
+  return def.labels?.[lang] || def.name;
+}
+
+/** A value as shown in a language (text values with a label there; everything else as it is). */
+export function valueLabel(def: AttributeDef, v: AttrValue, lang: Lang): string {
+  const s = String(v);
+  return (def.type === 'text' && def.valueLabels?.[s]?.[lang]) || s;
+}
+
+/**
+ * The stored value a typed text stands for: the value one of whose labels (in any language) or
+ * whose stored spelling it is, ignoring case; otherwise the text itself.
+ */
+export function valueFromLabel(def: AttributeDef, text: string): string {
+  const s = text.trim();
+  if (def.type !== 'text' || !def.valueLabels) return s;
+  const low = s.toLowerCase();
+  const labels = Object.entries(def.valueLabels);
+  if (labels.some(([v]) => v === s)) return s;
+  for (const [v] of labels) if (v.toLowerCase() === low) return v;
+  for (const [v, l] of labels) if (Object.values(l).some((x) => x?.toLowerCase() === low)) return v;
+  return s;
+}
+
+/** Every spelling of the attribute's name (stored name and labels), lower case. */
+function nameForms(def: AttributeDef): string[] {
+  return [def.name, ...Object.values(def.labels ?? {})].filter((x): x is string => !!x).map((x) => x.toLowerCase());
+}
+
+/** Labels without empty entries and unknown languages; undefined if none is left. */
+function cleanLabels(l: unknown): Partial<Record<Lang, string>> | undefined {
+  if (!l || typeof l !== 'object') return undefined;
+  const out: Partial<Record<Lang, string>> = {};
+  for (const [k, v] of Object.entries(l as Record<string, unknown>)) {
+    if (isLang(k) && typeof v === 'string' && v.trim()) out[k] = v.trim();
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+function cleanValueLabels(vl: unknown): Record<string, Partial<Record<Lang, string>>> | undefined {
+  if (!vl || typeof vl !== 'object') return undefined;
+  const out: Record<string, Partial<Record<Lang, string>>> = {};
+  for (const [v, l] of Object.entries(vl as Record<string, unknown>)) {
+    const c = cleanLabels(l);
+    if (c && v.trim()) out[v.trim()] = c;
+  }
+  return Object.keys(out).length ? out : undefined;
 }
 
 export type PaletteId = 'turbo' | 'plasma' | 'viridis' | 'blueRed';
@@ -34,7 +100,8 @@ export interface StoredAttributes {
   scales?: Record<string, AttributeScale>;
 }
 
-export type ChangeKind = 'defs' | 'values' | 'scales';
+/** 'labels': only names or value labels in other languages changed (nothing to restyle). */
+export type ChangeKind = 'defs' | 'values' | 'scales' | 'labels';
 type Listener = (kind: ChangeKind) => void;
 
 const STORAGE_KEY = 'galactic-map:attributes:v1';
@@ -86,9 +153,43 @@ export class AttributeStore {
     return this.defsList.find((d) => d.id === id);
   }
 
+  /** The attribute with this name in any spelling (its stored name or a label), ignoring case. */
   defByName(name: string): AttributeDef | undefined {
     const n = name.trim().toLowerCase();
-    return this.defsList.find((d) => d.name.toLowerCase() === n);
+    return this.defsList.find((d) => d.name.toLowerCase() === n) ?? this.defsList.find((d) => nameForms(d).includes(n));
+  }
+
+  /**
+   * Sets the attribute's name in the app's languages (empty: none, the stored name is shown).
+   * Throws if a label is the name of another attribute.
+   */
+  setLabels(id: string, labels: Partial<Record<Lang, string>>, notify = true): void {
+    const def = this.def(id);
+    if (!def) return;
+    const next = cleanLabels({ ...def.labels, ...labels });
+    for (const l of Object.values(next ?? {})) {
+      const other = this.defByName(l);
+      if (other && other.id !== id) throw new Error(`attribute name '${l}' not available`);
+    }
+    this.replaceDef({ ...def, labels: next });
+    if (notify) this.changed('labels');
+  }
+
+  /** Sets (or with null / '' removes) how a text value is shown in a language. */
+  setValueLabel(id: string, value: string, lang: Lang, label: string | null, notify = true): void {
+    const def = this.def(id);
+    if (!def || def.type !== 'text' || !value.trim()) return;
+    const v = value.trim();
+    const all = { ...def.valueLabels };
+    all[v] = { ...all[v], [lang]: label ?? '' };
+    this.replaceDef({ ...def, valueLabels: cleanValueLabels(all) });
+    if (notify) this.changed('labels');
+  }
+
+  private replaceDef(def: AttributeDef): void {
+    if (!def.labels) delete def.labels;
+    if (!def.valueLabels) delete def.valueLabels;
+    this.defsList = this.defsList.map((d) => (d.id === def.id ? def : d));
   }
 
   values(id: string): DesignationMap<AttrValue> {
@@ -134,7 +235,7 @@ export class AttributeStore {
    * Changes name, type or the system flag. A type change converts the values; values that do not
    * fit the new type are dropped and their number is returned.
    */
-  updateDef(id: string, patch: Partial<Omit<AttributeDef, 'id'>>, notify = true): number {
+  updateDef(id: string, patch: Partial<Pick<AttributeDef, 'name' | 'type' | 'system'>>, notify = true): number {
     const def = this.def(id);
     if (!def) return 0;
     if (patch.name !== undefined) {
@@ -157,7 +258,10 @@ export class AttributeStore {
       delete sc.colors;
       this.scaleMap[id] = sc;
     }
-    this.defsList = this.defsList.map((d) => (d.id === id ? { ...d, ...patch } : d));
+    const next: AttributeDef = { ...def, ...patch };
+    // only text values have labels
+    if (next.type !== 'text') delete next.valueLabels;
+    this.defsList = this.defsList.map((d) => (d.id === id ? next : d));
     if (notify) this.changed('defs');
     return dropped;
   }
@@ -234,7 +338,7 @@ export class AttributeStore {
       for (const [k, v] of this.values(d.id).entries()) o[k] = v;
       values[d.id] = o;
     }
-    return { v: 1, defs: this.defsList.map((d) => ({ ...d })), values, scales: this.scaleMap };
+    return { v: 1, defs: this.defsList.map((d) => structuredClone(d)), values, scales: this.scaleMap };
   }
 
   /** Replaces the whole state. */
@@ -245,7 +349,12 @@ export class AttributeStore {
     for (const d of data.defs ?? []) {
       if (!d || typeof d.id !== 'string' || typeof d.name !== 'string' || this.def(d.id)) continue;
       const type: AttrType = d.type === 'number' || d.type === 'color' ? d.type : 'text';
-      this.defsList.push({ id: d.id, name: d.name, type, system: !!d.system });
+      const def: AttributeDef = { id: d.id, name: d.name, type, system: !!d.system };
+      const labels = cleanLabels(d.labels);
+      const valueLabels = type === 'text' ? cleanValueLabels(d.valueLabels) : undefined;
+      if (labels) def.labels = labels;
+      if (valueLabels) def.valueLabels = valueLabels;
+      this.defsList.push(def);
       const m = this.values(d.id);
       for (const [k, v] of Object.entries(data.values?.[d.id] ?? {})) {
         const c = coerceValue(type, v);

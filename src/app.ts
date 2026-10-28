@@ -2,7 +2,7 @@ import { Color, MathUtils, Matrix4, PerspectiveCamera, Scene, Vector3, WebGLRend
 import { Navigation } from './controls/navigation';
 import { LABELLED_RADIUS, PRECISE_PX, SPRITE_CORE, labelledWins, pickScore } from './controls/pick';
 import { TapDetector } from './controls/tap';
-import { AttributeStore } from './data/attributes';
+import { AttributeStore, type ChangeKind } from './data/attributes';
 import { Flag, designationOf, type NodeData } from './data/format';
 import { decodeCsv } from './data/csv';
 import { NO_LOOKUP, csvNeedsLookup, exportCsv, importCsv, type ImportReport, type StarResolver } from './data/importer';
@@ -437,8 +437,15 @@ export class App {
     };
   }
 
-  private attributesChanged(kind: 'defs' | 'values' | 'scales'): void {
+  private attributesChanged(kind: ChangeKind): void {
     const s = this.store.get();
+    if (kind === 'labels') {
+      // names and value labels in other languages: only the texts change
+      this.panel.attributesChanged();
+      this.updateLegend();
+      if (!this.info.editing) this.info.rerender(this.nav.target);
+      return;
+    }
     if (kind === 'defs') {
       // a deleted (or retyped) attribute no longer colours or sizes the map
       const patch: Partial<Settings> = {};

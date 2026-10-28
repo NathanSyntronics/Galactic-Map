@@ -1,5 +1,5 @@
-import type { AttributeStore } from '../data/attributes';
-import { formatNumber, t, type MessageKey } from '../i18n';
+import { valueLabel, type AttributeStore } from '../data/attributes';
+import { formatNumber, getLang, t, type MessageKey } from '../i18n';
 import { JUMP_LENGTH_PALETTE, JUMP_UNIFORM_RGB } from '../render/links';
 import { ROUTE_CSS } from '../render/route';
 import {
@@ -79,9 +79,14 @@ export class Legend {
       } else if (color.type === 'text') {
         const cats = [...categoryColors(color.id, store)];
         const list = el('ul', 'legend-cats');
-        for (const [name, css] of cats.slice(0, MAX_CATEGORIES)) {
-          list.appendChild(this.swatch(css, color.id === '@spec' && name === 'D' ? `D · ${t('whiteDwarf')}` : name));
-        }
+        const def = color.builtin ? undefined : store.def(color.id);
+        const shown = cats.map(([name, css]) => ({
+          css,
+          label: def ? valueLabel(def, name, getLang()) : color.id === '@spec' && name === 'D' ? `D · ${t('whiteDwarf')}` : name,
+        }));
+        // user values in the alphabetical order of the current language (the colours keep theirs)
+        if (def) shown.sort((a, b) => a.label.localeCompare(b.label, getLang(), { numeric: true }));
+        for (const { css, label } of shown.slice(0, MAX_CATEGORIES)) list.appendChild(this.swatch(css, label));
         if (cats.length > MAX_CATEGORIES) list.appendChild(el('li', 'more', t('moreCategories', { n: cats.length - MAX_CATEGORIES })));
         this.root.appendChild(list);
       } else {

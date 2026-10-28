@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { AttributeStore } from '../../src/data/attributes';
+import { AttributeStore, attrName, valueFromLabel, valueLabel } from '../../src/data/attributes';
 import { csvLayout, decodeCsv, inferType, parseColumnHeader, parseCsv, parseNumber } from '../../src/data/csv';
 import { DesignationMap, canonicalDesignation, parseDesignation } from '../../src/data/designation';
 import { DesigCat, type NodeData } from '../../src/data/format';
-import { csvNeedsLookup, exportCsv, importCsv, type StarResolver } from '../../src/data/importer';
+import { NO_LOOKUP, csvNeedsLookup, exportCsv, importCsv, type StarResolver } from '../../src/data/importer';
 
 function fakeNode(desigs: [number, number, number, string?][]): NodeData {
   const n = desigs.length;
@@ -68,6 +68,8 @@ describe('CSV', () => {
     // an unquoted tag with a comma in a comma-separated file
     expect(parseCsv('name,Faction [text, system],Economy\nVega,League,2').header).toEqual(['name', 'Faction [text, system]', 'Economy']);
     expect(parseCsv('a,b\n"x\ny",2').rows).toEqual([['x\ny', '2']]);
+    // a tag's comma in a semicolon-separated file is not a delimiter
+    expect(parseCsv('designation;Faction [text, system]\nHR 1;A').delimiter).toBe(';');
   });
 
   it('reads English and German numbers', () => {
@@ -85,6 +87,11 @@ describe('CSV', () => {
     expect(parseColumnHeader('Faction [text, system]')).toEqual({ name: 'Faction', type: 'text', system: true });
     expect(parseColumnHeader('Wirtschaft [Zahl]')).toEqual({ name: 'Wirtschaft', type: 'number', system: null });
     expect(parseColumnHeader('Plain')).toEqual({ name: 'Plain', type: null, system: null });
+    expect(parseColumnHeader('Faction [de: Fraktion]')).toEqual({ name: 'Faction', type: null, system: null, translation: { lang: 'de', label: 'Fraktion' } });
+    expect(parseColumnHeader('Faction [DE]').translation).toEqual({ lang: 'de', label: null });
+    expect(parseColumnHeader('Fraktion [en: Faction, big]').translation).toEqual({ lang: 'en', label: 'Faction, big' });
+    // not a language of the app: an ordinary tag
+    expect(parseColumnHeader('Faction [fr: Faction]').translation).toBeUndefined();
     expect(inferType(['1', '', '2,5'], true)).toBe('number');
     expect(inferType(['#ff0000', '#0f0'], false)).toBe('color');
     expect(inferType(['red', '3'], false)).toBe('text');
@@ -206,5 +213,91 @@ describe('import and export', () => {
     expect(store.getValue(d.id, 'HR 1')).toBe(3);
     expect(store.setValue(d.id, 'HR 3', 'x')).toBe(false);
     expect(() => store.addDef('level', 'number')).toThrow();
+  });
+});
+
+describe('translations', () => {
+  it('shows names and text values in a language and reads typed labels back', () => {
+    const store = new AttributeStore(false);
+    const f = store.addDef('Faction', 'text', true);
+    store.setLabels(f.id, { de: 'Fraktion' });
+    store.setValueLabel(f.id, 'League of Vega', 'de', 'Liga von Wega');
+    const def = store.def(f.id)!;
+    expect(attrName(def, 'de')).toBe('Fraktion');
+    expect(attrName(def, 'en')).toBe('Faction');
+    expect(valueLabel(def, 'League of Vega', 'de')).toBe('Liga von Wega');
+    expect(valueLabel(def, 'League of Vega', 'en')).toBe('League of Vega');
+    expect(valueLabel(def, 'Other', 'de')).toBe('Other');
+    expect(valueFromLabel(def, ' liga von wega ')).toBe('League of Vega');
+    expect(valueFromLabel(def, 'league of vega')).toBe('League of Vega');
+    expect(valueFromLabel(def, 'New')).toBe('New');
+    // the name in any language finds the attribute; another attribute cannot take it
+    expect(store.defByName('fraktion')?.id).toBe(f.id);
+    expect(() => store.addDef('Fraktion', 'text')).toThrow();
+    const g = store.addDef('Capital', 'text');
+    expect(() => store.setLabels(g.id, { de: 'Fraktion' })).toThrow();
+    // empty labels are removed
+    store.setValueLabel(f.id, 'League of Vega', 'de', '');
+    expect(store.def(f.id)!.valueLabels).toBeUndefined();
+    store.setLabels(f.id, { de: ' ' });
+    expect(store.def(f.id)!.labels).toBeUndefined();
+  });
+
+  it('keeps labels through storage and drops value labels when the type is no longer text', () => {
+    const a = new AttributeStore(false);
+    const d = a.addDef('Level', 'text');
+    a.setLabels(d.id, { de: 'Stufe' });
+    a.setValueLabel(d.id, '3', 'de', 'drei');
+    const b = new AttributeStore(false);
+    const stored = JSON.parse(JSON.stringify(a.toJSON()));
+    stored.defs[0].labels.fr = 'Niveau';
+    b.load(stored);
+    expect(b.def(d.id)).toEqual({ id: d.id, name: 'Level', type: 'text', system: false, labels: { de: 'Stufe' }, valueLabels: { '3': { de: 'drei' } } });
+    b.updateDef(d.id, { type: 'number' });
+    expect(b.def(d.id)!.valueLabels).toBeUndefined();
+    expect(b.def(d.id)!.labels).toEqual({ de: 'Stufe' });
+  });
+
+  it('imports translation columns and maps values typed in another language', () => {
+    const store = new AttributeStore(false);
+    const csv =
+      'designation [exact],Faction [text, system],Faction [de: Fraktion],Capital [text],Capital [de: Hauptstadt]\n' +
+      'Sun,Commonwealth of Sol,Commonwealth von Sol,yes,ja\nHR 7001,League of Vega,Liga von Wega,yes,ja\nHR 1,League of Vega,,,\n';
+    const r = importCsv(csv, store, NO_LOOKUP);
+    expect(r.attributes.map((a) => [a.name, a.languages, a.translated])).toEqual([
+      ['Faction', ['de'], 2],
+      ['Capital', ['de'], 1],
+    ]);
+    const f = store.defByName('Fraktion')!;
+    expect(f.name).toBe('Faction');
+    expect(f.labels).toEqual({ de: 'Fraktion' });
+    expect(f.valueLabels).toEqual({ 'Commonwealth of Sol': { de: 'Commonwealth von Sol' }, 'League of Vega': { de: 'Liga von Wega' } });
+    expect(store.def(store.defByName('Hauptstadt')!.id)!.valueLabels).toEqual({ yes: { de: 'ja' } });
+    // a German file with German values: the values are the stored ones
+    importCsv('designation;Fraktion [text, system]\nHR 2;Liga von Wega\nHR 3;Neue Allianz', store, NO_LOOKUP);
+    expect(store.getValue(f.id, 'HR 2')).toBe('League of Vega');
+    expect(store.getValue(f.id, 'HR 3')).toBe('Neue Allianz');
+    expect(store.defs.length).toBe(2);
+  });
+
+  it('writes translation columns on export and reads them back', () => {
+    for (const lang of ['en', 'de'] as const) {
+      const a = new AttributeStore(false);
+      const f = a.addDef('Faction', 'text', true);
+      const e = a.addDef('Economy', 'number');
+      a.setLabels(f.id, { de: 'Fraktion' });
+      a.setLabels(e.id, { de: 'Wirtschaft' });
+      a.setValueLabel(f.id, 'League of Vega', 'de', 'Liga von Wega');
+      a.setValue(f.id, 'HR 7001', 'League of Vega');
+      a.setValue(f.id, 'HR 1', 'Sol');
+      a.setValue(e.id, 'HR 7001', 2.5);
+      const csv = exportCsv(a, { name: () => null }, lang);
+      const header = parseCsv(csv).header;
+      expect(header).toEqual(['designation', 'name', 'Faction [text, system]', 'Faction [de: Fraktion]', 'Economy [number]', 'Economy [de: Wirtschaft]']);
+      const b = new AttributeStore(false);
+      importCsv(csv, b, NO_LOOKUP);
+      expect(b.toJSON().defs).toEqual(a.toJSON().defs);
+      expect(b.toJSON().values).toEqual(a.toJSON().values);
+    }
   });
 });

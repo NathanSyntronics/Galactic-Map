@@ -1,6 +1,13 @@
-import type { AttrType, AttributeStore } from '../data/attributes';
+import { LANGS, type AttrType, type AttributeDef, type AttributeStore } from '../data/attributes';
 import type { ImportReport } from '../data/importer';
-import { formatNumber, t, type MessageKey } from '../i18n';
+import { formatNumber, getLang, t, type MessageKey } from '../i18n';
+import type { Lang } from '../settings';
+
+/** Language names in their own language. */
+const LANG_NAMES: Record<Lang, string> = { en: 'English', de: 'Deutsch' };
+
+/** Text values listed in the translation editor (more are translated in a CSV file). */
+const MAX_TRANSLATED_VALUES = 100;
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -66,6 +73,8 @@ export class AttributesDialog {
   readonly body = el('div', 'dialog-body attr-dialog');
   private message: HTMLElement | null = null;
   private importResult: HTMLElement | null = null;
+  /** Attributes whose translation editor is open. */
+  private translating = new Set<string>();
 
   constructor(
     private readonly attrs: AttributeStore,
@@ -129,9 +138,28 @@ export class AttributesDialog {
             this.render();
           },
         );
-        const cells = [name, type, sys, el('span', 'count', formatNumber(this.attrs.valueCount(def.id))), del];
+        const open = this.translating.has(def.id);
+        const translate = el('button', `btn subtle small${open ? ' active' : ''}`, t('translate'));
+        translate.setAttribute('aria-expanded', String(open));
+        translate.addEventListener('click', () => {
+          if (open) this.translating.delete(def.id);
+          else this.translating.add(def.id);
+          this.render();
+          this.body.querySelector<HTMLElement>(`[data-translate="${def.id}"] input`)?.focus();
+        });
+        const actions = el('span', 'attr-row-actions');
+        actions.append(translate, del);
+        const cells = [name, type, sys, el('span', 'count', formatNumber(this.attrs.valueCount(def.id))), actions];
         for (const c of cells) tr.appendChild(el('td')).appendChild(c);
         tbody.appendChild(tr);
+        if (open) {
+          const row = el('tr', 'attr-translations');
+          const td = el('td');
+          td.colSpan = cells.length;
+          td.appendChild(this.translationEditor(def));
+          row.appendChild(td);
+          tbody.appendChild(row);
+        }
       }
       table.appendChild(tbody);
       const scroll = el('div', 'table-scroll');
@@ -249,6 +277,79 @@ export class AttributesDialog {
     b.appendChild(store);
   }
 
+  /** Name and text values of an attribute in each language of the app. */
+  private translationEditor(def: AttributeDef): HTMLElement {
+    const box = el('div', 'attr-translate');
+    box.dataset.translate = def.id;
+    box.appendChild(el('h4', '', t('translationsTitle')));
+    box.appendChild(el('p', 'hint', t('translationsHelp')));
+    const table = el('table', 'attr-table translate-table');
+    const head = el('tr');
+    head.appendChild(el('th', '', ''));
+    // the current language first
+    const langs = [getLang(), ...LANGS.filter((l) => l !== getLang())];
+    for (const l of langs) head.appendChild(el('th', '', LANG_NAMES[l]));
+    table.appendChild(el('thead')).appendChild(head);
+    const tbody = el('tbody');
+    const field = (value: string, placeholder: string, label: string, apply: (v: string) => boolean): HTMLInputElement => {
+      const input = el('input');
+      input.type = 'text';
+      input.value = value;
+      input.placeholder = placeholder;
+      input.setAttribute('aria-label', label);
+      input.addEventListener('change', () => {
+        if (!apply(input.value.trim())) input.value = value;
+        else value = input.value.trim();
+      });
+      return input;
+    };
+    // the name
+    const nameRow = el('tr');
+    nameRow.appendChild(el('th', 'translate-key', t('translationName')));
+    for (const l of langs) {
+      const current = () => this.attrs.def(def.id);
+      const input = field(def.labels?.[l] ?? '', def.name, `${t('translationName')} (${LANG_NAMES[l]})`, (v) => {
+        if (!current()) return false;
+        try {
+          this.attrs.setLabels(def.id, { [l]: v });
+          this.say('');
+          return true;
+        } catch {
+          this.say(t('nameTaken'), true);
+          return false;
+        }
+      });
+      nameRow.appendChild(el('td')).appendChild(input);
+    }
+    tbody.appendChild(nameRow);
+    // the text values
+    let more = 0;
+    if (def.type === 'text') {
+      const values = this.attrs.distinct(def.id).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+      for (const v of values.slice(0, MAX_TRANSLATED_VALUES)) {
+        const row = el('tr');
+        const key = el('th', 'translate-key', v);
+        key.title = t('translationValue');
+        row.appendChild(key);
+        for (const l of langs) {
+          const input = field(def.valueLabels?.[v]?.[l] ?? '', v, `${v} (${LANG_NAMES[l]})`, (label) => {
+            this.attrs.setValueLabel(def.id, v, l, label === v ? null : label);
+            return true;
+          });
+          row.appendChild(el('td')).appendChild(input);
+        }
+        tbody.appendChild(row);
+      }
+      more = values.length - MAX_TRANSLATED_VALUES;
+    }
+    table.appendChild(tbody);
+    const scroll = el('div', 'table-scroll');
+    scroll.appendChild(table);
+    box.appendChild(scroll);
+    if (more > 0) box.appendChild(el('p', 'hint', t('translationMore', { n: formatNumber(more) })));
+    return box;
+  }
+
   private say(text: string, warn = false): void {
     if (!this.message) return;
     this.message.textContent = text;
@@ -266,6 +367,9 @@ export class AttributesDialog {
       const extra: string[] = [];
       if (a.created) extra.push(t('importCreated'));
       if (a.rejected) extra.push(t('importRejected', { n: formatNumber(a.rejected) }));
+      if (a.languages.length) {
+        extra.push(t('importTranslated', { langs: a.languages.map((l) => LANG_NAMES[l]).join(', '), n: formatNumber(a.translated) }));
+      }
       const typeKey = TYPES.find(([v]) => v === a.type)?.[1] ?? 'typeText';
       ul.appendChild(
         el(

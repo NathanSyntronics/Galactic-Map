@@ -1,9 +1,9 @@
 import { Vector3 } from 'three';
-import { normalizeColor, type AttrValue, type AttributeDef, type AttributeStore } from '../data/attributes';
+import { attrName, normalizeColor, valueFromLabel, valueLabel, type AttrValue, type AttributeDef, type AttributeStore } from '../data/attributes';
 import { parseNumber } from '../data/csv';
 import { Flag, UNKNOWN_I16, distErrPercent, spectralClassOf } from '../data/format';
 import { LY_PER_PC, galacticLB, worldToGalactic } from '../data/galactic';
-import { formatLy, formatNumber, localName, numberText, t } from '../i18n';
+import { formatLy, formatNumber, getLang, localName, numberText, t } from '../i18n';
 
 export interface StarInfo {
   key: string;
@@ -42,7 +42,7 @@ function valueText(def: AttributeDef, v: AttrValue): string {
     const digits = Math.min((String(v).split('.')[1] ?? '').length, 8);
     return /e/i.test(String(v)) ? numberText(v) : formatNumber(v, digits);
   }
-  return String(v);
+  return valueLabel(def, v, getLang());
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -294,7 +294,7 @@ export class InfoPanel {
     const dl = el('dl', 'attr-list');
     for (const def of defs) {
       const val = this.valueOf(info, def);
-      dl.appendChild(el('dt', '', def.name));
+      dl.appendChild(el('dt', '', attrName(def, getLang())));
       const dd = el('dd');
       if (!val) {
         dd.textContent = '–';
@@ -322,7 +322,7 @@ export class InfoPanel {
     for (const def of this.attrs.defs) {
       const val = this.valueOf(info, def);
       const row = el('label', 'attr-field');
-      const name = el('span', 'attr-name', def.name);
+      const name = el('span', 'attr-name', attrName(def, getLang()));
       if (def.system && info.system) name.appendChild(el('span', 'inherited', ` (${t('wholeSystem')})`));
       row.appendChild(name);
       const input = el('input');
@@ -340,7 +340,7 @@ export class InfoPanel {
         const pick = el('input');
         pick.type = 'color';
         pick.value = normalizeColor(input.value) ?? '#ffc861';
-        pick.setAttribute('aria-label', def.name);
+        pick.setAttribute('aria-label', attrName(def, getLang()));
         pick.addEventListener('input', () => (input.value = pick.value));
         input.addEventListener('input', () => {
           const c = normalizeColor(input.value);
@@ -348,14 +348,15 @@ export class InfoPanel {
         });
         wrap.appendChild(pick);
       } else {
-        input.value = val ? String(val.v) : '';
+        // text values are shown and typed in the current language (see valueFromLabel)
+        input.value = val ? valueLabel(def, val.v, getLang()) : '';
         const options = this.attrs.distinct(def.id).slice(0, 300);
         if (options.length) {
           const list = el('datalist');
           list.id = `attr-values-${def.id}`;
           for (const o of options) {
             const opt = el('option');
-            opt.value = o;
+            opt.value = valueLabel(def, o, getLang());
             list.appendChild(opt);
           }
           wrap.appendChild(list);
@@ -395,6 +396,7 @@ export class InfoPanel {
         let value: AttrValue | null = raw;
         if (raw && def.type === 'number') value = parseNumber(raw, true);
         else if (raw && def.type === 'color') value = normalizeColor(raw);
+        else if (raw) value = valueFromLabel(def, raw);
         const bad = !!raw && value === null;
         input.classList.toggle('invalid', bad);
         if (bad) ok = false;

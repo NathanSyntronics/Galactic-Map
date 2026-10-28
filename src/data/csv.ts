@@ -1,4 +1,5 @@
-import { COLOR_RE, normalizeColor, type AttrType, type AttrValue } from './attributes';
+import type { Lang } from '../settings';
+import { COLOR_RE, isLang, normalizeColor, type AttrType, type AttrValue } from './attributes';
 
 export interface CsvTable {
   header: string[];
@@ -94,15 +95,22 @@ function joinSplitTags(cells: string[], delimiter: string): string[] {
   return out;
 }
 
-/** The delimiter that splits the first line into the most fields (outside quotes). */
+/**
+ * The delimiter that splits the first line into the most fields (outside quotes and outside
+ * header tags: "Faction [text, system]" in a ';' file is one field).
+ */
 function detectDelimiter(text: string): string {
   const counts: Record<string, number> = { ',': 0, ';': 0, '\t': 0 };
   let quoted = false;
+  let tag = false;
   for (let i = 0; i < text.length; i++) {
     const c = text[i];
     if (c === '"') quoted = !quoted;
-    else if (!quoted && (c === '\n' || c === '\r')) break;
-    else if (!quoted && c in counts) counts[c]++;
+    else if (quoted) continue;
+    else if (c === '\n' || c === '\r') break;
+    else if (c === '[') tag = true;
+    else if (c === ']') tag = false;
+    else if (!tag && c in counts) counts[c]++;
   }
   if (counts['\t'] > counts[';'] && counts['\t'] > counts[',']) return '\t';
   return counts[';'] > counts[','] ? ';' : ',';
@@ -127,7 +135,14 @@ export interface ColumnSpec {
   name: string;
   type: AttrType | null;
   system: boolean | null;
+  /**
+   * A translation column ("Faction [de: Fraktion]" or "Faction [de]"): its cells are the values of
+   * the column `name` in this language, and `label` (if given) is the attribute's name in it.
+   */
+  translation?: { lang: Lang; label: string | null };
 }
+
+const TRANSLATION_TAG = /^\s*([a-z]{2})\s*(?::\s*(.*?))?\s*$/i;
 
 const TYPE_TAGS: Record<string, AttrType> = {
   number: 'number',
@@ -141,10 +156,16 @@ const TYPE_TAGS: Record<string, AttrType> = {
   farbe: 'color',
 };
 
-/** "Faction [text, system]" -> name 'Faction', type 'text', system true. */
+/**
+ * "Faction [text, system]" -> name 'Faction', type 'text', system true;
+ * "Faction [de: Fraktion]" -> a translation column of Faction (see ColumnSpec.translation).
+ */
 export function parseColumnHeader(h: string): ColumnSpec {
   const m = /^(.*?)\s*\[([^\]]*)\]\s*$/.exec(h);
   if (!m) return { name: h.trim(), type: null, system: null };
+  const tr = TRANSLATION_TAG.exec(m[2]);
+  const lang = tr?.[1].toLowerCase() ?? '';
+  if (tr && isLang(lang)) return { name: m[1].trim(), type: null, system: null, translation: { lang, label: tr[2] || null } };
   let type: AttrType | null = null;
   let system: boolean | null = null;
   for (const tag of m[2].split(/[,;\s]+/).map((x) => x.toLowerCase()).filter(Boolean)) {
@@ -157,6 +178,11 @@ export function parseColumnHeader(h: string): ColumnSpec {
 
 export function columnHeader(name: string, type: AttrType, system: boolean): string {
   return `${name} [${type}${system ? ', system' : ''}]`;
+}
+
+/** Header of a translation column: "Faction [de: Fraktion]", or "Faction [de]" without a name in that language. */
+export function translationHeader(name: string, lang: Lang, label: string | undefined): string {
+  return `${name} [${lang}${label ? `: ${label}` : ''}]`;
 }
 
 /** Most likely type of a column from its non-empty values. */

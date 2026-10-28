@@ -122,7 +122,11 @@ primary designation; for whole-system attributes the system's primary): such a f
 without looking the keys up, so it needs no name index. Every other column is an attribute. A tag in the header sets the type and the system flag:
 `Faction [text, system]`, `Economy [number]`, `Flag colour [color]` (German: `[Zahl]`, `[Farbe]`,
 `[Text]`); without a tag the type follows the values. Comma, semicolon and tab separated files
-and decimal commas are recognised. The export writes the same format: English with `,`, German
+and decimal commas are recognised. **Translations:** a column `Faction [de: Fraktion]` gives the
+attribute's German name and, in each row, the German form of that row's value (`[en: …]` for
+English); the values are stored once, in the spelling of the main column, and shown in the
+interface's language (a value typed in another language on the info card is recognised too).
+They can also be edited under *Attributes & CSV… → Translate*. The export writes the same format: English with `,`, German
 with `;` and decimal commas, so that spreadsheet programs open it directly. Try
 [`docs/example-attributes.csv`](docs/example-attributes.csv).
 
@@ -135,15 +139,16 @@ site's dataset* returns to it. With an `[exact]` key column it is applied right 
 applying it first loads the name index (`search.json`, 16.5 MB, and `systems.json`).
 
 **Example factions.** This repository ships such a dataset: four factions (attribute *Faction*,
-whole system; the capitals also have *Capital* = `yes`). Choose *Colour by → Faction* to see
+whole system; the capitals also have *Capital* = `yes`), with German names (*Fraktion*,
+*Hauptstadt* = `ja`, *Liga von Wega* …). Choose *Colour by → Faction* to see
 them; with the jump network's *Line colour → Star colours* the links take the faction colours too.
 
-| Faction | Capital | Systems | Colour |
-|---|---|---|---|
-| Commonwealth of Sol | Sun | 90 | blue |
-| League of Vega | Vega | 60 | orange |
-| Realm of Arcturus | Arcturus | 40 | red |
-| Pact of Pollux | Pollux | 20 | green |
+| Faction | German | Capital | Systems | Colour |
+|---|---|---|---|---|
+| Commonwealth of Sol | Commonwealth von Sol | Sun | 90 | blue |
+| League of Vega | Liga von Wega | Vega | 60 | orange |
+| Realm of Arcturus | Reich von Arktur | Arcturus | 40 | red |
+| Pact of Pollux | Pakt von Pollux | Pollux | 20 | green |
 
 The territories follow the jump network with the default settings. They grow from their capitals
 along its links, all at once: a faction claims the places (systems or single stars) that are

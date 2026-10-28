@@ -21,6 +21,8 @@ import { borderLinks, growTerritories, territoryJumps, type Territories } from '
 
 export interface Faction {
   name: string;
+  /** The name in German (the app shows it in the German interface). */
+  de: string;
   /** Name of the capital star (as the search finds it). */
   capital: string;
   /** Number of places (systems or single stars) of the territory. */
@@ -34,14 +36,18 @@ export interface Faction {
  * Arcturus red, and Pollux, which borders nobody, green.
  */
 export const FACTIONS: Faction[] = [
-  { name: 'Commonwealth of Sol', capital: 'Sun', size: 90 },
-  { name: 'League of Vega', capital: 'Vega', size: 60 },
-  { name: 'Realm of Arcturus', capital: 'Arcturus', size: 40 },
-  { name: 'Pact of Pollux', capital: 'Pollux', size: 20 },
+  { name: 'Commonwealth of Sol', de: 'Commonwealth von Sol', capital: 'Sun', size: 90 },
+  { name: 'League of Vega', de: 'Liga von Wega', capital: 'Vega', size: 60 },
+  { name: 'Realm of Arcturus', de: 'Reich von Arktur', capital: 'Arcturus', size: 40 },
+  { name: 'Pact of Pollux', de: 'Pakt von Pollux', capital: 'Pollux', size: 20 },
 ];
 
 export const FACTION_COLUMN = 'Faction [text, system]';
 export const CAPITAL_COLUMN = 'Capital [text]';
+/** Translation columns: the German names of the attributes and, per row, the German values. */
+export const FACTION_DE_COLUMN = 'Faction [de: Fraktion]';
+export const CAPITAL_DE_COLUMN = 'Capital [de: Hauptstadt]';
+export const CAPITAL_YES = { en: 'yes', de: 'ja' };
 export const KEY_COLUMN = 'designation [exact]';
 
 /** Radius around the Sun whose stars form the network; territories must stay a jump margin inside. */
@@ -189,7 +195,7 @@ export function makeFactions(root: string): FactionResult {
 
   const lines: string[] = [];
   // exact keys: the app applies the file without loading the search index (see CsvLayout)
-  const rows: string[][] = [[KEY_COLUMN, 'name', FACTION_COLUMN, CAPITAL_COLUMN]];
+  const rows: string[][] = [[KEY_COLUMN, 'name', FACTION_COLUMN, FACTION_DE_COLUMN, CAPITAL_COLUMN, CAPITAL_DE_COLUMN]];
   /** Expected faction per storage key, for the check below. */
   const expected = new Map<string, string>();
   const safe = REGION - jumpMargin(s.jumpRange);
@@ -215,7 +221,8 @@ export function makeFactions(root: string): FactionResult {
         const key = storageKey(star);
         if (seen.has(key)) continue;
         seen.add(key);
-        rows.push([key, nameOf(star), f.name, capitalKeys.has(key) ? 'yes' : '']);
+        const capital = capitalKeys.has(key);
+        rows.push([key, nameOf(star), f.name, f.de, capital ? CAPITAL_YES.en : '', capital ? CAPITAL_YES.de : '']);
         expected.set(key, f.name);
       }
     }
@@ -236,6 +243,11 @@ export function makeFactions(root: string): FactionResult {
   const def = store.defByName('Faction');
   const get = def && valueGetter(def.id, store);
   if (!get) throw new Error('no Faction attribute after the import');
+  // the German names
+  const capital = store.defByName('Hauptstadt');
+  if (def.labels?.de !== 'Fraktion' || capital?.labels?.de !== 'Hauptstadt') throw new Error('the German attribute names are missing');
+  if (capital.valueLabels?.[CAPITAL_YES.en]?.de !== CAPITAL_YES.de) throw new Error('the German capital value is missing');
+  for (const f of FACTIONS) if (def.valueLabels?.[f.name]?.de !== f.de) throw new Error(`${f.name}: no German name after the import`);
   FACTIONS.forEach((f, k) => {
     for (const p of terr.members[k])
       for (const star of members(net, p)) {

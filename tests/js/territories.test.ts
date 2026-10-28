@@ -115,4 +115,18 @@ describe('example factions (public/user/attributes.csv)', () => {
     const keys = table.rows.map((r) => r[keyColumn]);
     expect(new Set(keys).size).toBe(keys.length);
   });
+
+  it('gives the attributes and every value a German name', () => {
+    const de = (name: string) => table.header.findIndex((h) => {
+      const spec = parseColumnHeader(h);
+      return spec.name === name && spec.translation?.lang === 'de';
+    });
+    expect(parseColumnHeader(table.header[de('Faction')]).translation?.label).toBe('Fraktion');
+    expect(parseColumnHeader(table.header[de('Capital')]).translation?.label).toBe('Hauptstadt');
+    const german = new Map(FACTIONS.map((f) => [f.name, f.de]));
+    for (const r of table.rows) {
+      expect(r[de('Faction')]).toBe(german.get(r[col('Faction')]));
+      expect(r[de('Capital')]).toBe(r[col('Capital')] === 'yes' ? 'ja' : '');
+    }
+  });
 });

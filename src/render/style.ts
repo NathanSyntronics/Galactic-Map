@@ -1,6 +1,6 @@
-import type { AttrType, AttrValue, AttributeScale, AttributeStore, PaletteId } from '../data/attributes';
+import { attrName, type AttrType, type AttrValue, type AttributeScale, type AttributeStore, type PaletteId } from '../data/attributes';
 import { Flag, UNKNOWN_I16, spectralClassOf, type NodeData } from '../data/format';
-import type { MessageKey } from '../i18n';
+import { getLang, type MessageKey } from '../i18n';
 export type { MissingStyle };
 
 import type { MissingStyle } from '../settings';
@@ -167,7 +167,7 @@ export function paletteGradient(id: PaletteId, reverse = false): string {
 export interface AttributeInfo {
   id: string;
   type: AttrType;
-  /** User attribute name, or the message key of a built-in one. */
+  /** User attribute name in the current language, or the message key of a built-in one. */
   name: string;
   builtin: boolean;
 }
@@ -176,7 +176,7 @@ export function attributeInfo(id: string, store: AttributeStore): AttributeInfo 
   const b = builtin(id);
   if (b) return { id, type: b.type, name: b.label, builtin: true };
   const d = store.def(id);
-  return d ? { id, type: d.type, name: d.name, builtin: false } : null;
+  return d ? { id, type: d.type, name: attrName(d, getLang()), builtin: false } : null;
 }
 
 export type Getter = (node: NodeData, i: number) => AttrValue | undefined;

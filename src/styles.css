@@ -1186,3 +1186,46 @@ label.check input {
     visibility: hidden;
   }
 }
+
+.attr-row-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.attr-row-actions .btn.active {
+  border-color: var(--accent);
+}
+
+.attr-table tr.attr-translations > td {
+  border-top: none;
+  padding: 0 6px 10px;
+}
+
+.attr-translate {
+  background: rgba(127, 178, 255, 0.05);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.attr-translate h4 {
+  margin: 2px 0 4px;
+  font-size: 13px;
+}
+
+.attr-translate .hint {
+  margin: 0 0 6px;
+}
+
+.translate-table th.translate-key {
+  font-weight: 400;
+  color: var(--text);
+  min-width: 8em;
+  max-width: 14em;
+  overflow-wrap: break-word;
+}
+
+.translate-table td {
+  border-top: 1px solid var(--border);
+}
