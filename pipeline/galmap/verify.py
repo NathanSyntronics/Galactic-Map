@@ -19,6 +19,7 @@ import numpy as np
 
 from .coords import galactic_lb
 from .flags import Flag
+from .ooc import all_rows
 
 # name -> (distance in ly, tolerance as fraction, expected flags or 0)
 REFERENCE = {
@@ -71,8 +72,8 @@ PLANETS = {"Proxima Centauri": 2, "51 Pegasi": 1, "TRAPPIST-1": 7, "Epsilon Erid
 
 
 def _read_node(out: Path, manifest: dict, path: str) -> dict:
-    entry = next(e for e in manifest["nodes"] if e[0] == path)
-    _, count, nbytes, _mask, pack, offset = entry
+    entry = next(e for e in all_rows(out, manifest) if e[0] == path)
+    _, count, nbytes, _mask, pack, offset = entry[:6]
     with open(out / manifest["packs"][pack], "rb") as fh:
         fh.seek(offset)
         blob = fh.read(nbytes)

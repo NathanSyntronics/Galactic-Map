@@ -27,11 +27,11 @@ system_id       int      id of the multiple system (>= 0) or -1
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import struct
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -68,28 +68,62 @@ class Node:
         return m
 
 
-def importance(stars: pd.DataFrame) -> np.ndarray:
+def importance_of(logl: np.ndarray, absmag: np.ndarray, flags: np.ndarray) -> np.ndarray:
     """Luminosity used for LOD ordering (bright first); the Sun always first."""
-    logl = stars["logl"].to_numpy(dtype=float).copy()
-    fallback = (4.74 - stars["absmag"].to_numpy(dtype=float)) / 2.5
+    logl = np.asarray(logl, dtype=float).copy()
+    fallback = (4.74 - np.asarray(absmag, dtype=float)) / 2.5
     logl = np.where(np.isnan(logl), fallback, logl)
     logl = np.where(np.isnan(logl), -3.0, logl)
-    sun = (stars["flags"].to_numpy() & Flag.SUN) != 0
+    sun = (np.asarray(flags).astype(np.int64) & Flag.SUN) != 0
     logl[sun] = np.inf
     return logl
 
 
+def importance(stars: pd.DataFrame) -> np.ndarray:
+    return importance_of(stars["logl"].to_numpy(dtype=float), stars["absmag"].to_numpy(dtype=float), stars["flags"].to_numpy())
+
+
+_U64 = np.uint64
+
+
+def splitmix64(x: np.ndarray) -> np.ndarray:
+    """A well-mixed 64-bit hash of 64-bit integers (deterministic tie-break)."""
+    with np.errstate(over="ignore"):
+        z = x.astype(_U64) + _U64(0x9E3779B97F4A7C15)
+        z = (z ^ (z >> _U64(30))) * _U64(0xBF58476D1CE4E5B9)
+        z = (z ^ (z >> _U64(27))) * _U64(0x94D049BB133111EB)
+        return z ^ (z >> _U64(31))
+
+
+def tie_keys(cols: dict[str, np.ndarray]) -> np.ndarray:
+    """Hash of each star's designation: orders stars of equal importance the same way whatever
+    the order in which they arrive (the designation is unique in the dataset)."""
+    cat = cols["desig_cat"].astype(np.int64).astype(_U64)
+    lo = cols["desig_lo"].astype(np.int64).astype(_U64) & _U64(0xFFFFFFFF)
+    hi = cols["desig_hi"].astype(np.int64).astype(_U64) & _U64(0xFFFFFFFF)
+    key = (cat << _U64(56)) ^ (hi << _U64(32)) ^ lo
+    st = cols["desig_str"]
+    for i in np.nonzero(cols["desig_cat"] == 0)[0]:
+        s = st[i]
+        if isinstance(s, str) and s:
+            key[i] = int.from_bytes(hashlib.blake2b(s.encode("utf-8"), digest_size=8).digest(), "little")
+    return splitmix64(key)
+
+
+def octree_order(imp: np.ndarray, tie: np.ndarray) -> np.ndarray:
+    """Indices in the octree's order: importance (descending), then the tie hash, then arrival."""
+    return np.lexsort((np.arange(len(imp)), tie, -imp))
+
+
 def build_octree(stars: pd.DataFrame, capacity: int) -> Node:
+    """The whole octree in memory: the reference definition (galmap.ooc builds the same tree
+    for any number of stars)."""
     xyz = stars[["x", "y", "z"]].to_numpy(dtype=float)
     extent = float(np.max(np.abs(xyz))) if len(xyz) else 1.0
     # root half size: power of two that contains every star even with the centre offset
     half = 2.0 ** math.ceil(math.log2(extent * 1.2 + 1.0))
     center = np.array(ROOT_OFFSET) * half
-    imp = importance(stars)
-    # deterministic tie-break so equal luminosities do not create spatial patterns
-    rng = np.random.default_rng(12345)
-    jitter = rng.random(len(imp)) * 1e-6
-    order = np.lexsort((jitter, -imp))
+    order = octree_order(importance(stars), tie_keys(columns_of(stars)))
 
     def build(idx: np.ndarray, c: np.ndarray, h: float, path: str, depth: int) -> Node:
         node = Node(path=path, center=c, half=h, idx=idx)
@@ -230,7 +264,8 @@ def encode_node(node: Node, cols: dict[str, np.ndarray], sys_info: dict[int, lis
     return bytes(body)
 
 
-def _columns(stars: pd.DataFrame) -> dict[str, np.ndarray]:
+def columns_of(stars: pd.DataFrame) -> dict[str, np.ndarray]:
+    """The column arrays encode_node reads."""
     def obj(name: str) -> np.ndarray:
         if name in stars:
             return stars[name].to_numpy(dtype=object)
@@ -272,108 +307,25 @@ def write_dataset(
     stats: dict | None = None,
     capacity: int = 4096,
     pack_bytes: int = 4 << 20,
+    bulk=None,
+    work_dir: Path | None = None,
+    max_bucket: int | None = None,
+    subtree_nodes: int | None = None,
 ) -> dict:
-    """Build the octree and write manifest.json, search.json, systems.json and the pack files."""
-    out_dir = Path(out_dir)
-    stars = stars.reset_index(drop=True)
-    root = build_octree(stars, capacity)
-    cols = _columns(stars)
+    """Build the octree and write manifest.json (with sub-manifests in m/ for large trees),
+    search.json, systems.json and the pack files. `bulk`: further chunks of stars (tables or
+    column arrays, see galmap.bulk) that are streamed through the out-of-core writer."""
+    from .ooc import MAX_BUCKET, SUBTREE_NODES, OctreeWriter
 
-    pack_dir = out_dir / "n"
-    pack_dir.mkdir(parents=True, exist_ok=True)
-    for old in pack_dir.glob("*.bin"):
-        old.unlink()
-
-    packs: list[str] = []
-    node_entries: list[list] = []
-    node_of_star = np.empty(len(stars), dtype=object)
-    local_of_star = np.full(len(stars), -1, dtype=np.int64)
-    current = bytearray()
-
-    def flush() -> None:
-        nonlocal current
-        if not current:
-            return
-        name = f"n/p{len(packs):03d}.bin"
-        (out_dir / name).write_bytes(current)
-        packs.append(name)
-        current = bytearray()
-
-    sys_info: dict[int, list] = {}
-    if systems is not None and len(systems):
-        for row in systems.itertuples(index=False):
-            de = row.name_de if isinstance(row.name_de, str) and row.name_de != row.name_en else None
-            en = row.name_en if isinstance(row.name_en, str) else None
-            d = getattr(row, "designation", None)
-            sys_info[int(row.system_id)] = [en, de, int(row.members), d if isinstance(d, str) and d else None]
-    for node in iter_nodes(root):
-        blob = encode_node(node, cols, sys_info)
-        if current and len(current) + len(blob) > pack_bytes:
-            flush()
-        offset = len(current)
-        current += blob
-        node_entries.append([node.path, int(len(node.idx)), len(blob), node.child_mask, len(packs), offset])
-        node_of_star[node.idx] = node.path
-        local_of_star[node.idx] = np.arange(len(node.idx))
-    flush()
-
-    # search index: named stars
-    search = []
-    rank = cols["name_rank"]
-    for gi in np.nonzero(rank <= NAMED_MAX_RANK)[0]:
-        en = cols["name_en"][gi]
-        if not isinstance(en, str) or not en:
-            continue
-        de = cols["name_de"][gi]
-        a = cols["alt"][gi]
-        x, y, z = (round(float(v), 3) for v in cols["xyz"][gi])
-        entry = [
-            en,
-            de if isinstance(de, str) and de and de != en else None,
-            node_of_star[gi],
-            int(local_of_star[gi]),
-            x,
-            y,
-            z,
-            int(rank[gi]),
-            list(a) if isinstance(a, (list, tuple)) and len(a) else None,
-            designation_text(int(cols["desig_cat"][gi]), int(cols["desig_lo"][gi]), int(cols["desig_hi"][gi]), cols["desig_str"][gi]),
-            int(cols["system_id"][gi]),
-        ]
-        search.append(entry)
-    search.sort(key=lambda e: (e[7], e[0]))
-    (out_dir / "search.json").write_text(json.dumps(search, ensure_ascii=False, separators=(",", ":"), allow_nan=False), "utf-8")
-
-    sys_out: dict[str, list] = {}
-    if systems is not None and len(systems):
-        for row in systems.itertuples(index=False):
-            de = row.name_de if isinstance(row.name_de, str) and row.name_de != row.name_en else None
-            sys_out[str(int(row.system_id))] = [
-                row.name_en if isinstance(row.name_en, str) else None,
-                de,
-                int(row.members),
-                round(float(row.cx), 3),
-                round(float(row.cy), 3),
-                round(float(row.cz), 3),
-                d if isinstance(d := getattr(row, "designation", None), str) and d else None,
-            ]
-    (out_dir / "systems.json").write_text(json.dumps(sys_out, ensure_ascii=False, separators=(",", ":"), allow_nan=False), "utf-8")
-
-    manifest = {
-        "format": "galmap-octree",
-        "version": VERSION,
-        "generated": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
-        "units": "ly",
-        "frame": "galactic-heliocentric",
-        "root": {"center": [float(v) for v in root.center], "halfSize": float(root.half)},
-        "capacity": capacity,
-        "starCount": int(len(stars)),
-        "nodeCount": len(node_entries),
-        "packs": packs,
-        "nodes": node_entries,
-        "sources": sources,
-        "params": params,
-        "stats": stats or {},
-    }
-    (out_dir / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=1), "utf-8")
-    return manifest
+    w = OctreeWriter(
+        out_dir,
+        capacity=capacity,
+        pack_bytes=pack_bytes,
+        work_dir=work_dir,
+        max_bucket=MAX_BUCKET if max_bucket is None else max_bucket,
+        subtree_nodes=SUBTREE_NODES if subtree_nodes is None else subtree_nodes,
+    )
+    w.add(stars)
+    for chunk in bulk or ():
+        w.add(chunk)
+    return w.finish(systems, sources, params, stats)
