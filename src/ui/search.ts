@@ -73,6 +73,18 @@ export class SearchIndex {
     });
   }
 
+  /** Adds entries (e.g. the galaxies, when they are loaded). */
+  add(tuples: SearchTuple[]): void {
+    this.exact = null;
+    this.clashes = null;
+    this.byDesignation = null;
+    for (const tuple of tuples) {
+      const [en, de, , , x, y, z, , alt] = tuple;
+      const keys = [en, ...(de ? [de] : []), ...(alt ?? [])].map(normalize);
+      this.entries.push({ tuple, keys, pos: galacticToWorld(x, y, z) });
+    }
+  }
+
   get size(): number {
     return this.entries.length;
   }

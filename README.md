@@ -43,6 +43,10 @@ An interactive 3-D map of the Sun's stellar neighbourhood, built from real star 
   get more links than faint ones. Every rule is adjustable.
 * **Route planning** through the jump network, also between distant stars: from the Sun to
   Betelgeuse it takes 114 jumps.
+* **Galaxies.** Zoom out past the Milky Way (a stylised model with bar and spiral arms) to the
+  Local Group, the Local Volume and the 55,877 galaxies of Cosmicflows-4, out to about 1.5 billion
+  light years: every galaxy whose distance is measured independently of its redshift, at its
+  true size and orientation, with English and German names ([`docs/GALAXIES.md`](docs/GALAXIES.md)).
 * **English and German**, switchable in the settings.
 
 ## Using the map
@@ -82,13 +86,14 @@ wide window gets the normal ones. Each tab writes only the settings it changed, 
 older tab keeps what you set in another.
 
 The settings panel (☰) controls:
-* the visible radius, and whether it follows the zoom (on by default: radius = camera distance
-  / 2.2, the framing of the start view; the radius slider then moves the camera; switched off,
-  the radius stays where it is);
+* the visible radius (2 ly to 2 billion ly), and whether it follows the zoom (on by default:
+  radius = camera distance / 2.2, the framing of the start view; the radius slider then moves the
+  camera; switched off, the radius stays where it is);
 * brown dwarfs (off by default) and white dwarfs;
 * a maximum distance uncertainty;
 * labels, star size (0.2× to 12×), brightness and colour saturation;
 * the galactic grid and the height lines;
+* the galaxies and the Milky Way model (both on);
 * the level of detail (how many stars may be loaded at once; it matters only for view radii of a few hundred light years and more);
 * the data layers (below);
 * the jump network (below);
@@ -277,6 +282,16 @@ specified in [`docs/ROUTES.md`](docs/ROUTES.md):
 | [NASA Exoplanet Archive](https://exoplanetarchive.ipac.caltech.edu/) (Planetary Systems Composite Parameters, DOI 10.26133/NEA13) | number of known planets per host star |
 | [Mamajek's dwarf sequence](https://www.pas.rochester.edu/~emamajek/EEM_dwarf_UBVIJHK_colors_Teff.txt) (Pecaut & Mamajek 2013) | colour → temperature, bolometric corrections |
 
+Galaxies ([`docs/GALAXIES.md`](docs/GALAXIES.md)):
+
+| Catalogue | Used for |
+|---|---|
+| [Cosmicflows-4](https://doi.org/10.3847/1538-4357/ac94d8) (Tully et al. 2023, ApJ 944, 94) | distances of 55,877 galaxies (TRGB, Cepheids, SN Ia, SBF, fundamental plane, Tully-Fisher, …) |
+| [Updated Nearby Galaxy Catalog](https://doi.org/10.1088/0004-6256/145/4/101) (Karachentsev, Makarov & Kaisina 2013, AJ 145, 101) | galaxies within about 11 Mpc: distances, Holmberg diameters, types, luminosities |
+| [Local Volume Database](https://github.com/apace7/local_volume_database) (Pace 2025, v1.1.1) | dwarf galaxies of the Local Group and the Local Volume |
+| [2MASS Extended Source Catalog](https://irsa.ipac.caltech.edu/Missions/2mass.html) (Jarrett et al. 2000, IRSA) | sizes, axis ratios and position angles |
+| [Wikidata](https://www.wikidata.org/) (CC0) | English and German names, catalogue numbers |
+
 The generated star data contains data derived from HYG / AT-HYG and is therefore published
 under **CC BY-SA 4.0**. The rest of the code is under the MIT licence.
 
@@ -356,6 +371,8 @@ Requirements: Python ≥ 3.11 and Node ≥ 20.
 python -m venv .venv && .venv/bin/pip install -r pipeline/requirements.txt
 cd pipeline && ../.venv/bin/python -m galmap.build --out ../public/data
 ../.venv/bin/python -m galmap.verify ../public/data    # sanity checks against known stars
+# galaxies (downloads ~60 MB, mostly the 2MASS XSC, ~10 min the first time)
+../.venv/bin/python -m galmap.galaxies --out ../public/data
 cd ..
 
 # web app

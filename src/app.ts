@@ -20,7 +20,7 @@ import {
   type OctreeNode,
   type SubManifest,
 } from './data/octree';
-import { formatLy, formatNumber, jumpStatsText, localName, setLang, t, type MessageKey } from './i18n';
+import { formatLy, formatNumber, getLang, jumpStatsText, localName, setLang, t, type MessageKey } from './i18n';
 import {
   MAX_PAIRS,
   MAX_PLACES,
@@ -61,6 +61,9 @@ import {
 } from './settings';
 import { AttributesDialog } from './ui/attributes-dialog';
 import { InfoPanel, displayName, type JumpListing, type StarInfo } from './ui/info';
+import { GalaxyCard } from './ui/galaxy-card';
+import { GalaxyFlag, galaxyDesignation, galaxyName, galaxyRank, loadGalaxies, type GalaxyCatalogue } from './data/galaxies';
+import { GalaxyLayer, milkyWayOpacity } from './render/galaxies';
 import { Legend } from './ui/legend';
 import { LabelLayer, TopK, labelUnder, labelledStarNear, namedCandidateLimit, onScreen, starPriority, type LabelCandidate } from './ui/labels';
 import { SettingsPanel } from './ui/panel';
@@ -212,6 +215,14 @@ export class App {
   private lastTime = performance.now();
   private hashTimer = 0;
   private lastTap = { time: 0, x: 0, y: 0 };
+  /** Galaxies (docs/GALAXIES.md): loaded when the view first reaches galaxy scales or the search is used. */
+  private readonly galaxyLayer = new GalaxyLayer();
+  private galaxyLoad: Promise<GalaxyCatalogue | null> | null = null;
+  private galaxySearchAdded = false;
+  private selectedGalaxy: number | null = null;
+  private galaxyCard!: GalaxyCard;
+  /** Galaxies inside the visible sphere (status line). */
+  private galaxiesInView = 0;
   private readonly viewProj = new Matrix4();
 
   constructor(private readonly container: HTMLElement) {
@@ -237,6 +248,8 @@ export class App {
     );
 
     this.scene.add(
+      this.galaxyLayer.milkyWay,
+      this.galaxyLayer.group,
       this.grid.group,
       this.dropLines.lines,
       this.jumpLines.group,
@@ -274,6 +287,10 @@ export class App {
 
     this.info = new InfoPanel(container, this.attrs);
     this.catchSecondTap(this.info.root);
+    this.galaxyCard = new GalaxyCard(container);
+    this.catchSecondTap(this.galaxyCard.root);
+    this.galaxyCard.onClose = () => this.select(null);
+    this.galaxyCard.onFlyTo = (i) => this.flyToGalaxy(i);
     this.info.onManageAttributes = () => this.showAttributes();
     this.info.onClose = () => this.select(null);
     this.info.onFlyTo = (info) => this.nav.flyTo(info.pos);
@@ -625,9 +642,14 @@ export class App {
 
   private async fetchSearch(): Promise<boolean> {
     try {
+      // the galaxies' names belong to the index too (loaded alongside; the stars alone if they fail)
+      const galaxies = this.ensureGalaxies();
       const res = await fetch(`${this.baseUrl}search.json`);
       if (!res.ok) throw new HttpError(res.status, res.url);
       this.searchIndex.load((await res.json()) as SearchTuple[]);
+      this.galaxySearchAdded = false;
+      await galaxies;
+      this.addGalaxySearch();
       this.search.indexLoaded();
       return true;
     } catch (err) {
@@ -647,6 +669,7 @@ export class App {
     if (has('lang')) {
       this.search.updateTexts();
       this.info.rerender(this.nav.target);
+      this.galaxyCard.rerender(this.nav.target);
       this.routeBox.updateTexts();
       this.refreshChrome();
     }
@@ -756,6 +779,8 @@ export class App {
     );
     const before = this.selectedPaths;
     this.selectedPaths = new Set(selected.map((n) => n.path));
+    // a view far from the stars (galaxy scales) waits for none of them
+    if (!selected.length && this.loadingKey === 'loading') this.loadingEl.classList.add('hidden');
     const added = [...this.selectedPaths].some((p) => !before.has(p));
     if (added || [...before].some((p) => !this.selectedPaths.has(p))) {
       // new nodes change the network; nodes dropped by a zoom in only when it no longer serves
@@ -780,6 +805,169 @@ export class App {
   }
 
   // ------------------------------------------------------------------ labels & stats
+
+  // ------------------------------------------------------------------ galaxies
+
+  /** Loads the galaxies once (null if they are unavailable). */
+  private ensureGalaxies(): Promise<GalaxyCatalogue | null> {
+    if (!this.galaxyLoad) {
+      this.galaxyLoad = loadGalaxies(this.baseUrl).then(
+        (cat) => {
+          this.galaxyLayer.setCatalogue(cat);
+          this.candidatesDirty = true;
+          this.addGalaxySearch();
+          return cat;
+        },
+        (err: unknown) => {
+          console.warn('galaxies unavailable', err);
+          return null;
+        },
+      );
+    }
+    return this.galaxyLoad;
+  }
+
+  /** The galaxies' names and designations in the search index (path 'g', index = galaxy). */
+  private addGalaxySearch(): void {
+    const cat = this.galaxyLayer.catalogue;
+    if (!cat || this.galaxySearchAdded || !this.searchIndex.size) return;
+    this.galaxySearchAdded = true;
+    const tuples: SearchTuple[] = [];
+    for (let i = 0; i < cat.count; i++) {
+      const n = cat.names.get(i);
+      const p = cat.pos;
+      // galactic coordinates as in search.json (world (x, y, z) = galactic (x, z, -y))
+      const g: [number, number, number] = [p[3 * i], -p[3 * i + 2], p[3 * i + 1]];
+      const designation = galaxyDesignation(cat, i);
+      const alt = n ? [...n.alt] : [];
+      if (n && designation !== n.en && !alt.includes(designation)) alt.unshift(designation);
+      tuples.push([n?.en ?? designation, n?.de ?? null, 'g', i, g[0], g[1], g[2], galaxyRank(cat, i), alt.length ? alt : null, designation, -1]);
+    }
+    this.searchIndex.add(tuples);
+  }
+
+  /** Per frame: loads the galaxies when the view reaches galaxy scales, and draws them. */
+  private updateGalaxies(s: Settings, scale: number): void {
+    if ((s.galaxies || s.milkyWay) && s.radius > 20_000) void this.ensureGalaxies();
+    this.galaxyLayer.update(this.nav.target, s.radius, scale, this.renderer.getPixelRatio(), s.galaxies, s.milkyWay ? milkyWayOpacity(s.radius) : 0);
+  }
+
+  /** Label candidates of the named galaxies in the visible sphere (and the Milky Way at its centre). */
+  private galaxyCandidates(cands: LabelCandidate[]): void {
+    const cat = this.galaxyLayer.catalogue;
+    this.galaxiesInView = 0;
+    const s = this.store.get();
+    if (!cat || !s.galaxies) return;
+    const target = this.nav.target;
+    const cam = this.camera.position;
+    const vp = this.viewProj.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse).elements;
+    const r2 = s.radius * s.radius;
+    const top = new TopK<number>(namedCandidateLimit(s.labelCount));
+    const p = cat.pos;
+    const lang = getLang();
+    const mwShown = s.milkyWay && milkyWayOpacity(s.radius) > 0.3;
+    for (let i = 0; i < cat.count; i++) {
+      const x = p[3 * i], y = p[3 * i + 1], z = p[3 * i + 2];
+      const dx = x - target.x, dy = y - target.y, dz = z - target.z;
+      if (dx * dx + dy * dy + dz * dz > r2) continue;
+      const model = (cat.flags[i] & GalaxyFlag.MODEL) !== 0;
+      if (!model) this.galaxiesInView++;
+      if (model && !mwShown) continue;
+      const rank = galaxyRank(cat, i);
+      if (rank >= 99 && i !== this.selectedGalaxy) continue;
+      if (!onScreen(vp, x, y, z)) continue;
+      const dist = Math.hypot(x - cam.x, y - cam.y, z - cam.z);
+      top.push(starPriority(cat.logL[i] || 8, dist, Math.min(rank, 6), undefined, model), i);
+    }
+    for (const i of top.items()) {
+      cands.push({
+        key: `g:${i}`,
+        pos: new Vector3(p[3 * i], p[3 * i + 1], p[3 * i + 2]),
+        text: galaxyName(cat, i, lang),
+        rank: Math.min(galaxyRank(cat, i), 6),
+        logL: cat.logL[i] || 8,
+        galaxy: i,
+      });
+    }
+    if (this.selectedGalaxy !== null && !cands.some((c) => c.key === `g:${this.selectedGalaxy}`)) {
+      const i = this.selectedGalaxy;
+      cands.push({ key: `g:${i}`, pos: new Vector3(p[3 * i], p[3 * i + 1], p[3 * i + 2]), text: galaxyName(cat, i, lang), rank: 0, logL: 0, galaxy: i });
+    }
+  }
+
+  /** The galaxy whose label is under the pointer, if any. */
+  private galaxyLabelAt(clientX: number, clientY: number, touch: boolean): number | null {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const hit = labelUnder(this.labels.hits, clientX - rect.left, clientY - rect.top, touch ? 6 : 2);
+    return hit && hit.c.galaxy !== undefined ? hit.c.galaxy : null;
+  }
+
+  /**
+   * The galaxy under the pointer: whose ellipse on screen (its diameter, at least radiusPx around
+   * small ones) contains it, the smallest of several. The Milky Way model counts while it is shown.
+   */
+  private pickGalaxy(clientX: number, clientY: number, radiusPx: number): number | null {
+    const cat = this.galaxyLayer.catalogue;
+    const s = this.store.get();
+    if (!cat || !s.galaxies) return null;
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const mx = clientX - rect.left;
+    const my = clientY - rect.top;
+    const w = rect.width;
+    const h = rect.height;
+    const m = new Matrix4().multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse).elements;
+    const pxPerUnit = h / (2 * Math.tan(MathUtils.degToRad(this.camera.fov) / 2));
+    const target = this.nav.target;
+    const r2 = s.radius * s.radius;
+    const mwShown = s.milkyWay && milkyWayOpacity(s.radius) > 0.3;
+    let best: number | null = null;
+    let bestSize = Infinity;
+    const p = cat.pos;
+    for (let i = 0; i < cat.count; i++) {
+      const x = p[3 * i], y = p[3 * i + 1], z = p[3 * i + 2];
+      const dx = x - target.x, dy = y - target.y, dz = z - target.z;
+      if (dx * dx + dy * dy + dz * dz > r2) continue;
+      if (cat.flags[i] & GalaxyFlag.MODEL && !mwShown) continue;
+      const cw = m[3] * x + m[7] * y + m[11] * z + m[15];
+      if (cw <= 0) continue;
+      const sx = ((m[0] * x + m[4] * y + m[8] * z + m[12]) / cw * 0.5 + 0.5) * w;
+      const sy = (1 - ((m[1] * x + m[5] * y + m[9] * z + m[13]) / cw * 0.5 + 0.5)) * h;
+      const size = ((cat.diam[i] / 2) / cw) * pxPerUnit;
+      const reach = Math.max(size, radiusPx);
+      if (Math.hypot(sx - mx, sy - my) > reach) continue;
+      if (size < bestSize) {
+        best = i;
+        bestSize = size;
+      }
+    }
+    return best;
+  }
+
+  private selectGalaxy(i: number | null): void {
+    const cat = this.galaxyLayer.catalogue;
+    this.select(null);
+    if (!cat || i === null) return;
+    this.selectedGalaxy = i;
+    const pos = this.galaxyLayer.position(i);
+    this.labels.selectedKey = `g:${i}`;
+    this.selMarker.show(pos, this.renderer.getPixelRatio());
+    this.galaxyCard.show(cat, i, this.nav.target);
+    this.candidatesDirty = true;
+  }
+
+  /**
+   * Flies to a galaxy, at a distance that shows all of it, seen from the Sun's side (as it looks
+   * on the sky); the Milky Way model from above, a little towards the Sun.
+   */
+  private flyToGalaxy(i: number): void {
+    const cat = this.galaxyLayer.catalogue;
+    if (!cat) return;
+    const model = (cat.flags[i] & GalaxyFlag.MODEL) !== 0;
+    const dist = model ? 160_000 : Math.max(cat.diam[i] * 1.6, 5_000);
+    const pos = this.galaxyLayer.position(i);
+    const dir = model ? new Vector3(-0.45, 0.88, 0.15) : pos.clone().negate();
+    this.nav.flyTo(pos, dist, 1.6, dir);
+  }
 
   private rebuildCandidates(): void {
     const s = this.store.get();
@@ -861,6 +1049,7 @@ export class App {
       });
     }
     this.routeCandidates(cands);
+    this.galaxyCandidates(cands);
     // Keep the selected star labelled even if it is outside the candidate set.
     if (this.selected && !cands.some((c) => c.key === this.selected!.key)) {
       cands.push({
@@ -876,6 +1065,7 @@ export class App {
     this.inView = inView;
     // only the view-dependent values: rebuilding the card here would swallow clicks on its buttons
     if (this.selected) this.info.updateView(this.nav.target);
+    if (this.selectedGalaxy !== null) this.galaxyCard.updateView(this.nav.target);
   }
 
   /**
@@ -943,10 +1133,11 @@ export class App {
   private updateStatus(): void {
     if (!this.loader) return;
     const loaded = this.starfield.visiblePointCount();
-    let text = t('stats', {
-      loaded: formatNumber(loaded),
-      visible: formatNumber(this.inView),
-    });
+    const g = this.galaxiesInView;
+    const galaxies = g === 1 ? t('statsGalaxiesOne') : t('statsGalaxies', { n: formatNumber(g) });
+    // at galaxy scales without stars: the galaxies alone
+    let text = loaded === 0 && g > 0 ? galaxies : t('stats', { loaded: formatNumber(loaded), visible: formatNumber(this.inView) });
+    if (loaded > 0 && g > 0) text += ` · ${galaxies}`;
     const pending = this.loader.pendingCount;
     if (pending > 0) text += ` · ${pending === 1 ? t('statsLoadingOne') : t('statsLoading', { pending: formatNumber(pending) })}`;
     this.status.textContent = text;
@@ -974,7 +1165,11 @@ export class App {
     dom.addEventListener('pointerup', (e) => {
       if (!taps.up(e.pointerId, e.clientX, e.clientY, e.timeStamp)) return;
       // (while the settings panel is open, its scrim catches every press beside it)
-      const hit = this.pickAt(e.clientX, e.clientY, e.pointerType === 'touch' ? 22 : 14);
+      const touch = e.pointerType === 'touch';
+      // a galaxy's label, then the stars, then the galaxies themselves
+      const galaxyLabel = this.galaxyLabelAt(e.clientX, e.clientY, touch);
+      const hit = galaxyLabel === null ? this.pickAt(e.clientX, e.clientY, touch ? 22 : 14) : null;
+      const galaxy = galaxyLabel ?? (hit ? null : this.pickGalaxy(e.clientX, e.clientY, touch ? 22 : 12));
       const isDouble = secondTap;
       secondTap = false;
       // after a double-tap the next tap starts a new pair
@@ -982,6 +1177,9 @@ export class App {
       if (hit) {
         this.select(hit);
         if (isDouble) this.nav.flyTo(hit.pos);
+      } else if (galaxy !== null) {
+        this.selectGalaxy(galaxy);
+        if (isDouble) this.flyToGalaxy(galaxy);
       } else if (!isDouble) {
         this.select(null);
       }
@@ -999,7 +1197,7 @@ export class App {
     let swallowClick = false;
     const isSecondTap = (e: PointerEvent) =>
       e.isPrimary &&
-      !!this.selected &&
+      (!!this.selected || this.selectedGalaxy !== null) &&
       e.timeStamp - this.lastTap.time < DOUBLE_TAP_MS &&
       Math.hypot(e.clientX - this.lastTap.x, e.clientY - this.lastTap.y) < 30;
     el.addEventListener(
@@ -1022,6 +1220,7 @@ export class App {
         e.stopPropagation();
         this.lastTap = { time: 0, x: 0, y: 0 };
         if (this.selected) this.nav.flyTo(this.selected.pos);
+        else if (this.selectedGalaxy !== null) this.flyToGalaxy(this.selectedGalaxy);
       },
       { capture: true },
     );
@@ -1136,6 +1335,10 @@ export class App {
   private select(info: StarInfo | null): void {
     this.pendingSelect = null;
     this.selected = info;
+    if (this.selectedGalaxy !== null) {
+      this.selectedGalaxy = null;
+      this.galaxyCard.show(null, null, this.nav.target);
+    }
     this.labels.selectedKey = info?.key ?? null;
     this.selMarker.show(info?.pos ?? null, this.renderer.getPixelRatio());
     this.info.show(info, this.nav.target);
@@ -1279,6 +1482,11 @@ export class App {
   }
 
   private pickSearch(hit: SearchHit): void {
+    if (hit.path === 'g') {
+      this.selectGalaxy(hit.index);
+      this.flyToGalaxy(hit.index);
+      return;
+    }
     const s = this.store.get();
     // a fixed radius: close enough to see the sphere; radius follows zoom: the zoom stays
     const dist = MathUtils.clamp(this.nav.distance, 3, s.autoRadius ? Infinity : Math.max(s.radius * 1.8, 10));
@@ -1570,6 +1778,25 @@ export class App {
       ul.appendChild(li);
     }
     body.appendChild(ul);
+    const gal = this.galaxyLayer.catalogue;
+    if (gal) {
+      body.appendChild(el('p', '', t('galaxySources')));
+      const gl = el('ul', 'sources');
+      for (const src of gal.sources) {
+        const li = el('li');
+        li.appendChild(el('b', '', src.title));
+        if (src.citation) li.appendChild(el('div', 'cite', src.citation));
+        if (src.url && /^https?:\/\//.test(src.url)) {
+          const a = el('a', '', src.url);
+          a.href = src.url;
+          a.target = '_blank';
+          a.rel = 'noopener';
+          li.appendChild(a);
+        }
+        gl.appendChild(li);
+      }
+      body.appendChild(gl);
+    }
     if (this.manifest) {
       body.appendChild(
         el('p', 'cite', `${formatNumber(this.manifest.starCount)} ${t('stars')} · ${this.manifest.generated}`),
@@ -1610,7 +1837,7 @@ export class App {
       this.nav.setView(galacticToWorld(c[0], c[1], c[2]), galacticToWorld(o[0], o[1], o[2]));
     } else if (initial) {
       const R = this.store.get().radius;
-      const d = MathUtils.clamp(distanceForRadius(R), 5, 150_000);
+      const d = MathUtils.clamp(distanceForRadius(R), 5, 5_000_000_000);
       const el2 = MathUtils.degToRad(28);
       // camera behind the Sun, looking towards the Galactic Centre (+X), slightly from above
       this.nav.setView(new Vector3(0, 0, 0), new Vector3(-Math.cos(el2) * d, Math.sin(el2) * d, d * 0.12));
@@ -1658,6 +1885,7 @@ export class App {
     // the more stars are in view, the fainter the faintest ones, so dense regions do not saturate
     u.uMinAlpha.value = MathUtils.clamp(0.55 * Math.sqrt(2500 / Math.max(this.inView, 1)), 0.035, 0.55);
     u.uMinPx.value = 2.6 * this.renderer.getPixelRatio();
+    this.updateGalaxies(s, u.uScale.value);
     // larger star sizes raise the cap too (gently), so that the brightest stars keep growing
     u.uMaxPx.value = 64 * this.renderer.getPixelRatio() * MathUtils.clamp(Math.sqrt(s.starSize), 1, 3);
 

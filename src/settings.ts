@@ -24,6 +24,10 @@ export interface Settings {
   saturation: number;
   grid: boolean;
   dropLines: boolean;
+  /** Galaxies (docs/GALAXIES.md). */
+  galaxies: boolean;
+  /** The Milky Way drawn as a model when zoomed out. */
+  milkyWay: boolean;
   quality: Quality;
   /** Attribute that sets the star colours ('' natural temperature colour). */
   colorBy: string;
@@ -65,6 +69,8 @@ export const DEFAULT_SETTINGS: Settings = {
   saturation: 1.6,
   grid: true,
   dropLines: true,
+  galaxies: true,
+  milkyWay: true,
   quality: 'medium',
   colorBy: '',
   sizeBy: '',
@@ -109,7 +115,8 @@ export const QUALITY_BUDGET: Record<Quality, number> = {
 };
 
 export const RADIUS_MIN = 2;
-export const RADIUS_MAX = 50_000;
+/** Up to the most distant galaxies (Cosmicflows-4 reaches about 1.5 billion ly). */
+export const RADIUS_MAX = 2_000_000_000;
 
 /** Camera distance per light year of radius in the default view (44 ly for 20 ly). */
 export const AUTO_RADIUS_RATIO = 2.2;

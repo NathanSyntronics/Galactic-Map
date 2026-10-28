@@ -1,4 +1,4 @@
-import { MathUtils, PerspectiveCamera, Spherical, Vector3 } from 'three';
+import { MathUtils, PerspectiveCamera, Quaternion, Spherical, Vector3 } from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 const UP = new Vector3(0, 1, 0);
@@ -38,7 +38,12 @@ interface Flight {
   toDist: number;
   t: number;
   duration: number;
+  /** Turns the view direction (target -> camera) from `fromDir` to `toDir` on the way. */
+  fromDir?: Vector3;
+  turn?: Quaternion;
 }
+
+const IDENTITY = new Quaternion();
 
 /**
  * Orbit-style navigation around a view centre (the orbit target):
@@ -69,7 +74,7 @@ export class Navigation {
     c.zoomSpeed = 1.2;
     c.panSpeed = 1.0;
     c.minDistance = 0.02;
-    c.maxDistance = 200_000;
+    c.maxDistance = 5_000_000_000;
     c.zoomToCursor = false;
     c.addEventListener('change', () => this.onChange());
     c.addEventListener('start', () => {
@@ -110,9 +115,12 @@ export class Navigation {
     this.onShortcut(e.key, e);
   }
 
-  /** Animate the view centre to a point; optionally change the camera distance. */
-  flyTo(point: Vector3, distance?: number, duration = 1.2): void {
-    this.flight = {
+  /**
+   * Animate the view centre to a point; optionally change the camera distance and the direction
+   * from the view centre to the camera (a unit vector; kept a little away from straight up or down).
+   */
+  flyTo(point: Vector3, distance?: number, duration = 1.2, direction?: Vector3): void {
+    const flight: Flight = {
       fromTarget: this.controls.target.clone(),
       toTarget: point.clone(),
       fromDist: this.distance,
@@ -120,6 +128,21 @@ export class Navigation {
       t: 0,
       duration,
     };
+    if (direction && direction.lengthSq() > 0) {
+      const from = this.camera.position.clone().sub(this.controls.target);
+      if (from.lengthSq() < 1e-12) from.set(0, 0, 1);
+      from.normalize();
+      const to = direction.clone().normalize();
+      to.y = MathUtils.clamp(to.y, -0.97, 0.97);
+      const h = Math.hypot(to.x, to.z) || 1;
+      const k = Math.sqrt(1 - to.y * to.y) / h;
+      to.x *= k;
+      to.z *= k;
+      if (to.x === 0 && to.z === 0) to.x = Math.sqrt(1 - to.y * to.y);
+      flight.fromDir = from;
+      flight.turn = new Quaternion().setFromUnitVectors(from, to);
+    }
+    this.flight = flight;
   }
 
   /** Sets the camera distance at once, keeping the view centre and direction (a running flight keeps its target). */
@@ -155,6 +178,7 @@ export class Navigation {
       f.t = Math.min(f.t + dt / f.duration, 1);
       const k = f.t < 0.5 ? 4 * f.t * f.t * f.t : 1 - Math.pow(-2 * f.t + 2, 3) / 2;
       const offset = this.tmp.copy(this.camera.position).sub(c.target);
+      if (f.fromDir && f.turn) offset.copy(f.fromDir).applyQuaternion(new Quaternion().slerpQuaternions(IDENTITY, f.turn, k));
       const dist = Math.exp(MathUtils.lerp(Math.log(f.fromDist), Math.log(f.toDist), k));
       offset.setLength(dist);
       c.target.lerpVectors(f.fromTarget, f.toTarget, k);

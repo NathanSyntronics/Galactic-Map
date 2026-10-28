@@ -125,7 +125,8 @@ describe('radius follows zoom', () => {
 
   it('clamps to the radius range and keeps three significant digits', () => {
     expect(radiusForDistance(0.5)).toBe(RADIUS_MIN);
-    expect(radiusForDistance(1e7)).toBe(RADIUS_MAX);
+    expect(radiusForDistance(1e10)).toBe(RADIUS_MAX);
+    expect(radiusForDistance(1e7)).toBe(4_550_000);
     expect(radiusForDistance(100)).toBe(45.5);
     expect(radiusForDistance(12345)).toBe(5610);
     expect(radiusForDistance(7)).toBe(3.18);

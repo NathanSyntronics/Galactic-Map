@@ -270,6 +270,8 @@ export class SettingsPanel {
     );
     b.appendChild(this.checkbox('grid', () => s().grid, (v) => this.store.set({ grid: v })));
     b.appendChild(this.checkbox('dropLines', () => s().dropLines, (v) => this.store.set({ dropLines: v })));
+    b.appendChild(this.checkbox('galaxies', () => s().galaxies, (v) => this.store.set({ galaxies: v })));
+    b.appendChild(this.checkbox('milkyWay', () => s().milkyWay, (v) => this.store.set({ milkyWay: v })));
     b.appendChild(
       this.select<Quality>(
         'quality',

@@ -17,7 +17,7 @@ on the sky are not included. This document is the specification the implementati
 | Updated Nearby Galaxy Catalog (Karachentsev, Makarov & Kaisina 2013, AJ 145, 101) | all known galaxies within about 11 Mpc: distances and their method, Holmberg diameters, axis ratios, types, luminosities | 869, of which 90 have a distance from their velocity only (left out) |
 | Cosmicflows-4 (Tully et al. 2023, ApJ 944, 94) | distances of 55,877 galaxies from the tip of the red giant branch, Cepheids, masers, surface brightness fluctuations, supernovae, the fundamental plane and the Tully-Fisher relation | 55,877 |
 | 2MASS Extended Source Catalog (IRSA) | total radius, axis ratio, position angle and K magnitude of the galaxies it has | |
-| Wikidata | English and German names, Wikipedia articles and catalogue numbers (Messier, NGC, IC, UGC, ESO) of the 17,000 galaxies with a PGC number | |
+| Wikidata | English and German names, Wikipedia articles, catalogue numbers (Messier, NGC, IC, UGC, ESO) and sky positions of the 17,000 galaxies with a PGC number; the names of the dwarf galaxies it lists without one (Fornax Dwarf Galaxy, Boötes I, …), looked up by label | |
 
 The machine-readable tables of both papers come from the publisher (the VizieR and EDD copies
 were not reachable when this was built); all downloads are cached in `pipeline/cache/galaxies`.
@@ -27,7 +27,11 @@ were not reachable when this was built); all downloads are cached in `pipeline/c
 * Cosmicflows-4 is the base (PGC numbers). A UNGC galaxy is the same as a Cosmicflows-4 galaxy
   within 1.5' (or a sixth of its Holmberg diameter, for large nearby galaxies), an LVDB dwarf within
   1.5' (or half its half-light radius), if their distance moduli also agree within 1 mag; the
-  nearest one wins. Unmatched galaxies are added.
+  nearest one wins. Unmatched galaxies are added. The UNGC and the LVDB have no PGC numbers: an
+  added galaxy gets one from Wikidata by its name (UNGC "MESSIER081" = "M 81" = PGC 28630), else by
+  its position (within the same match radius). If that galaxy is already in the list, or one is
+  listed under the same UNGC / LVDB name (the SMC, whose centres differ by 1°), the two are merged.
+  The UNGC's own entry for the Milky Way is left out (it is a record of its own).
 * **Distance:** the most precise of the catalogues' distances (smallest distance-modulus error;
   where a catalogue gives none, the method's typical error). The method is kept (TRGB, Cepheids,
   masers, SBF, SN Ia, SN II, fundamental plane, Tully-Fisher, RR Lyrae, horizontal branch, CMD,
@@ -53,10 +57,14 @@ were not reachable when this was built); all downloads are cached in `pipeline/c
 * **Luminosity** (log L☉): the UNGC's K-band luminosity, else from the 2MASS K magnitude, else from
   M_V (LVDB) or M_B (UNGC), else from the size.
 * **Names:** the Wikidata label in English and German where it is a common name with a Wikipedia
-  article (Andromeda Galaxy / Andromedagalaxie); else the best catalogue designation (Messier,
-  NGC, IC, others; the LVDB and UNGC names such as "Bootes I" or "WLM"). Every galaxy keeps its
-  designations (PGC number first). Name ranks: 0 common name, 1 Messier, 2 NGC, 3 IC, 4 other,
-  99 PGC number only.
+  article (Andromeda Galaxy / Andromedagalaxie); else the best designation: Messier (short, "M 81",
+  in both languages), NGC, IC, then the LVDB and UNGC names that are not catalogue numbers
+  ("Bootes I", "WLM"; the LVDB's spelling first), then UGC, ESO and other catalogue names. A
+  galaxy without a common name whose LVDB / UNGC name is the start of the English label of a
+  Wikidata item with a Wikipedia article at the same place (within 20' or its own size) takes that
+  item's names ("Fornax" → Fornax Dwarf Galaxy / Fornax-Zwerggalaxie). Every galaxy keeps its
+  other designations; the primary one is its PGC number (else its first designation). Name ranks:
+  0 common name, 1 Messier, 2 NGC, 3 IC, 4 other, 99 PGC number only.
 * **Local Group:** members are the galaxies within 1.5 Mpc of the barycentre between the Milky Way
   and Andromeda (at 55 % of the way to Andromeda).
 * **The Milky Way** is the first record, drawn as a model (see below), at the Galactic Centre
@@ -81,9 +89,10 @@ were not reachable when this was built); all downloads are cached in `pipeline/c
 | 29 | u8, u16 | reserved |
 | 32 | u32 | PGC number (0: none) |
 
-`galaxies.json`: `count`, `recordBytes`, `classes`, `methods`, `sources`, `stats` and `names`: for
-every galaxy with a name or without a PGC number `[index, English, German or null, rank,
-designation, [other designations]]`. A galaxy without an entry is called "PGC <number>".
+`galaxies.json`: `count`, `recordBytes`, `data` (the records' file, relative to galaxies.json),
+`classes`, `methods`, `sources`, `stats` and `names`: for every galaxy with a name or without a PGC
+number `[index, English, German or null, rank, designation, [other designations]]` (the other
+designations leave out the primary one). A galaxy without an entry is called "PGC <number>".
 
 ## App
 
@@ -91,15 +100,17 @@ designation, [other designations]]`. A galaxy without an entry is called "PGC <n
 
 * The visible radius reaches 2 billion ly, the camera 5 billion ly. Distances of a million light
   years and more are written in millions ("2.5 million ly" / "2,5 Mio. Lj") and billions.
-* The galaxy files (2 MB and about 1 MB) are loaded the first time the visible radius exceeds
-  20,000 ly, or the search needs them.
+* The galaxy files (2 MB and 0.4 MB) are loaded the first time the visible radius exceeds
+  20,000 ly, or with the search index (the search knows the stars and the galaxies at once).
+* A view far from the stars waits for none of them (no "loading" notice); the status line counts
+  the galaxies in the visible sphere ("38 galaxies in view").
 
 ### Drawing (`src/render/galaxies.ts`)
 
 * Like the stars, a galaxy is drawn while it lies in the visible sphere (the same fade at its
   edge), relative to an origin near the view centre (float precision).
-* **Disk galaxies** (spiral, lenticular, irregular) are quads in their disk plane, of their true
-  size and orientation, with a procedural pattern: a spiral has an exponential disk, two
+* **Disk galaxies** (spiral, lenticular, irregular) are quads in their disk plane (seen from
+  either side), of their true size and orientation, with a procedural pattern: a spiral has an exponential disk, two
   logarithmic arms (pitch 15°, a phase of its own) and a bulge; a lenticular a smooth disk and a
   bulge; an irregular clumpy noise. **Ellipticals and spheroidals** face the camera, with their
   axis ratio along their major axis's projection. Every galaxy also has a small glow facing the
@@ -108,8 +119,9 @@ designation, [other designations]]`. A galaxy without an entry is called "PGC <n
   luminosity (log L 7 → faint, 11 → full), colours the class (spiral disks blue-white with a
   yellow bulge, ellipticals and lenticulars warm, irregulars blue, spheroidals pale).
 * **The Milky Way model:** a disk of 100,000 ly with a bar (half length 16,000 ly, 27° from the
-  Sun–centre line) and four arms (logarithmic, pitch 12°) plus the Local Arm, which passes the
-  Sun; a stylised picture, not data. It fades in as the visible radius grows from 4,000 to
+  Sun–centre line) and four arms (logarithmic, pitch 12°; two major ones, Scutum-Centaurus and
+  Perseus, and two minor ones) plus the Local Arm, which passes the Sun; a stylised picture, not
+  data. It fades in as the visible radius grows from 4,000 to
   30,000 ly; the stars stay drawn over it.
 * Setting *Galaxies* (on) shows them, *Milky Way model* (on) the model.
 
@@ -122,5 +134,7 @@ designation, [other designations]]`. A galaxy without an entry is called "PGC <n
 * The galaxy card shows name (and German name), class, distance with error and method, the
   catalogues, diameter, luminosity, Local Group membership and the designations; *Centre view
   here* and a link to NED.
-* The search knows the names and designations of all galaxies (PGC numbers too); picking one flies
-  to it at a distance that shows the whole galaxy.
+* The search knows the names and designations of all galaxies (PGC numbers too); picking one (or
+  *Centre view here* on its card) flies to it at a distance that shows the whole galaxy, turning
+  the view to look from the Sun's side, so that it looks as it does on the sky; the Milky Way
+  from above, a little towards the Sun.

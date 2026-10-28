@@ -24,6 +24,8 @@ export interface LabelCandidate {
   size?: number;
   /** Start or destination of the route: always labelled, wherever it is. */
   pinned?: boolean;
+  /** A galaxy (index in the galaxy catalogue) instead of a star. */
+  galaxy?: number;
   /**
    * A waypoint of the route: a candidate wherever it is (the route is drawn whole), labelled ahead
    * of all other stars, but like them only where its label overlaps no other.
