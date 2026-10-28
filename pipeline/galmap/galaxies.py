@@ -163,6 +163,8 @@ METHOD_ERR = {"TRGB": 0.1, "Cep": 0.1, "maser": 0.1, "geom": 0.1, "SBF": 0.15, "
 def ungc_name(name: str) -> str:
     """'NGC0024' -> 'NGC 24', 'UGC00064' -> 'UGC 64', 'ESO349-031' -> 'ESO 349-031',
     'MESSIER081' -> 'M 81', 'HolmIX' -> 'Holmberg IX', 'KKH34' -> 'KKH 34'."""
+    if re.fullmatch(r"[A-Z]{6,}", name):
+        return name.title()  # 'CIRCINUS' -> 'Circinus'
     m = re.fullmatch(r"MESSIER0*(\d+)", name)
     if m:
         return f"M {m.group(1)}"

@@ -45,6 +45,7 @@ def test_ungc_names_and_keys():
     assert G.ungc_name("HolmIX") == "Holmberg IX"
     assert G.ungc_name("KKH34") == "KKH 34"
     assert G.ungc_name("Sculptor") == "Sculptor"
+    assert G.ungc_name("CIRCINUS") == "Circinus" and G.ungc_name("HIZSS003") == "HIZSS003"
     assert G.name_key("Messier 81") == G.name_key("M 81") == G.name_key("MESSIER081") == "M81"
     assert G.name_key("ESO 349-031") == G.name_key("ESO 349-31")
     assert G.name_key("And XVIII") == G.name_key("Andromeda XVIII")
