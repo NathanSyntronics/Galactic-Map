@@ -78,6 +78,8 @@ RECORD = np.dtype(
     ]
 )
 TEXT_COLUMNS = ("desig_str", "name_en", "name_de", "alt", "spect")
+#: what the upper levels need of a candidate star (56 bytes instead of a full record and its columns)
+CANDIDATE = np.dtype([("x", "<f8"), ("y", "<f8"), ("z", "<f8"), ("imp", "<f8"), ("tie", "<u8"), ("uid", "<i8"), ("owner", "<i8")])
 def to_records(cols: dict[str, np.ndarray], uid0: int) -> tuple[np.ndarray, dict[int, tuple]]:
     """Fixed-width records of a chunk and its text fields ({uid: (desig_str, name_en, ...)})."""
     n = len(cols["xyz"])
@@ -181,6 +183,24 @@ def descend(rec: np.ndarray, c0: np.ndarray, h0: float, depth: int) -> list[np.n
         out.append(code)
         h = hh
     return out
+
+
+def deepest_code(rec: np.ndarray, c0: np.ndarray, h0: float, depth: int) -> np.ndarray:
+    """The cube code of every record at `depth` (codes above it: shift right by 3 per level)."""
+    n = len(rec)
+    x, y, z = rec["x"], rec["y"], rec["z"]
+    cx, cy, cz = np.full(n, c0[0]), np.full(n, c0[1]), np.full(n, c0[2])
+    code = np.ones(n, np.int64)
+    h = h0
+    for _ in range(depth):
+        hh = h / 2
+        ox, oy, oz = x >= cx, y >= cy, z >= cz
+        cx = cx + np.where(ox, hh, -hh)
+        cy = cy + np.where(oy, hh, -hh)
+        cz = cz + np.where(oz, hh, -hh)
+        code = code * 8 + (ox.astype(np.int64) | (oy.astype(np.int64) << 1) | (oz.astype(np.int64) << 2))
+        h = hh
+    return code
 
 
 def depth_of(code: int) -> int:
@@ -374,6 +394,24 @@ def build_subtree(order: np.ndarray, xyz: np.ndarray, c: np.ndarray, h: float, p
 # ------------------------------------------------------------------ writer
 
 
+@dataclass
+class UpperNode:
+    path: str
+    center: np.ndarray
+    half: float
+    #: uids of the node's stars in octree order
+    uids: np.ndarray
+    #: codes of the child cubes that are upper nodes or buckets
+    children: list[int]
+
+
+@dataclass
+class UpperPlan:
+    nodes: list[UpperNode] = field(default_factory=list)
+    #: bucket code -> sorted uids of its stars the upper nodes took
+    taken: dict[int, np.ndarray] = field(default_factory=dict)
+
+
 class OctreeWriter:
     """Builds the octree of all stars added (core table and bulk chunks) and writes the dataset."""
 
@@ -470,91 +508,108 @@ class OctreeWriter:
         sys_info = system_info(systems)
         c0, h0 = root_cube(self.spool.extent)
 
+        log.debug("octree: spooled, memory %s MB", rss_mb())
         buckets = choose_buckets(self.spool, c0, h0, self.max_bucket)
+        log.debug("octree: buckets chosen, memory %s MB", rss_mb())
         paths = partition(self.spool, buckets, c0, h0, self.work)
+        log.debug("octree: partitioned, memory %s MB", rss_mb())
         shutil.rmtree(self.spool.dir, ignore_errors=True)
         self.stats["buckets"] = len(buckets.buckets)
         log.info("octree: %d stars in %d buckets (largest %d), %d cubes above them", self.spool.count, len(buckets.buckets), max(buckets.buckets.values(), default=0), len(buckets.upper))
 
-        taken: dict[int, set[int]] = defaultdict(set)
-        if buckets.upper:
-            taken = self._upper(buckets, paths, c0, h0, sys_info)
+        plan = self._upper_plan(buckets, paths, c0, h0) if buckets.upper else None
+        log.debug("octree: upper levels planned, memory %s MB", rss_mb())
+        # the subtrees, bucket by bucket; the stars the upper nodes took are set aside for them
+        taken_parts: list[np.ndarray] = []
+        taken_texts: dict[int, tuple] = {}
         for code in sorted(buckets.buckets, key=lambda k: paths[k]):
-            self._bucket(code, paths[code], taken.get(code, set()), c0, h0, sys_info)
+            rec, texts = load_bucket(self.work, paths[code])
+            if plan is not None and code in plan.taken:
+                m = np.isin(rec["uid"], plan.taken[code])
+                taken_parts.append(rec[m])
+                for u in rec["uid"][m]:
+                    t = texts.get(int(u))
+                    if t is not None:
+                        taken_texts[int(u)] = t
+                rec = rec[~m]
+            self._bucket(code, paths[code], rec, texts, c0, h0, sys_info)
+            del rec, texts
+        log.debug("octree: subtrees written, memory %s MB", rss_mb())
+        if plan is not None:
+            self._emit_upper(plan, np.concatenate(taken_parts) if taken_parts else np.empty(0, RECORD), taken_texts, buckets, sys_info)
         self._flush()
         return self._manifest(c0, h0, systems, sources, params, stats)
 
-    def _upper(self, buckets: Buckets, paths: dict[int, str], c0, h0, sys_info) -> dict[int, set[int]]:
-        """Builds and writes the nodes above the buckets; returns the uids they took per bucket."""
-        parts, texts, owner = [], {}, []
+    def _upper_plan(self, buckets: Buckets, paths: dict[int, str], c0, h0) -> "UpperPlan":
+        """The nodes above the buckets, built from compact candidates: each bucket's
+        `capacity * depth` most important stars (position, order keys and uid only)."""
+        parts = []
         for code in buckets.buckets:
-            rec, t = load_bucket(self.work, paths[code])
-            k = self.capacity * depth_of(code)
-            top = rec[order_of(rec)[:k]]
-            parts.append(top)
-            owner.append(np.full(len(top), code, np.int64))
-            if t:
-                hit = top["uid"][np.isin(top["uid"], np.fromiter(t.keys(), np.int64, len(t)))]
-                texts.update({int(u): t[int(u)] for u in hit})
-        cand = np.concatenate(parts) if parts else np.empty(0, RECORD)
-        owner_of = np.concatenate(owner) if owner else np.empty(0, np.int64)
+            rec = np.fromfile(bucket_files(self.work, paths[code])[0], RECORD)
+            top = rec[order_of(rec)[: self.capacity * depth_of(code)]]
+            c = np.empty(len(top), CANDIDATE)
+            for f in ("x", "y", "z", "imp", "tie", "uid"):
+                c[f] = top[f]
+            c["owner"] = code
+            parts.append(c)
+            del rec, top
+        cand = np.concatenate(parts) if parts else np.empty(0, CANDIDATE)
+        del parts
         self.stats["candidates"] = len(cand)
-        cols = columns_from_records(cand, texts)
-        xyz = cols["xyz"]
-        order = order_of(cand)
-        cand_codes = descend(cand, c0, h0, max(depth_of(c) for c in buckets.upper) + 1)
+        order = np.lexsort((cand["uid"], cand["tie"], -cand["imp"]))
+        deepest = max(depth_of(c) for c in buckets.upper)
+        code_at = deepest_code(cand, c0, h0, deepest)
+        cx, cy, cz = cand["x"], cand["y"], cand["z"]
+        plan = UpperPlan()
         taken_idx: list[np.ndarray] = []
-        nodes: list[tuple[Node, int]] = []
 
         def build(idx: np.ndarray, c, h, code: int) -> None:
             path = cube_of(code, c0, h0)[2]
             depth = depth_of(code)
             # stars of the cube that reach this node: all of the cube minus those taken above
-            in_cube = int(np.count_nonzero(cand_codes[depth] == code))
+            in_cube = int(np.count_nonzero((code_at >> (3 * (deepest - depth))) == code))
             reaching = buckets.upper[code] - (in_cube - len(idx))
             if reaching <= self.capacity:
                 raise RuntimeError(f"cube {path} above the buckets would be a leaf ({reaching} stars)")
-            node = Node(path=path, center=c, half=h, idx=idx[: self.capacity])
-            taken_idx.append(node.idx)
+            mine = idx[: self.capacity]
+            taken_idx.append(mine)
             rest = idx[self.capacity :]
-            p = xyz[rest]
-            octant = (p[:, 0] >= c[0]).astype(np.int8) | ((p[:, 1] >= c[1]).astype(np.int8) << 1) | ((p[:, 2] >= c[2]).astype(np.int8) << 2)
-            mask_children = []
-            entry = (node, len(nodes))
-            nodes.append(entry)
+            octant = (cx[rest] >= c[0]).astype(np.int8) | ((cy[rest] >= c[1]).astype(np.int8) << 1) | ((cz[rest] >= c[2]).astype(np.int8) << 2)
+            children = []
+            plan.nodes.append(UpperNode(path, c, h, cand["uid"][mine].copy(), children))
             for o in range(8):
                 child = code * 8 + o
-                sel = rest[octant == o]
                 if child in buckets.upper:
+                    children.append(child)
                     cc, hh = child_cube(c, h, o)
-                    mask_children.append(o)
-                    build(sel, cc, hh, child)
+                    build(rest[octant == o], cc, hh, child)
                 elif child in buckets.buckets:
-                    mask_children.append(o)  # checked below: the bucket may have lost all its stars
-            node.children = {o: None for o in mask_children}  # type: ignore[misc]
+                    children.append(child)
 
         build(order, c0, h0, 1)
-        taken_all = np.concatenate(taken_idx) if taken_idx else np.empty(0, np.int64)
-        taken: dict[int, set[int]] = defaultdict(set)
-        for i in taken_all:
-            taken[int(owner_of[i])].add(int(cand["uid"][i]))
-        # a bucket child exists only if stars are left for it
-        left = {code: n - len(taken.get(code, ())) for code, n in buckets.buckets.items()}
-        for node, _ in nodes:
-            code = code_of(node.path)
-            mask = 0
-            for o in node.children:
-                child = code * 8 + o
-                if child in buckets.upper or left.get(child, 0) > 0:
-                    mask |= 1 << o
-            self._emit(node, cols, sys_info, mask)
-        self.stats["upperNodes"] = len(nodes)
-        return taken
+        taken = np.concatenate(taken_idx) if taken_idx else np.empty(0, np.int64)
+        owner = cand["owner"][taken]
+        uids = cand["uid"][taken]
+        for code in np.unique(owner):
+            plan.taken[int(code)] = np.sort(uids[owner == code])
+        self.stats["upperNodes"] = len(plan.nodes)
+        return plan
 
-    def _bucket(self, code: int, path: str, taken: set[int], c0, h0, sys_info) -> None:
-        rec, texts = load_bucket(self.work, path)
-        if taken:
-            rec = rec[~np.isin(rec["uid"], np.fromiter(taken, np.int64, len(taken)))]
+    def _emit_upper(self, plan: "UpperPlan", rec: np.ndarray, texts: dict[int, tuple], buckets: Buckets, sys_info) -> None:
+        """Writes the upper nodes, with the full records of the stars they took."""
+        cols = columns_from_records(rec, texts)
+        pos = {int(u): i for i, u in enumerate(rec["uid"])}
+        left = {code: n - len(plan.taken.get(code, ())) for code, n in buckets.buckets.items()}
+        for un in plan.nodes:
+            node = Node(path=un.path, center=un.center, half=un.half, idx=np.array([pos[int(u)] for u in un.uids], dtype=np.int64))
+            mask = 0
+            for child in un.children:
+                # a bucket child exists only if stars are left for it
+                if child in buckets.upper or left.get(child, 0) > 0:
+                    mask |= 1 << (child & 7)
+            self._emit(node, cols, sys_info, mask)
+
+    def _bucket(self, code: int, path: str, rec: np.ndarray, texts: dict[int, tuple], c0, h0, sys_info) -> None:
         if not len(rec):
             return
         cols = columns_from_records(rec, texts)
@@ -598,6 +653,20 @@ class OctreeWriter:
         (out / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=1), "utf-8")
         log.info("octree: %d nodes, %d packs, %d sub-manifests; %s", len(self.rows), len(self.packs), len(subs), self.stats)
         return manifest
+
+
+def rss_mb() -> tuple[float, float]:
+    """Current and peak resident memory of the process (MB; Linux)."""
+    cur = peak = 0.0
+    try:
+        for line in Path("/proc/self/status").read_text().splitlines():
+            if line.startswith("VmRSS:"):
+                cur = int(line.split()[1]) / 1024
+            elif line.startswith("VmHWM:"):
+                peak = int(line.split()[1]) / 1024
+    except OSError:
+        pass
+    return round(cur), round(peak)
 
 
 def code_of(path: str) -> int:

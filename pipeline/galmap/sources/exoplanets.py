@@ -73,8 +73,9 @@ def load(refresh: bool = False) -> pd.DataFrame:
     return out
 
 
-def attach(stars: pd.DataFrame, hosts: pd.DataFrame) -> np.ndarray:
-    """Number of confirmed planets per star row (0 for none)."""
+def attach(stars: pd.DataFrame, hosts: pd.DataFrame, matched_out: list | None = None) -> np.ndarray:
+    """Number of confirmed planets per star row (0 for none). `matched_out`: receives the mask of
+    the hosts that were matched (the rest may belong to bulk stars, see by_gaia)."""
     n = len(stars)
     planets = np.zeros(n, dtype=np.int64)
     taken = np.zeros(n, bool)
@@ -121,4 +122,16 @@ def attach(stars: pd.DataFrame, hosts: pd.DataFrame) -> np.ndarray:
         "exoplanets: %d of %d hosts matched (%s); %d planets on the map",
         int(matched.sum()), len(hosts), ", ".join(f"{v} by {k}" for k, v in counts.items()), int(planets.sum()),
     )
+    if matched_out is not None:
+        matched_out.append(matched)
     return planets
+
+
+def by_gaia(hosts: pd.DataFrame, matched: np.ndarray | None = None) -> pd.Series:
+    """Planets per Gaia DR3 id of the hosts not matched to a core star (bulk stars, galmap.bulk)."""
+    h = hosts if matched is None else hosts[~matched]
+    g = h["gaia"].astype("Int64")
+    s = pd.Series(h["planets"].to_numpy(), index=g).loc[lambda x: x.index.notna()]
+    s = s[~s.index.duplicated(keep=False)]
+    s.index = s.index.astype("int64")
+    return s

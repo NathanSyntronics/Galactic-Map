@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from . import derive, merge, naming, systems
+from . import bulk, derive, merge, naming, systems
 from .download import CACHE_DIR, fetch
 from .flags import Desig, Flag, Rank
 from .names import GREEK, designation_key, letters_conflict, split_component
@@ -218,7 +218,15 @@ def build(
     limit: int | None = None,
     use_simbad: bool = True,
     field: bool = True,
+    field_bulk: bool = False,
+    bulk_files: Path | None = None,
+    bulk_selection: bulk.Selection | None = None,
+    work_dir: Path | None = None,
+    max_bucket: int | None = None,
 ) -> dict:
+    """The whole dataset. The core catalogue is merged in memory; bulk Gaia stars (the 100-200 pc
+    field with `field_bulk`, ESA bulk files with `bulk_files`) are derived chunk by chunk and
+    streamed into the out-of-core octree writer (docs/SCALING.md)."""
     t0 = time.time()
     phot = Photometry(load_mamajek(fetch(MAMAJEK_URL, MAMAJEK_FILE, refresh=refresh)))
 
@@ -232,9 +240,22 @@ def build(
     s = merge.merge_gcns(s, gcns.load(refresh), g)
     del a, g  # the full AT-HYG and Gaia tables are no longer needed (memory)
     gc.collect()
-    if field:
+    # bulk sources: (name, chunk iterator factory, selection)
+    sources_bulk: list[tuple[str, object, bulk.Selection]] = []
+    if field and field_bulk:
+        sources_bulk.append(("gaia_field", lambda: bulk.field_source(refresh), bulk.FIELD))
+    elif field:
         s = merge.add_gaia_field(s, gaia.load_field(refresh))
         gc.collect()
+    if bulk_files:
+        sel = bulk_selection or bulk.Selection(min_plx=1.0, max_plx=bulk.FIELD.min_plx if field else 10.0)
+        sources_bulk.append(("gaia_files", lambda: bulk.files_source(bulk_files), sel))
+    # Gaia rows next to catalogue rows without Gaia astrometry join the core, so that the dedupe
+    # below treats them as when they are all in the core
+    for _name, src, sel in sources_bulk:
+        promoted = bulk.prepass(src(), sel, s)
+        if len(promoted):
+            s = merge.add_gaia_field(s, promoted, **sel.kwargs())
     s = merge.dedupe_against_gaia(s)
     s = merge.merge_census(s, census20.load(refresh))
     s = pd.concat([s, sun_row()], ignore_index=True)
@@ -246,11 +267,14 @@ def build(
 
     # SIMBAD: identifiers, object types and spectral types for everything within ~100 pc
     sb_idents: dict[int, list[str]] = {}
+    lookups = bulk.Lookups()
     try:
         if not use_simbad:
             raise RuntimeError("disabled with --no-simbad")
         basic, ident = simbad.load(refresh)
         sb_idents, sb_info = simbad.attach(s, basic, ident)
+        if sources_bulk:
+            lookups.simbad = simbad.SimbadByGaia(basic, ident, taken=set(int(v) for v in sb_info["simbad_oid"].dropna()))
         s = pd.concat([s, sb_info], axis=1)
         no_spt = s["spect"].isna() & s["simbad_sp_type"].notna()
         s.loc[no_spt, "spect"] = s.loc[no_spt, "simbad_sp_type"]
@@ -281,25 +305,32 @@ def build(
     s.loc[sun, ["name_rank", "name_en", "name_de", "desig_cat", "desig_str"]] = [Rank.IAU, "Sun", "Sonne", Desig.STRING, "Sun"]
     s.loc[sun, ["x", "y", "z", "dist_err"]] = 0.0
     try:
-        s["planets"] = exoplanets.attach(s, exoplanets.load(refresh))
+        hosts = exoplanets.load(refresh)
+        matched: list = []
+        s["planets"] = exoplanets.attach(s, hosts, matched)
+        if sources_bulk:
+            lookups.planets = exoplanets.by_gaia(hosts, matched[0])
     except Exception as err:  # a bonus layer; the map works without it
         log.warning("NASA Exoplanet Archive unavailable, continuing without planets: %s", err)
         s["planets"] = 0
     sys_table = systems.system_table(s)
     _write_debug_table(s)
 
-    stats = {
-        "stars": int(len(s)),
-        "named": int((s["name_rank"] <= Rank.NAMED_MAX).sum()),
-        "brownDwarfs": int(((s["flags"] & Flag.BROWN_DWARF) != 0).sum()),
-        "whiteDwarfs": int(((s["flags"] & Flag.WHITE_DWARF) != 0).sum()),
-        "systems": int(len(sys_table)),
-        "within20pc": int((s["dist_pc"] < 20).sum()),
-        "within100pc": int((s["dist_pc"] < 100).sum()),
-        "within200pc": int((s["dist_pc"] < 200).sum()),
-        "planetHosts": int((s["planets"] > 0).sum()),
-        "planets": int(s["planets"].sum()),
-    }
+    def counts(t: pd.DataFrame) -> dict:
+        return {
+            "stars": int(len(t)),
+            "named": int((t["name_rank"] <= Rank.NAMED_MAX).sum()),
+            "brownDwarfs": int(((t["flags"] & Flag.BROWN_DWARF) != 0).sum()),
+            "whiteDwarfs": int(((t["flags"] & Flag.WHITE_DWARF) != 0).sum()),
+            "within20pc": int((t["dist_pc"] < 20).sum()),
+            "within100pc": int((t["dist_pc"] < 100).sum()),
+            "within200pc": int((t["dist_pc"] < 200).sum()),
+            "planetHosts": int((t["planets"] > 0).sum()),
+            "planets": int(t["planets"].sum()),
+        }
+
+    stats = counts(s)
+    stats["systems"] = int(len(sys_table))
     sources = []
     for info, flag in (
         (census20.SOURCE_INFO, Flag.SRC_CENSUS20),
@@ -326,7 +357,26 @@ def build(
         "gaiaFieldMinParallaxMas": merge.FIELD_MIN_PLX,
         "gaiaFieldMaxRelativeError": merge.FIELD_MAX_REL_ERR,
     }
-    manifest = write_dataset(s, sys_table, out, sources=sources, params=params, stats=stats, capacity=capacity)
+    bulk_iter = None
+    if sources_bulk:
+        skip = bulk.SortedIds(s["gaia"].dropna().astype("int64").to_numpy())
+        bulk_stats = bulk.BulkStats()
+
+        def add_counts(rows: pd.DataFrame) -> None:
+            for k, v in counts(rows).items():
+                stats[k] += v
+
+        def stream():
+            for name, src, sel in sources_bulk:
+                log.info("bulk source %s: %s", name, sel.describe())
+                yield from bulk.chunks(src(), sel, phot, skip, lookups, bulk_stats, on_chunk=add_counts)
+
+        bulk_iter = stream()
+        params["bulk"] = [{"source": name, **sel.describe()} for name, _src, sel in sources_bulk]
+    manifest = write_dataset(
+        s, sys_table, out, sources=sources, params=params, stats=stats, capacity=capacity,
+        bulk=bulk_iter, work_dir=work_dir, max_bucket=max_bucket,
+    )
     log.info("done in %.0f s: %s", time.time() - t0, stats)
     return manifest
 
@@ -339,11 +389,25 @@ def main() -> None:
     ap.add_argument("--limit", type=int, default=None, help="use only a random sample of AT-HYG (for testing)")
     ap.add_argument("--no-simbad", action="store_true", help="skip the SIMBAD name lookup")
     ap.add_argument("--no-field", action="store_true", help="skip the Gaia field stars between 100 and 200 pc")
+    ap.add_argument("--field-bulk", action="store_true", help="the field stars through the bulk path (chunk by chunk, see docs/SCALING.md)")
+    ap.add_argument("--bulk-files", type=Path, default=None, help="directory of ESA GaiaSource_*.csv.gz files to add as bulk stars")
+    ap.add_argument("--bulk-min-plx", type=float, default=1.0, help="bulk files: smallest parallax in mas (default 1, i.e. 1 kpc)")
+    ap.add_argument("--bulk-max-rel-err", type=float, default=0.1, help="bulk files: largest relative parallax error (default 0.1)")
+    ap.add_argument("--bulk-max-ruwe", type=float, default=None, help="bulk files: largest RUWE (default none)")
+    ap.add_argument("--work-dir", type=Path, default=None, help="directory for the octree writer's temporary files (default: system temp)")
+    ap.add_argument("--max-bucket", type=int, default=None, help="stars per bucket of the out-of-core octree writer")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
+    selection = None
+    if args.bulk_files:
+        selection = bulk.Selection(
+            min_plx=args.bulk_min_plx, max_plx=bulk.FIELD.min_plx if not args.no_field else 10.0,
+            max_rel_err=args.bulk_max_rel_err, max_ruwe=args.bulk_max_ruwe,
+        )
     build(
         args.out, refresh=args.refresh, capacity=args.capacity, limit=args.limit,
-        use_simbad=not args.no_simbad, field=not args.no_field,
+        use_simbad=not args.no_simbad, field=not args.no_field, field_bulk=args.field_bulk,
+        bulk_files=args.bulk_files, bulk_selection=selection, work_dir=args.work_dir, max_bucket=args.max_bucket,
     )
 
 

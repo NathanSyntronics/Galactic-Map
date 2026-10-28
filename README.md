@@ -329,8 +329,16 @@ Multiple systems (`systems.py`) are grouped from four sources:
 ### Level of detail
 
 The stars are stored in an octree (`pipeline/galmap/octree.py`):
-* Each node keeps the most luminous stars of its cube that are not already in an ancestor.
+* Each node keeps the most luminous stars of its cube that are not already in an ancestor
+  (equal luminosities: ordered by a hash of the designation, so the tree does not depend on the
+  order in which the stars arrive).
 * Distant regions therefore show their brightest stars first.
+* The writer (`pipeline/galmap/ooc.py`) works out of core: stars are spooled to disk in chunks
+  and split into buckets of at most 8 million stars; the levels above the buckets are built
+  exactly from each bucket's brightest candidates, and each bucket's subtree is built and
+  written on its own. So memory does not grow with the number of stars. Large trees get
+  sub-manifests (`m/<path>.json`) that the app loads on demand. See
+  [`docs/SCALING.md`](docs/SCALING.md) for hundreds of millions of stars.
 * Nodes are bundled into a few pack files that the app reads with HTTP range requests. A range
   that comes back short (Chrome's cache sometimes answers a revalidated range with an empty body,
   e.g. after a reload) is asked for once more past the browser cache.
@@ -360,6 +368,20 @@ npm run bench:route  # route search benchmark (see docs/ROUTES.md, Measurements)
 
 Tests: `npm test` (decoder, cross-checked against a fixture written by the Python writer)
 and `cd pipeline && python -m pytest`.
+
+Large datasets (prepared, see [`docs/SCALING.md`](docs/SCALING.md)):
+
+```bash
+cd pipeline
+../.venv/bin/python -m galmap.build --out /tmp/a --field-bulk     # the 100-200 pc field chunk by chunk
+../.venv/bin/python -m galmap.compare ../public/data /tmp/a       # star-by-star comparison of two builds
+../.venv/bin/python -m galmap.fetch_gaia_bulk --dest /data/gaia_source --limit 2   # ESA bulk files
+../.venv/bin/python -m galmap.build --out /data/out --bulk-files /data/gaia_source --work-dir /data/tmp
+../.venv/bin/python -m galmap.scale_test --stars 8000000 --out /tmp/scale   # synthetic memory test
+```
+
+The app reads the star data from `VITE_DATA_URL` when it is set (e.g. object storage with range
+requests), otherwise from `data/` next to it.
 
 ### Deployment
 

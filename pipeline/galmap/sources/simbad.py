@@ -111,8 +111,8 @@ def attach(stars: pd.DataFrame, basic: pd.DataFrame, ident: pd.DataFrame) -> tup
     """Map SIMBAD objects onto star rows via Gaia DR3 id or HIP number, and the remaining nearby
     stars by position.
 
-    Returns ({row index: [identifier, ...]}, per-row frame with main_id, otype, sp_type, wds and
-    simbad_match: "gaia", "hip" or "pos").
+    Returns ({row index: [identifier, ...]}, per-row frame with main_id, otype, sp_type, wds,
+    simbad_oid and simbad_match: "gaia", "hip" or "pos").
     """
     gaia = ident[ident["id"].str.startswith("Gaia DR3 ")]
     g_oid = pd.Series(gaia["oidref"].to_numpy(), index=exact_int64(gaia["id"].str.slice(9)))
@@ -220,6 +220,8 @@ def attach(stars: pd.DataFrame, basic: pd.DataFrame, ident: pd.DataFrame) -> tup
     info["simbad_sp_type"] = None
     info["wds"] = None
     info["simbad_match"] = None
+    info["simbad_oid"] = pd.array(np.where(ok, row_oid, -1), dtype="Int64")
+    info.loc[~ok, "simbad_oid"] = pd.NA
     info.loc[ok & m, "simbad_match"] = "gaia"
     info.loc[ok & m2, "simbad_match"] = "hip"
     info.loc[ok & pos, "simbad_match"] = "pos"
@@ -317,3 +319,45 @@ def _consistency_check(stars: pd.DataFrame, ident: pd.DataFrame, basic: pd.DataF
         return True
 
     return check
+
+
+class SimbadByGaia:
+    """SIMBAD lookups by Gaia DR3 id alone, for bulk stars processed chunk by chunk (galmap.bulk):
+    identifiers, main id, object type and spectral type of the object whose identifiers include
+    the star's Gaia DR3 number. Objects already matched to a star of the core catalogue are left
+    out (one SIMBAD object per star, as in attach)."""
+
+    def __init__(self, basic: pd.DataFrame, ident: pd.DataFrame, taken: set[int] | None = None):
+        gaia = ident[ident["id"].str.startswith("Gaia DR3 ")]
+        g_oid = pd.Series(gaia["oidref"].to_numpy(), index=exact_int64(gaia["id"].str.slice(9)))
+        g_oid = g_oid[~g_oid.index.duplicated(keep=False)]
+        if taken:
+            g_oid = g_oid[~g_oid.isin(list(taken))]
+        self.oid_of = g_oid
+        useful = ident[~ident["id"].str.match(NOISE)]
+        self.by_oid = useful.groupby("oidref")["id"].apply(list)
+        self.basic = basic.set_index("oid")
+
+    def lookup(self, gaia_ids: np.ndarray) -> tuple[dict[int, list[str]], pd.DataFrame]:
+        """({row: identifiers}, frame with simbad_main_id, simbad_otype, simbad_sp_type, simbad_oid)."""
+        ids = pd.Series(np.asarray(gaia_ids, dtype=np.int64))
+        hit = ids.isin(self.oid_of.index).to_numpy()
+        oid = np.full(len(ids), -1, dtype=np.int64)
+        oid[hit] = self.oid_of.loc[ids[hit]].to_numpy()
+        info = pd.DataFrame(index=range(len(ids)))
+        info["simbad_main_id"] = None
+        info["simbad_otype"] = None
+        info["simbad_sp_type"] = None
+        info["simbad_oid"] = pd.array(np.where(hit, oid, 0), dtype="Int64")
+        info.loc[~hit, "simbad_oid"] = pd.NA
+        idents: dict[int, list[str]] = {}
+        if hit.any():
+            sub = self.basic.reindex(oid[hit])
+            info.loc[hit, "simbad_main_id"] = sub["main_id"].str.replace(r"\s+", " ", regex=True).to_numpy()
+            info.loc[hit, "simbad_otype"] = sub["otype"].to_numpy()
+            info.loc[hit, "simbad_sp_type"] = sub["sp_type"].replace("", None).to_numpy()
+            for i in np.nonzero(hit)[0]:
+                lst = self.by_oid.get(int(oid[i]))
+                if lst:
+                    idents[int(i)] = lst
+        return idents, info

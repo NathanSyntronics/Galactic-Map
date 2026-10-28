@@ -285,21 +285,21 @@ FIELD_MIN_PLX = 5.0
 FIELD_MAX_REL_ERR = 0.1
 
 
-def add_gaia_field(stars: pd.DataFrame, field: pd.DataFrame) -> pd.DataFrame:
-    """Adds the Gaia DR3 stars between 100 and 200 pc that no other catalogue has: beyond 100 pc the
-    other sources contain only the Tycho-2 stars (V < ~11.5), i.e. no red dwarfs. Inside 100 pc the
-    GCNS (which rejects spurious Gaia solutions) stays the complete list."""
+def field_selection(field: pd.DataFrame, min_plx: float = FIELD_MIN_PLX, max_plx: float = 10.0, max_rel_err: float = FIELD_MAX_REL_ERR,
+                    solutions=(31, 95), max_ruwe: float | None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """(keep mask, parallax, error) of Gaia rows: zero-point corrected, RUWE-inflated parallaxes in
+    [min_plx, max_plx) mas with a relative error below max_rel_err and a 5/6-parameter solution."""
     plx, err = gaia_parallax(field["parallax"], field["parallax_error"], field["parallax_zp"], field["ruwe"])
     sol = field["astrometric_params_solved"].to_numpy(float)
-    keep = (plx >= FIELD_MIN_PLX) & (plx < 10.0) & (err > 0) & (err / plx < FIELD_MAX_REL_ERR) & np.isin(sol, (31, 95))
-    present = field["source_id"].astype("Int64").isin(stars["gaia"].dropna()).to_numpy()
-    new = field[keep & ~present].reset_index(drop=True)
-    plx, err = plx[keep & ~present], err[keep & ~present]
-    log.info(
-        "Gaia field 100-200 pc: %d candidates, %d with < %.0f %% parallax error, %d already present, %d added",
-        len(field), int(keep.sum()), FIELD_MAX_REL_ERR * 100, int((keep & present).sum()), len(new),
-    )
-    add = pd.DataFrame(
+    keep = (plx >= min_plx) & (plx < max_plx) & (err > 0) & (err / plx < max_rel_err) & np.isin(sol, solutions)
+    if max_ruwe is not None:
+        keep &= np.nan_to_num(field["ruwe"].to_numpy(float), nan=np.inf) <= max_ruwe
+    return keep, plx, err
+
+
+def field_rows(new: pd.DataFrame, plx: np.ndarray, err: np.ndarray) -> pd.DataFrame:
+    """Star rows (the merged table's columns) of Gaia field sources."""
+    return pd.DataFrame(
         {
             "src": Flag.SRC_GAIA,
             "ra": new["ra"].to_numpy(float),
@@ -324,7 +324,36 @@ def add_gaia_field(stars: pd.DataFrame, field: pd.DataFrame) -> pd.DataFrame:
             "is_sun": False,
         }
     )
-    return pd.concat([stars, add], ignore_index=True)
+
+
+def add_gaia_field(stars: pd.DataFrame, field: pd.DataFrame, **selection) -> pd.DataFrame:
+    """Adds the Gaia DR3 stars between 100 and 200 pc that no other catalogue has: beyond 100 pc the
+    other sources contain only the Tycho-2 stars (V < ~11.5), i.e. no red dwarfs. Inside 100 pc the
+    GCNS (which rejects spurious Gaia solutions) stays the complete list. `selection`: other
+    limits (field_selection's keywords) for Gaia rows of a bulk source that join the core."""
+    keep, plx, err = field_selection(field, **selection)
+    present = field["source_id"].astype("Int64").isin(stars["gaia"].dropna()).to_numpy()
+    new = field[keep & ~present].reset_index(drop=True)
+    plx, err = plx[keep & ~present], err[keep & ~present]
+    log.info(
+        "Gaia field 100-200 pc: %d candidates, %d with < %.0f %% parallax error, %d already present, %d added",
+        len(field), int(keep.sum()), FIELD_MAX_REL_ERR * 100, int((keep & present).sum()), len(new),
+    )
+    return pd.concat([stars, field_rows(new, plx, err)], ignore_index=True)
+
+
+def dedupe_candidates(s: pd.DataFrame) -> pd.DataFrame:
+    """Rows dedupe_against_gaia may merge into a Gaia row: no Gaia astrometry, a parallax above
+    1 mas; with their position at the Gaia epoch and the search radius (radians)."""
+    is_g = s["gaia"].notna().to_numpy()
+    plx = s["plx"].to_numpy(float)
+    cand = np.nonzero(~is_g & np.isfinite(plx) & (plx > 1.0) & ~s["is_sun"].to_numpy(bool))[0]
+    ra, dec = _positions_at(
+        s["ra"].to_numpy(float)[cand], s["dec"].to_numpy(float)[cand], np.nan_to_num(s["pmra"].to_numpy(float)[cand]),
+        np.nan_to_num(s["pmdec"].to_numpy(float)[cand]), s["epoch"].to_numpy(float)[cand],
+    )
+    gliese_only = (s["tyc"].isna() & s["hip"].isna()).to_numpy()[cand]
+    return pd.DataFrame({"row": cand, "ra": ra, "dec": dec, "radius": np.where(gliese_only, 60.0, 3.0) * ARCSEC})
 
 
 def dedupe_against_gaia(s: pd.DataFrame) -> pd.DataFrame:

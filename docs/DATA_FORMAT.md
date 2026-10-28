@@ -1,4 +1,4 @@
-# Galactic Map – data format (version 1)
+# Galactic Map – data format (manifest version 2)
 
 This document is the contract between the Python pipeline (`pipeline/`) and the
 web app (`src/`). Both sides must implement exactly what is written here.
@@ -33,13 +33,15 @@ In the three.js scene the galactic frame is mapped to the y-up world:
 ```
 public/data/
   manifest.json        global metadata + octree hierarchy
+  m/<path>.json        sub-manifests of large subtrees (only in large datasets)
   search.json          search index of named stars
   systems.json         multiple-star systems
   n/p000.bin …         pack files, each containing many node blobs back to back
 ```
 
-Node blobs are bundled into a few pack files (in depth-first order, so a pack
-holds neighbouring subtrees) instead of one file per node. This keeps the
+Node blobs are bundled into a few pack files (each subtree in depth-first order,
+so a pack holds neighbouring subtrees; see docs/SCALING.md for the order of a
+dataset built in buckets) instead of one file per node. This keeps the
 number of files small (git, static hosting limits) while still allowing small
 nodes. A client fetches one node with an HTTP `Range` request
 (`bytes=offset-(offset+bytes-1)`); if the server ignores the range and answers
@@ -51,19 +53,20 @@ the pack in memory for the other nodes in it).
 ```jsonc
 {
   "format": "galmap-octree",
-  "version": 1,
+  "version": 2,                          // 1: no sub-manifests (still read)
   "generated": "2026-10-14T12:00:00Z",   // ISO timestamp of the build
   "units": "ly",
   "frame": "galactic-heliocentric",
   "root": { "center": [cx, cy, cz], "halfSize": H },  // root cube, ly
   "capacity": 4096,                      // max stars stored per node
   "starCount": 2900000,
-  "nodeCount": 1100,
+  "nodeCount": 1100,                     // all nodes, including those in sub-manifests
   "packs": ["n/p000.bin", "n/p001.bin"], // pack files, relative to manifest
   "nodes": [
-    // [path, count, bytes, childMask, packIndex, byteOffset]
+    // [path, count, bytes, childMask, packIndex, byteOffset(, subManifest)]
     ["r", 4096, 104345, 255, 0, 0],
     ["r0", 4096, 109876, 17, 0, 104448],
+    ["r1", 4096, 101200, 255, 3, 0, "m/r1.json"],   // descendants of r1: in m/r1.json
     ...
   ],
   "sources": [
@@ -74,6 +77,22 @@ the pack in memory for the other nodes in it).
   "stats":  { ... }    // free-form counts for display / debugging
 }
 ```
+
+### Sub-manifests (version 2)
+
+A dataset of hundreds of millions of stars has hundreds of thousands of nodes; listing them all in
+`manifest.json` would make every visitor load tens of MB first. The writer
+(`pipeline/galmap/ooc.py`, `split_manifest`) therefore hands large subtrees to files of their own:
+
+* A node row with a 7th field names a sub-manifest (`m/<path>.json`); the node itself stays in
+  the listing, its descendants are in that file:
+  `{"format": "galmap-octree-nodes", "version": 2, "path": "r1", "nodes": [rows...]}`, rows in
+  the same format, which may name further sub-manifests.
+* Bottom-up, a node whose listing would exceed 4,096 rows hands its largest child subtrees to
+  sub-manifests until it fits, so every file lists at most about 4,096 nodes. Today's data
+  (2,893 nodes) keeps a single manifest.
+* The app loads a sub-manifest when the level-of-detail selection, the search or a route corridor
+  reaches the node (until then the node counts as a leaf). `nodeCount` counts every node.
 
 ### Node paths and bounds
 
