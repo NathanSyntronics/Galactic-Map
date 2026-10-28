@@ -133,33 +133,53 @@ with `;` and decimal commas, so that spreadsheet programs open it directly. Try
 Every star has a primary designation (shown under its name on the info card) that is unique in
 the dataset; attribute values are stored under it, so they survive rebuilds of the star data.
 
-The attributes are stored in the browser (localStorage). A site can ship a dataset of its own
-as `public/user/attributes.csv`: visitors see it until they change something, and *Back to the
-site's dataset* returns to it. With an `[exact]` key column it is applied right away; otherwise
-applying it first loads the name index (`search.json`, 16.5 MB, and `systems.json`).
+The attributes are stored in the browser, in IndexedDB, with the values packed in typed arrays
+(200,000 values are saved in about 40 ms and loaded in about 50 ms); data of earlier versions in
+localStorage is moved over on the first visit, and where IndexedDB is unavailable localStorage is
+used as before. A site can ship a dataset of its own as `public/user/attributes.csv`: visitors see
+it until they change something, and *Back to the site's dataset* returns to it. Visitors with
+data of their own do not download it (the app only checks that it exists). With an `[exact]` key
+column it is applied right away, in steps so that the map stays smooth; otherwise applying it
+first loads the name index (`search.json`, 16.5 MB, and `systems.json`). Large files are fine: the
+CSV reader and the value index are built for hundreds of thousands of rows (the shipped dataset,
+176,000 rows and 9.3 MB, 1.7 MB compressed, is read and applied in about 0.3 s on a desktop
+computer and takes about 17 MB of memory).
 
-**Example factions.** This repository ships such a dataset: four factions (attribute *Faction*,
+**Example factions.** This repository ships such a dataset: nine factions (attribute *Faction*,
 whole system; the capitals also have *Capital* = `yes`), with German names (*Fraktion*,
-*Hauptstadt* = `ja`, *Liga von Wega* …). Choose *Colour by → Faction* to see
-them; with the jump network's *Line colour → Star colours* the links take the faction colours too.
+*Hauptstadt* = `ja`, *Liga von Wega* …): four small ones around the Sun and five large ones
+around distant giants, from 1,000 to 100,000 systems. Choose *Colour by → Faction* to see them;
+with the jump network's *Line colour → Star colours* the links take the faction colours too.
 
-| Faction | German | Capital | Systems | Colour |
-|---|---|---|---|---|
-| Commonwealth of Sol | Commonwealth von Sol | Sun | 90 | blue |
-| League of Vega | Liga von Wega | Vega | 60 | orange |
-| Realm of Arcturus | Reich von Arktur | Arcturus | 40 | red |
-| Pact of Pollux | Pakt von Pollux | Pollux | 20 | green |
+| Faction | German | Capital | Distance | Systems | Colour |
+|---|---|---|---|---|---|
+| Commonwealth of Sol | Commonwealth von Sol | Sun | – | 90 | blue |
+| League of Vega | Liga von Wega | Vega | 25 ly | 60 | orange |
+| Realm of Arcturus | Reich von Arktur | Arcturus | 37 ly | 40 | red |
+| Pact of Pollux | Pakt von Pollux | Pollux | 34 ly | 20 | green |
+| Union of Betelgeuse | Union von Beteigeuze | Betelgeuse | 498 ly | 100,000 | light green |
+| Theocracy of Antares | Theokratie von Antares | Antares | 554 ly | 50,000 | pink |
+| Star Kingdom of Polaris | Königreich des Polarsterns | Polaris | 433 ly | 20,000 | yellow |
+| Syndicate of Canopus | Syndikat von Canopus | Canopus | 309 ly | 5,000 | teal |
+| Republic of Spica | Republik Spica | Spica | 250 ly | 1,000 | purple |
+
+The large territories reach 50 ly (Spica) to 254 ly (Betelgeuse) from their capitals; Betelgeuse's
+fills most of the map's edge region in the direction of Orion (the star data end at 650 ly).
 
 The territories follow the jump network with the default settings. They grow from their capitals
 along its links, all at once: a faction claims the places (systems or single stars) that are
 linked to its territory, nearest to its capital first, until it has its size, and a place belongs
-to one faction at most. So every territory is one connected part of the network. Text values are
-coloured in alphabetical order, so the names set the colours: the Sun and Vega, which share the
-longest border, get blue and orange, which stay distinct with red-green colour blindness.
-`npm run factions` (`tools/make-factions.mjs`) recomputes them from the star data in
-`public/data/`. It writes exact keys (so a first visit loads no name index for them) and checks
-that importing the file gives every star of a territory its faction, and that looking the keys up
-by name instead gives the same values.
+to one faction at most. So every territory is one connected part of the network. The small
+factions grow together in the network of the 100 ly around the Sun; each large one grows in a
+network region of its own around its capital (100 to 360 ly; the capitals are 400 ly or more
+apart, so they cannot meet), which is checked to hold the territory a jump margin inside it. Text
+values are coloured in alphabetical order, so the names set the colours: the Sun and Vega, which
+share the longest border, get blue and orange, which stay distinct with red-green colour
+blindness, and the large factions come after the small ones in the alphabet, so the small ones
+keep their colours. `npm run factions` (`tools/make-factions.mjs`, about 15 s) recomputes them
+from the star data in `public/data/`. It writes exact keys (so a first visit loads no name index
+for them), the German names once per value, and checks that importing the file gives every star
+of a territory its faction, and that looking the keys up by name instead gives the same values.
 
 ### Jump network
 

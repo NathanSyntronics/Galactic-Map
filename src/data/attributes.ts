@@ -1,5 +1,6 @@
 import type { Lang } from '../settings';
-import { DesignationMap, canonicalDesignation } from './designation';
+import { BrowserAttributeStorage, type AttributeStorage } from './attribute-storage';
+import { DesignationMap, type PackedDesignations, type ParsedDesignation } from './designation';
 
 /** The languages of the app, in which attribute names and text values can be given. */
 export const LANGS: readonly Lang[] = ['en', 'de'];
@@ -45,13 +46,21 @@ export function valueLabel(def: AttributeDef, v: AttrValue, lang: Lang): string 
 export function valueFromLabel(def: AttributeDef, text: string): string {
   const s = text.trim();
   if (def.type !== 'text' || !def.valueLabels) return s;
-  const low = s.toLowerCase();
-  const labels = Object.entries(def.valueLabels);
-  if (labels.some(([v]) => v === s)) return s;
-  for (const [v] of labels) if (v.toLowerCase() === low) return v;
-  for (const [v, l] of labels) if (Object.values(l).some((x) => x?.toLowerCase() === low)) return v;
-  return s;
+  if (s in def.valueLabels) return s;
+  let forms = labelForms.get(def);
+  if (!forms) {
+    // stored spellings first, then the labels (a definition is replaced, never changed, on edits)
+    forms = new Map();
+    for (const v of Object.keys(def.valueLabels)) forms.set(v.toLowerCase(), v);
+    for (const [v, l] of Object.entries(def.valueLabels))
+      for (const x of Object.values(l)) if (x && !forms.has(x.toLowerCase())) forms.set(x.toLowerCase(), v);
+    labelForms.set(def, forms);
+  }
+  return forms.get(s.toLowerCase()) ?? s;
 }
+
+/** Lower-case spellings and labels of an attribute's values -> stored value (valueFromLabel). */
+const labelForms = new WeakMap<AttributeDef, Map<string, string>>();
 
 /** Every spelling of the attribute's name (stored name and labels), lower case. */
 function nameForms(def: AttributeDef): string[] {
@@ -101,10 +110,25 @@ export interface StoredAttributes {
 }
 
 /** 'labels': only names or value labels in other languages changed (nothing to restyle). */
+/** Values of one attribute packed for storage (DesignationMap.pack): numbers, or text via a table. */
+export interface PackedValues extends Omit<PackedDesignations<unknown>, 'values'> {
+  numbers?: Float64Array;
+  /** Index into `table` per entry (text and colour attributes). */
+  index?: Uint32Array;
+  table?: string[];
+}
+
+/** The store's state as kept in IndexedDB: like StoredAttributes, with packed values. */
+export interface PackedAttributes {
+  v: 2;
+  defs: AttributeDef[];
+  values: Record<string, PackedValues>;
+  scales?: Record<string, AttributeScale>;
+}
+
 export type ChangeKind = 'defs' | 'values' | 'scales' | 'labels';
 type Listener = (kind: ChangeKind) => void;
 
-const STORAGE_KEY = 'galactic-map:attributes:v1';
 export const COLOR_RE = /^#[0-9a-f]{6}$/i;
 
 /** '#abc' / 'ABCDEF' / '#AbCdEf' -> '#abcdef'; null if it is not a hex colour. */
@@ -129,8 +153,9 @@ export function coerceValue(type: AttrType, v: AttrValue): AttrValue | null {
 
 /**
  * The user's star attributes: definitions plus values keyed by the stars' primary designations.
- * Kept in localStorage; the optional site dataset (public/user/attributes.csv) is only the
- * starting point for visitors who have no data of their own yet.
+ * Kept in the browser (IndexedDB, see attribute-storage.ts); the optional site dataset
+ * (public/user/attributes.csv) is only the starting point for visitors who have no data of their
+ * own yet.
  */
 export class AttributeStore {
   private defsList: AttributeDef[] = [];
@@ -143,7 +168,12 @@ export class AttributeStore {
   saveError: unknown = null;
   onSaveError: (err: unknown) => void = () => {};
 
-  constructor(private readonly persist = true) {}
+  private readonly storage: AttributeStorage | null;
+
+  /** `persist`: true for the browser's storage, false for none (tests, tools), or a storage of its own. */
+  constructor(persist: boolean | AttributeStorage = true) {
+    this.storage = persist === true ? new BrowserAttributeStorage() : persist || null;
+  }
 
   get defs(): readonly AttributeDef[] {
     return this.defsList;
@@ -273,8 +303,11 @@ export class AttributeStore {
     this.changed('defs');
   }
 
-  /** Sets (or with null / '' deletes) the value of a star; returns false if it does not fit the type. */
-  setValue(id: string, designation: string, value: AttrValue | null, notify = true): boolean {
+  /**
+   * Sets (or with null / '' deletes) the value of a star (designation in any spelling, or parsed);
+   * returns false if it does not fit the type.
+   */
+  setValue(id: string, designation: string | ParsedDesignation, value: AttrValue | null, notify = true): boolean {
     const def = this.def(id);
     if (!def) return false;
     const m = this.values(id);
@@ -341,8 +374,31 @@ export class AttributeStore {
     return { v: 1, defs: this.defsList.map((d) => structuredClone(d)), values, scales: this.scaleMap };
   }
 
-  /** Replaces the whole state. */
-  load(data: StoredAttributes, notify = true): void {
+  /** The state packed for storage: typed arrays, text values through a table (see PackedAttributes). */
+  pack(): PackedAttributes {
+    const values: Record<string, PackedValues> = {};
+    for (const d of this.defsList) {
+      const { values: vals, ...keys } = this.values(d.id).pack();
+      if (d.type === 'number') {
+        values[d.id] = { ...keys, numbers: Float64Array.from(vals as number[]) };
+      } else {
+        const table: string[] = [];
+        const at = new Map<string, number>();
+        const index = new Uint32Array(vals.length);
+        vals.forEach((v, k) => {
+          const s = String(v);
+          let i = at.get(s);
+          if (i === undefined) at.set(s, (i = table.push(s) - 1));
+          index[k] = i;
+        });
+        values[d.id] = { ...keys, index, table };
+      }
+    }
+    return { v: 2, defs: this.defsList.map((d) => structuredClone(d)), values, scales: structuredClone(this.scaleMap) };
+  }
+
+  /** Replaces the whole state (as stored: StoredAttributes or PackedAttributes). */
+  load(data: StoredAttributes | PackedAttributes, notify = true): void {
     this.defsList = [];
     this.maps.clear();
     this.scaleMap = {};
@@ -356,49 +412,48 @@ export class AttributeStore {
       if (valueLabels) def.valueLabels = valueLabels;
       this.defsList.push(def);
       const m = this.values(d.id);
-      for (const [k, v] of Object.entries(data.values?.[d.id] ?? {})) {
-        const c = coerceValue(type, v);
-        if (c !== null) m.set(canonicalDesignation(k), c);
+      const convert = (v: unknown) => (typeof v === 'number' || typeof v === 'string' ? coerceValue(type, v) : null);
+      if (data.v === 2) {
+        const p = data.values?.[d.id];
+        if (!p) continue;
+        const n = p.cat.length + p.names.length;
+        const vals: unknown[] = new Array(n);
+        for (let k = 0; k < n; k++) vals[k] = p.numbers ? p.numbers[k] : p.table?.[p.index?.[k] ?? -1];
+        m.unpack({ ...p, values: vals }, convert);
+      } else {
+        for (const [k, v] of Object.entries(data.values?.[d.id] ?? {})) {
+          const c = convert(v);
+          if (c !== null) m.set(k, c);
+        }
       }
     }
     for (const [k, v] of Object.entries(data.scales ?? {})) if (v && typeof v === 'object') this.scaleMap[k] = { ...v };
     if (notify) this.changed('defs', false);
   }
 
-  /** The stored state of this browser, or null if there is none. */
-  static readStored(): StoredAttributes | null {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return null;
-      const parsed = JSON.parse(raw) as StoredAttributes;
-      return parsed && parsed.v === 1 && Array.isArray(parsed.defs) ? parsed : null;
-    } catch {
-      return null;
-    }
+  /** The state stored in this browser, or null if there is none. */
+  readStored(): Promise<StoredAttributes | PackedAttributes | null> {
+    return this.storage ? this.storage.read() : Promise.resolve(null);
   }
 
   /** Forgets this browser's data (the site dataset applies again on the next start). */
-  clearStored(): void {
+  clearStored(): Promise<void> {
     window.clearTimeout(this.saveTimer);
-    try {
-      localStorage.removeItem(STORAGE_KEY);
-    } catch {
-      // nothing stored
-    }
+    return this.storage ? this.storage.clear() : Promise.resolve();
   }
 
-  /** Runs changes that are not saved (the site's dataset). */
-  withoutSaving(fn: () => void): void {
+  /** Runs changes that are not saved (the site's dataset); `fn` may be asynchronous. */
+  async withoutSaving(fn: () => void | Promise<void>): Promise<void> {
     this.saving = false;
     try {
-      fn();
+      await fn();
     } finally {
       this.saving = true;
     }
   }
 
   private changed(kind: ChangeKind, save = true): void {
-    if (save && this.persist && this.saving) this.scheduleSave();
+    if (save && this.storage && this.saving) this.scheduleSave();
     for (const l of this.listeners) l(kind);
   }
 
@@ -407,14 +462,18 @@ export class AttributeStore {
     this.saveTimer = window.setTimeout(() => this.saveNow(), 300);
   }
 
-  saveNow(): void {
+  /** Saves now (instead of after the short delay that collects a batch of changes). */
+  saveNow(): Promise<void> {
     window.clearTimeout(this.saveTimer);
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.toJSON()));
-      this.saveError = null;
-    } catch (err) {
-      this.saveError = err;
-      this.onSaveError(err);
-    }
+    if (!this.storage) return Promise.resolve();
+    return this.storage.write(this).then(
+      () => {
+        this.saveError = null;
+      },
+      (err: unknown) => {
+        this.saveError = err;
+        this.onSaveError(err);
+      },
+    );
   }
 }

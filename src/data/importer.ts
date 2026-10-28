@@ -1,7 +1,7 @@
 import type { Lang } from '../settings';
 import { AttributeStore, LANGS, valueFromLabel, type AttrType, type AttributeDef } from './attributes';
 import { csvLayout, cellValue, columnHeader, inferType, parseColumnHeader, parseCsv, toCsv, translationHeader } from './csv';
-import { canonicalDesignation, isCatalogueNumber } from './designation';
+import { canonicalDesignation, isCatalogueNumber, parseDesignation, type ParsedDesignation } from './designation';
 
 /** Finds stars by name or designation (backed by the search index and systems.json). */
 export interface StarResolver {
@@ -60,6 +60,40 @@ function looksLikeDesignation(key: string): boolean {
  * language) stands for that value.
  */
 export function importCsv(text: string, store: AttributeStore, resolver: StarResolver, replace = false): ImportReport {
+  const steps = importSteps(text, store, resolver, replace, Infinity);
+  for (;;) {
+    const r = steps.next();
+    if (r.done) return r.value;
+  }
+}
+
+/**
+ * The same as importCsv, in steps of `rowsPerStep` rows with a pause in between, so that a large
+ * file (a site dataset of 200,000 rows) does not hold up the page. Listeners hear of the import
+ * once, at the end.
+ */
+export async function importCsvAsync(
+  text: string,
+  store: AttributeStore,
+  resolver: StarResolver,
+  replace = false,
+  rowsPerStep = 20_000,
+): Promise<ImportReport> {
+  const steps = importSteps(text, store, resolver, replace, rowsPerStep);
+  for (;;) {
+    const r = steps.next();
+    if (r.done) return r.value;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+}
+
+function* importSteps(
+  text: string,
+  store: AttributeStore,
+  resolver: StarResolver,
+  replace: boolean,
+  rowsPerStep: number,
+): Generator<void, ImportReport, void> {
   const table = parseCsv(text);
   const decimalComma = table.delimiter !== ',';
   const { keyColumn, valueColumns, exactKeys } = csvLayout(table.header);
@@ -125,13 +159,16 @@ export function importCsv(text: string, store: AttributeStore, resolver: StarRes
   // the labels above may have changed the definitions
   for (const c of columns) c.def = store.def(c.def.id)!;
 
+  let done = 0;
   for (const row of table.rows) {
+    if (++done % rowsPerStep === 0) yield;
     const key = (row[keyColumn] ?? '').trim();
     if (!key) continue;
     // exact keys are taken as they are, also for whole-system values (already the primary's)
-    let star = exactKeys ? null : resolver.star(key);
+    let star: { designation: string | ParsedDesignation; system: number } | null = exactKeys ? null : resolver.star(key);
     if (exactKeys) {
-      star = { designation: canonicalDesignation(key), system: -1 };
+      // parsed once for all columns (site datasets have hundreds of thousands of rows)
+      star = { designation: parseDesignation(key), system: -1 };
       report.unverified++;
     } else if (star) report.matched++;
     else if (looksLikeDesignation(key)) {
@@ -150,7 +187,8 @@ export function importCsv(text: string, store: AttributeStore, resolver: StarRes
         info.rejected++;
         continue;
       }
-      const target = def.system && star.system >= 0 ? (resolver.systemPrimary(star.system) ?? star.designation) : star.designation;
+      const target: string | ParsedDesignation =
+        def.system && star.system >= 0 ? (resolver.systemPrimary(star.system) ?? star.designation) : star.designation;
       store.setValue(def.id, target, v, false);
       info.values++;
     }

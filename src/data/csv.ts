@@ -19,57 +19,79 @@ export function decodeCsv(bytes: ArrayBuffer): string {
   }
 }
 
-/** Splits CSV text into rows (RFC 4180 quoting, any line ending); detects ',', ';' or tab. */
+/**
+ * Splits CSV text into rows (RFC 4180 quoting, any line ending); detects ',', ';' or tab. A quote
+ * opens a quoted field only at its start (after blanks); text after the closing quote is kept.
+ * Fields are sliced from the text rather than built character by character (site datasets have
+ * hundreds of thousands of rows).
+ */
 export function parseCsv(text: string): CsvTable {
   if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
   const delimiter = detectDelimiter(text);
+  const D = delimiter.charCodeAt(0);
   const rows: string[][] = [];
   let row: string[] = [];
-  let field = '';
-  let quoted = false;
-  let i = 0;
   const n = text.length;
+  /** Index of the next delimiter or line break from k (n if none). */
+  const fieldEnd = (k: number): number => {
+    while (k < n) {
+      const c = text.charCodeAt(k);
+      if (c === D || c === 10 || c === 13) return k;
+      k++;
+    }
+    return n;
+  };
+  let i = 0;
   while (i < n) {
-    const c = text[i];
-    if (quoted) {
-      if (c === '"') {
-        if (text[i + 1] === '"') {
-          field += '"';
-          i += 2;
-          continue;
+    let j = i;
+    for (;;) {
+      const c = text.charCodeAt(j);
+      if (j < n && c !== D && (c === 32 || c === 9 || c === 0xa0)) j++;
+      else break;
+    }
+    let field: string;
+    if (text.charCodeAt(j) === 34) {
+      let out = '';
+      let k = j + 1;
+      for (;;) {
+        const q = text.indexOf('"', k);
+        if (q < 0) {
+          out += text.slice(k);
+          k = n;
+          break;
         }
-        quoted = false;
-        i++;
-        continue;
+        out += text.slice(k, q);
+        if (text.charCodeAt(q + 1) === 34) {
+          out += '"';
+          k = q + 2;
+        } else {
+          k = q + 1;
+          break;
+        }
       }
-      field += c;
+      const e = fieldEnd(k);
+      field = e > k ? out + text.slice(k, e) : out;
+      i = e;
+    } else {
+      const e = fieldEnd(i);
+      field = text.slice(i, e);
+      i = e;
+    }
+    row.push(field);
+    if (i >= n) break;
+    const c = text.charCodeAt(i);
+    if (c === D) {
       i++;
+      // a delimiter at the very end: one more, empty field
+      if (i >= n) row.push('');
       continue;
     }
-    if (c === '"' && field.trim() === '') {
-      quoted = true;
-      field = '';
-      i++;
-    } else if (c === delimiter) {
-      row.push(field);
-      field = '';
-      i++;
-    } else if (c === '\r' || c === '\n') {
-      row.push(field);
-      rows.push(row);
-      row = [];
-      field = '';
-      i += c === '\r' && text[i + 1] === '\n' ? 2 : 1;
-    } else {
-      field += c;
-      i++;
-    }
-  }
-  if (field !== '' || row.length) {
-    row.push(field);
     rows.push(row);
+    row = [];
+    i += c === 13 && text.charCodeAt(i + 1) === 10 ? 2 : 1;
   }
-  const nonEmpty = rows.filter((r) => r.some((f) => f.trim() !== ''));
+  if (row.length) rows.push(row);
+  const nonEmpty = rows.filter((r) => r.length > 1 || r[0].trim() !== '');
   const header = joinSplitTags(nonEmpty.shift() ?? [], delimiter).map((h) => h.trim());
   return { header, rows: nonEmpty, delimiter };
 }

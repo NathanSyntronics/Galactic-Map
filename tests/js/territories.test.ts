@@ -86,9 +86,10 @@ describe('territories', () => {
 describe('example factions (public/user/attributes.csv)', () => {
   const table = parseCsv(readFileSync(new URL('../../public/user/attributes.csv', import.meta.url), 'utf8'));
   const { keyColumn, exactKeys } = csvLayout(table.header);
-  const col = (name: string) => table.header.findIndex((h) => parseColumnHeader(h).name === name);
+  const col = (name: string) => table.header.findIndex((h) => parseColumnHeader(h).name === name && !parseColumnHeader(h).translation);
+  const de = (name: string) => table.header.findIndex((h) => parseColumnHeader(h).name === name && parseColumnHeader(h).translation?.lang === 'de');
 
-  it('has a whole-system text column Faction and four factions of 10 to 100 systems', () => {
+  it('has a whole-system text column Faction: four small factions near the Sun, five large ones', () => {
     // exact keys: applied without loading the search index
     expect(table.header[keyColumn]).toBe('designation [exact]');
     expect(exactKeys).toBe(true);
@@ -97,36 +98,35 @@ describe('example factions (public/user/attributes.csv)', () => {
     const sizes = new Map<string, number>();
     for (const r of table.rows) sizes.set(r[col('Faction')], (sizes.get(r[col('Faction')]) ?? 0) + 1);
     expect([...sizes.keys()].sort()).toEqual(FACTIONS.map((f) => f.name).sort());
+    // a row per system or single star: at least one per place
     for (const f of FACTIONS) {
-      expect(sizes.get(f.name)).toBe(f.size);
-      expect(f.size).toBeGreaterThanOrEqual(10);
-      expect(f.size).toBeLessThanOrEqual(100);
+      expect(sizes.get(f.name)).toBeGreaterThanOrEqual(f.size);
+      expect(sizes.get(f.name)).toBeLessThan(f.size * 1.05 + 1);
+      if (f.region === undefined) expect([f.size >= 10, f.size <= 100]).toEqual([true, true]);
+      else expect([f.size >= 1000, f.size <= 100_000]).toEqual([true, true]);
     }
+    expect(Math.min(...FACTIONS.filter((f) => f.region).map((f) => f.size))).toBe(1000);
+    expect(Math.max(...FACTIONS.map((f) => f.size))).toBe(100_000);
   });
 
   it('marks one capital per faction and names every star once', () => {
     const capitals = table.rows.filter((r) => r[col('Capital')] === 'yes').map((r) => [r[1], r[col('Faction')]]);
-    expect(capitals).toEqual([
-      ['Sun', 'Commonwealth of Sol'],
-      ['Vega', 'League of Vega'],
-      ['Arcturus', 'Realm of Arcturus'],
-      ['Pollux', 'Pact of Pollux'],
-    ]);
+    expect(capitals).toEqual(FACTIONS.map((f) => [f.capital, f.name]));
     const keys = table.rows.map((r) => r[keyColumn]);
     expect(new Set(keys).size).toBe(keys.length);
   });
 
   it('gives the attributes and every value a German name', () => {
-    const de = (name: string) => table.header.findIndex((h) => {
-      const spec = parseColumnHeader(h);
-      return spec.name === name && spec.translation?.lang === 'de';
-    });
     expect(parseColumnHeader(table.header[de('Faction')]).translation?.label).toBe('Fraktion');
     expect(parseColumnHeader(table.header[de('Capital')]).translation?.label).toBe('Hauptstadt');
-    const german = new Map(FACTIONS.map((f) => [f.name, f.de]));
-    for (const r of table.rows) {
-      expect(r[de('Faction')]).toBe(german.get(r[col('Faction')]));
-      expect(r[de('Capital')]).toBe(r[col('Capital')] === 'yes' ? 'ja' : '');
-    }
+    // the German form once per value, on the capital's row (the faction's first)
+    const german = table.rows.filter((r) => r[de('Faction')]).map((r) => [r[col('Faction')], r[de('Faction')], r[col('Capital')]]);
+    expect(german).toEqual(FACTIONS.map((f) => [f.name, f.de, 'yes']));
+    for (const r of table.rows) expect(r[de('Capital')]).toBe(r[col('Capital')] === 'yes' ? 'ja' : '');
+  });
+
+  it('keeps the colours of the small factions: the large ones sort after them', () => {
+    const order = FACTIONS.map((f) => f.name).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    expect(order.slice(0, 4)).toEqual(['Commonwealth of Sol', 'League of Vega', 'Pact of Pollux', 'Realm of Arcturus']);
   });
 });

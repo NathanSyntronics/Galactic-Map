@@ -5,7 +5,7 @@ import { TapDetector } from './controls/tap';
 import { AttributeStore, type ChangeKind } from './data/attributes';
 import { Flag, designationOf, type NodeData } from './data/format';
 import { decodeCsv } from './data/csv';
-import { NO_LOOKUP, csvNeedsLookup, exportCsv, importCsv, type ImportReport, type StarResolver } from './data/importer';
+import { NO_LOOKUP, csvNeedsLookup, exportCsv, importCsvAsync, type ImportReport, type StarResolver } from './data/importer';
 import { galacticToWorld, worldToGalactic } from './data/galactic';
 import {
   HttpError,
@@ -129,8 +129,10 @@ export class App {
   private lastStyle = 0;
   private readonly legend: Legend;
   private attrDialog: AttributesDialog | null = null;
-  /** The site's own attribute dataset (public/user/attributes.csv), if it has one. */
+  /** The site's own attribute dataset (public/user/attributes.csv), once downloaded. */
   private siteData: string | null = null;
+  /** True if the site has a dataset of its own (it may not be downloaded yet). */
+  private siteDataAvailable = false;
   private systemPrimaries: Promise<Map<number, string>> | null = null;
   private saveWarned = false;
   private readonly renderer: WebGLRenderer;
@@ -222,8 +224,7 @@ export class App {
 
     this.camera = new PerspectiveCamera(55, 1, 0.001, 1e6);
     this.nav = new Navigation(this.camera, this.renderer.domElement);
-    const stored = AttributeStore.readStored();
-    if (stored) this.attrs.load(stored, false);
+    // the user's attributes arrive from the browser's storage shortly after the start (loadAttributes)
     this.stylePlan = buildPlan(this.store.get(), this.attrs);
     this.starfield = new Starfield(
       () => this.store.get(),
@@ -376,36 +377,72 @@ export class App {
     // a route kept from the last visit
     this.planner.invalidate();
     this.loop();
-    // fetched for everyone (it is small), so that visitors with data of their own can go back to it;
-    // the shipped one has exact keys, so applying it loads no search index
-    void this.loadSiteData(!AttributeStore.readStored());
+    void this.loadAttributes();
   }
 
   // ------------------------------------------------------------------ user attributes
 
-  /** Loads the site's attribute dataset; `apply`: shows it (visitors without data of their own). */
-  private async loadSiteData(apply: boolean): Promise<void> {
+  /**
+   * The visitor's own attributes from the browser's storage, or else the site's dataset. For
+   * visitors with data of their own, the site's dataset (several MB) is only looked for, and
+   * fetched when they go back to it.
+   */
+  private async loadAttributes(): Promise<void> {
+    let stored = null;
     try {
-      const res = await fetch(`${import.meta.env.BASE_URL}user/attributes.csv`);
-      if (!res.ok) return;
-      const text = await res.text();
-      // dev servers answer unknown paths with the app page
-      if (/^\s*</.test(text)) return;
-      this.siteData = text;
-      if (apply) await this.applySiteData();
+      stored = await this.attrs.readStored();
+    } catch (err) {
+      console.warn('stored attributes unavailable', err);
+    }
+    if (stored) {
+      this.attrs.load(stored);
+      await this.probeSiteData();
+    } else if (await this.fetchSiteData()) await this.applySiteData();
+  }
+
+  private siteDataUrl(): string {
+    return `${import.meta.env.BASE_URL}user/attributes.csv`;
+  }
+
+  /** Whether the site has a dataset of its own (without downloading it). */
+  private async probeSiteData(): Promise<void> {
+    try {
+      const res = await fetch(this.siteDataUrl(), { method: 'HEAD' });
+      // dev servers answer unknown paths with the app page; hosts without HEAD: look when asked
+      this.siteDataAvailable = res.status === 405 || res.status === 501 || (res.ok && !/html/i.test(res.headers.get('content-type') ?? ''));
     } catch (err) {
       console.warn('site attributes unavailable', err);
     }
   }
 
+  /** Downloads the site's dataset; false if it has none. */
+  private async fetchSiteData(): Promise<boolean> {
+    if (this.siteData) return true;
+    try {
+      const res = await fetch(this.siteDataUrl());
+      if (!res.ok) return false;
+      const text = await res.text();
+      // dev servers answer unknown paths with the app page
+      if (/^\s*</.test(text)) return false;
+      this.siteData = text;
+      this.siteDataAvailable = true;
+      return true;
+    } catch (err) {
+      console.warn('site attributes unavailable', err);
+      return false;
+    }
+  }
+
   private async applySiteData(): Promise<void> {
     if (!this.siteData) return;
+    const text = this.siteData;
     // a dataset with exact keys (the shipped one) needs neither the search index nor systems.json
-    const resolver = csvNeedsLookup(this.siteData) ? await this.resolver() : NO_LOOKUP;
-    // the site dataset is not saved as the visitor's own data: site updates keep reaching them
-    this.attrs.withoutSaving(() => {
+    const resolver = csvNeedsLookup(text) ? await this.resolver() : NO_LOOKUP;
+    // the site dataset is not saved as the visitor's own data: site updates keep reaching them;
+    // imported in steps, so that the map stays smooth while 200,000 values arrive
+    await this.attrs.withoutSaving(async () => {
       this.attrs.load({ v: 1, defs: [], values: {} }, false);
-      importCsv(this.siteData!, this.attrs, resolver);
+      await importCsvAsync(text, this.attrs, resolver);
     });
   }
 
@@ -474,14 +511,14 @@ export class App {
     this.attrDialog = new AttributesDialog(this.attrs, {
       importCsv: async (file, replace) => this.importFile(file, replace),
       exportCsv: async () => this.exportFile(),
-      hasSiteData: () => this.siteData !== null,
+      hasSiteData: () => this.siteDataAvailable,
       resetToSite: async () => {
-        this.attrs.clearStored();
-        await this.applySiteData();
+        await this.attrs.clearStored();
+        if (await this.fetchSiteData()) await this.applySiteData();
       },
       deleteAll: () => {
         this.attrs.load({ v: 1, defs: [], values: {} });
-        this.attrs.saveNow();
+        void this.attrs.saveNow();
       },
     });
     this.panel.toggle(false);
@@ -491,7 +528,7 @@ export class App {
   private async importFile(file: File, replace: boolean): Promise<ImportReport> {
     const text = decodeCsv(await file.arrayBuffer());
     const resolver = csvNeedsLookup(text) ? await this.resolver() : NO_LOOKUP;
-    return importCsv(text, this.attrs, resolver, replace);
+    return importCsvAsync(text, this.attrs, resolver, replace);
   }
 
   private async exportFile(): Promise<void> {

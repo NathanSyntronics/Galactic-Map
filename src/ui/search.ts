@@ -1,4 +1,5 @@
 import { Vector3 } from 'three';
+import { canonicalDesignation, isCatalogueNumber } from '../data/designation';
 import { galacticToWorld } from '../data/galactic';
 import { formatLy, localName, t } from '../i18n';
 import { addRecent, readRecent, resolveRecent, sameRecent, writeRecent, type RecentSearch } from './recent';
@@ -110,6 +111,15 @@ export class SearchIndex {
     const n = normalize(key);
     const first = this.exact.get(n) ?? null;
     const clash = this.clashes?.get(n);
+    if (first && isCatalogueNumber(key)) {
+      // a catalogue number names only the star that has it: the normalised key drops the
+      // separators, so "TYC 734-1774-1" and "TYC 7341-774-1" share it
+      const c = canonicalDesignation(key);
+      const has = (tuple: SearchTuple) =>
+        [tuple[9], tuple[0], tuple[1], ...(tuple[8] ?? [])].some((x) => !!x && isCatalogueNumber(x) && canonicalDesignation(x) === c);
+      if (has(first)) return first;
+      return clash?.find((x) => has(x.tuple))?.tuple ?? null;
+    }
     if (!first || !clash) return first;
     const k = key.trim();
     const spelled = (tuple: SearchTuple) => [tuple[9], tuple[0], tuple[1], ...(tuple[8] ?? [])].some((x) => x === k);

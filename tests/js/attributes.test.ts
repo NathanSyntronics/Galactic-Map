@@ -53,6 +53,36 @@ describe('designations', () => {
     expect(m.get(node, 0)).toBeUndefined();
     expect(m.size).toBe(3);
   });
+
+  it('keeps catalogue numbers that share a low word apart and lists them as text', () => {
+    const m = new DesignationMap<string>();
+    const a = (5n << 32n) | 77n;
+    const b = (9n << 32n) | 77n;
+    m.set(`Gaia DR3 ${a}`, 'a');
+    m.set(`Gaia DR3 ${b}`, 'b');
+    m.set('HIP 77', 'hip');
+    m.set('Alpha Centauri', 'name');
+    m.set(`gaia dr3 ${a}`, 'a2');
+    expect(m.size).toBe(4);
+    expect(m.getText(`Gaia DR3 ${a}`)).toBe('a2');
+    expect(m.getExact(`Gaia DR3 ${b}`)).toBe('b');
+    expect(m.getExact('Alpha Centauri')).toBe('name');
+    expect(Object.fromEntries(m.entries())).toEqual({ 'Alpha Centauri': 'name', [`Gaia DR3 ${a}`]: 'a2', [`Gaia DR3 ${b}`]: 'b', 'HIP 77': 'hip' });
+    expect(m.delete(`Gaia DR3 ${b}`)).toBe(true);
+    expect(m.delete(`Gaia DR3 ${b}`)).toBe(false);
+    expect(m.getText(`Gaia DR3 ${a}`)).toBe('a2');
+    expect([...m.values()].sort()).toEqual(['a2', 'hip', 'name']);
+    expect(m.size).toBe(3);
+  });
+
+  it('reads Gaia DR3 numbers up to 2^64 - 1 without loss', () => {
+    for (const id of [0n, 4294967295n, 4294967296n, 5853498713190525696n, (1n << 64n) - 1n]) {
+      expect(parseDesignation(`Gaia DR3 ${id}`)).toEqual({ cat: DesigCat.GAIA_DR3, lo: Number(id & 0xffffffffn), hi: Number(id >> 32n), str: null });
+      expect(canonicalDesignation(`gaia  dr3 ${id}`)).toBe(`Gaia DR3 ${id}`);
+    }
+    expect(parseDesignation(`Gaia DR3 ${1n << 64n}`).cat).toBe(DesigCat.STRING);
+    expect(canonicalDesignation(' Alpha\u00a0 Centauri ')).toBe('Alpha Centauri');
+  });
 });
 
 describe('CSV', () => {

@@ -76,4 +76,18 @@ describe('SearchIndex', () => {
     expect(idx.byPrimary('G 185-7')?.[3]).toBe(2);
     expect(idx.byPrimary('G 1857')).toBeNull();
   });
+
+  it('finds a catalogue number only on the star that has it', () => {
+    const idx = new SearchIndex();
+    idx.load([
+      ['HD 143116', null, 'r1', 1, 0, 0, 0, 7, ['HIP 78372', 'TYC 7341-774-1'], 'HIP 78372', -1],
+      ['Star Y', null, 'r2', 2, 0, 0, 0, 7, ['TYC 7341-775-1'], 'HD 2', -1],
+    ]);
+    expect(idx.find('TYC 7341-774-1')?.[3]).toBe(1);
+    expect(idx.find('tyc 7341-774-1')?.[3]).toBe(1);
+    // the same digits split differently are another star (not in the index)
+    expect(idx.find('TYC 734-1774-1')).toBeNull();
+    expect(idx.find('TYC 7341-77-51')).toBeNull();
+    expect(idx.find('HIP 78372')?.[3]).toBe(1);
+  });
 });
