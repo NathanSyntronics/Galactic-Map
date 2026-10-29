@@ -64,6 +64,10 @@ def wide_binary_links(s: pd.DataFrame, min_dist_pc: float = 19.0) -> list[tuple[
     pmra = s["pmra"].to_numpy(float)
     pmdec = s["pmdec"].to_numpy(float)
     ok = np.isfinite(err) & np.isfinite(pmra) & (plx / err > 10) & (plx < 1000 / min_dist_pc) & (plx > 1.0)
+    # (not the planet hosts added from the archive: thousands of Kepler stars far behind would make
+    # the nearer stars of their field look crowded)
+    if "src" in s:
+        ok &= (s["src"].to_numpy(np.int64) & Flag.SRC_EXOPLANET) == 0
     idx = np.nonzero(ok)[0]
     ra, dec = propagate(s["ra"].to_numpy(float)[idx], s["dec"].to_numpy(float)[idx], pmra[idx], pmdec[idx], 2016.0 - s["epoch"].to_numpy(float)[idx])
     u = unit_vectors(ra, dec)

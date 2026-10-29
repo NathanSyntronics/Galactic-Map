@@ -24,7 +24,8 @@ from .names import GREEK, designation_key, letters_conflict, split_component
 from .octree import write_dataset
 from .photometry import MAMAJEK_URL, Photometry, load_mamajek
 from .sources import athyg, census20, exoplanets, gaia, gcns, hyg, iau, simbad, wikidata
-from . import binaries
+from . import binaries, planets
+from . import hosts as planet_hosts
 
 log = logging.getLogger("galmap.build")
 
@@ -262,6 +263,11 @@ def build(
     s = pd.concat([s, sun_row()], ignore_index=True)
     s["is_sun"] = s["is_sun"].fillna(False).astype(bool)
     s["src"] = s["src"].fillna(0).astype(np.int64)
+    # the hosts of known planets that no catalogue above has (Kepler, TESS, microlensing, ...)
+    try:
+        s = planet_hosts.add_hosts(s, planets.load(refresh))
+    except Exception as err:  # the map works without them (their planets then have no star)
+        log.warning("NASA Exoplanet Archive unavailable, no planet hosts added: %s", err)
     for c in ("brown_dwarf", "white_dwarf"):
         s[c] = s[c].fillna(False).astype(bool)
     s = derive.positions(s)
@@ -307,13 +313,16 @@ def build(
     # IAU names last: their designations are also matched against the SIMBAD and Wikidata names
     ext = external_names(s, iau.load(refresh), ext)
     s = naming.assign_names(s, ext)
+    planet_hosts.name_hosts(s)
     sun = s["is_sun"].to_numpy()
     s.loc[sun, ["name_rank", "name_en", "name_de", "desig_cat", "desig_str"]] = [Rank.IAU, "Sun", "Sonne", Desig.STRING, "Sun"]
     s.loc[sun, ["x", "y", "z", "dist_err"]] = 0.0
     try:
         hosts = exoplanets.load(refresh)
         matched: list = []
-        s["planets"] = exoplanets.attach(s, hosts, matched)
+        host_names: list = []
+        s["planets"] = exoplanets.attach(s, hosts, matched, host_names)
+        s["planet_host"] = host_names[0]
         if sources_bulk:
             lookups.planets = exoplanets.by_gaia(hosts, matched[0])
     except Exception as err:  # a bonus layer; the map works without it

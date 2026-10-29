@@ -191,7 +191,9 @@ def encode_node(node: Node, cols: dict[str, np.ndarray], sys_info: dict[int, lis
     systems: dict[str, int] = {}
     spect: dict[str, str] = {}
     planets: dict[str, int] = {}
+    hosts: dict[str, str] = {}
     planet_col = cols["planets"]
+    host_col = cols.get("planet_host")  # (not in the bulk paths)
     desig_str = cols["desig_str"]
     name_rank = cols["name_rank"]
     name_en = cols["name_en"]
@@ -221,6 +223,9 @@ def encode_node(node: Node, cols: dict[str, np.ndarray], sys_info: dict[int, lis
             spect[str(local)] = st
         if planet_col[gi] > 0:
             planets[str(local)] = int(planet_col[gi])
+            h = host_col[gi] if host_col is not None else None
+            if isinstance(h, str) and h:
+                hosts[str(local)] = h
     if d:
         extra["d"] = d
     if names:
@@ -235,6 +240,8 @@ def encode_node(node: Node, cols: dict[str, np.ndarray], sys_info: dict[int, lis
         extra["t"] = spect
     if planets:
         extra["p"] = planets
+    if hosts:
+        extra["h"] = hosts
     extra_bytes = json.dumps(extra, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8") if extra else b""
 
     body = bytearray(HEADER_BYTES)
@@ -295,6 +302,7 @@ def columns_of(stars: pd.DataFrame) -> dict[str, np.ndarray]:
         "system_id": num("system_id", -1, np.int64),
         "spect": obj("spect"),
         "planets": num("planets", 0, np.int64),
+        "planet_host": obj("planet_host"),
     }
 
 

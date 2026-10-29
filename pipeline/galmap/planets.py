@@ -36,9 +36,10 @@ log = logging.getLogger("galmap.planets")
 
 FILE = CACHE_DIR / "exoplanets" / "planets.csv"
 COLUMNS = (
-    "pl_name, hostname, pl_letter, hip_name, hd_name, gaia_dr3_id, ra, dec, sy_dist, sy_snum, sy_pnum, cb_flag, "
+    "pl_name, hostname, pl_letter, hip_name, hd_name, gaia_dr3_id, ra, dec, sy_dist, sy_disterr1, sy_disterr2, "
+    "sy_pmra, sy_pmdec, sy_vmag, sy_gaiamag, sy_snum, sy_pnum, cb_flag, "
     "pl_orbper, pl_orbsmax, pl_orbeccen, pl_orbincl, pl_orblper, pl_orbtper, pl_tranmid, "
-    "pl_rade, pl_bmasse, pl_bmassprov, pl_eqt, st_mass, st_rad, st_teff, discoverymethod, disc_year"
+    "pl_rade, pl_bmasse, pl_bmassprov, pl_eqt, st_mass, st_rad, st_teff, st_spectype, st_lum, discoverymethod, disc_year"
 )
 QUERY = f"select {COLUMNS} from pscomppars"
 MIN_ROWS = 5000
@@ -88,10 +89,12 @@ def _num(s: pd.Series) -> np.ndarray:
 
 
 def load(refresh: bool = False) -> pd.DataFrame:
-    """The confirmed planets (one row each) with their orbits, sizes and hosts."""
-    if FILE.exists() and not refresh:
-        raw = pd.read_csv(FILE, dtype=str, keep_default_na=False)
-    else:
+    """The confirmed planets (one row each) with their orbits, sizes and hosts (also the source of
+    the planet counts and of the host stars no other catalogue has, see galmap.hosts)."""
+    raw = pd.read_csv(FILE, dtype=str, keep_default_na=False) if FILE.exists() and not refresh else None
+    wanted = [c.strip() for c in COLUMNS.split(",")]
+    if raw is None or any(c not in raw.columns for c in wanted):
+        # (also when the cached table lacks columns asked for since)
         raw = tap_sync(TAP, QUERY, timeout=600)
         if len(raw) < MIN_ROWS:
             raise RuntimeError(f"NASA Exoplanet Archive returned only {len(raw)} planets")
@@ -216,9 +219,18 @@ def match_hosts(planets: pd.DataFrame, stars: pd.DataFrame) -> dict[str, int]:
     tree = cKDTree(u)
     out: dict[str, int] = {}
     taken: set[int] = set()
-    counts = {"designation": 0, "name": 0, "position": 0}
+    counts = {"host": 0, "designation": 0, "name": 0, "position": 0}
+    # the build wrote each host's archive name with its star (node field "h"): exact
+    if "planet_host" in stars:
+        for k, hn in enumerate(stars["planet_host"]):
+            if isinstance(hn, str) and hn in hosts.index and hn not in out and k not in taken:
+                out[hn] = k
+                taken.add(k)
+                counts["host"] += 1
     rest = []
     for host, h in hosts.iterrows():
+        if host in out:
+            continue
         k = None
         for v in (h["gaia"], h["hip"], h["hd"]):
             if isinstance(v, str) and v and _norm(v) in by_key:

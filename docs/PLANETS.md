@@ -1,7 +1,7 @@
 # Planets
 
-The map shows the confirmed planets of the stars on it, about 2,950 around 2,150 stars, and the
-eight planets of the Solar System, each on its orbit at its position for a date (now, or running
+The map shows the confirmed planets of the NASA Exoplanet Archive, 6,428 around 4,818 stars (all but
+the 23 planets of the 21 hosts whose distance is unknown), and the eight planets of the Solar System, each on its orbit at its position for a date (now, or running
 faster). Zoomed into a star, the orbits appear as ellipses and the planets as symbols; like the
 stars and the galaxies, the symbols are larger than the planets are. This document is the
 specification the implementation follows.
@@ -25,12 +25,25 @@ reads the built stars and writes `planets.json` next to them.
 
 ### Hosts
 
-The planets' hosts are found among the built stars that carry a planet count: by designation
-(Gaia DR3, HIP, HD), by name, else the nearest such star within 0.5° of the archive's position whose
-distance agrees within 30 %. The planets of hosts that are not on the map (about 3,500, most of
-them far beyond the map's stars) are left out. Each host is written with its node path and index
-and its position exactly as the node stores it (float32), so the app draws a system exactly on its
-star.
+The star build (`galmap.build`) matches the archive's hosts to the stars of the catalogues (Gaia
+DR3, HIP, HD, else the position within 3″ and the distance within 20 %) and counts their planets.
+**Hosts that no catalogue has** (about 2,670: Kepler, K2, TESS and CoRoT stars, the hosts of
+microlensing planets up to 21,500 ly away, ...) are added as stars (`galmap/hosts.py`): at the
+archive's position and distance, with its V and G magnitudes, temperature and spectral type,
+flagged `SRC_EXOPLANET` (bit 14) and named by their archive name ("TOI-700", "OGLE-2005-BLG-390L")
+unless the naming finds a better one ("Kepler-90" for KOI-351). The distances of microlensing hosts
+come from models of the event: they are flagged as distances without a parallax. A host that has a
+star of the map within 3″ plus 20 years of its proper motion is that star (LHS 1678, whose
+catalogue position is of another epoch), unless that star hosts other planets already (then it is
+a companion with planets of its own and is added). The added hosts do not take part in the
+wide-binary heuristic (thousands of Kepler stars far behind would make the nearer stars of their
+field look crowded).
+
+The build writes each host's archive name into its node (field `h`, docs/DATA_FORMAT.md);
+`galmap.planets` links the planets by it, exactly. (Without it: by designation, by name, else the
+nearest host within 0.5° whose distance agrees within 30 %.) Each host is written with its node path
+and index and its position exactly as the node stores it (float32), so the app draws a system
+exactly on its star.
 
 ### Orbits
 

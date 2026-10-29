@@ -14,14 +14,11 @@ import pandas as pd
 from scipy.spatial import cKDTree
 
 from ..coords import propagate, unit_vectors
-from ..download import CACHE_DIR, exact_int64, tap_sync
+from ..download import exact_int64
 
 log = logging.getLogger(__name__)
 
 TAP = "https://exoplanetarchive.ipac.caltech.edu/TAP"
-FILE = CACHE_DIR / "exoplanets" / "pscomppars.csv"
-QUERY = "select pl_name, hostname, hip_name, hd_name, gaia_dr3_id, ra, dec, sy_dist from pscomppars"
-MIN_ROWS = 5000
 
 SOURCE_INFO = {
     "key": "exoplanets",
@@ -38,15 +35,15 @@ def _number(s: pd.Series, prefix: str) -> pd.Series:
 
 
 def load(refresh: bool = False) -> pd.DataFrame:
-    """One row per host star: hostname, gaia, hip, hd, ra, dec, dist_pc, planets."""
-    if FILE.exists() and not refresh:
-        raw = pd.read_csv(FILE, dtype=str, keep_default_na=False)
-    else:
-        raw = tap_sync(TAP, QUERY, timeout=300)
-        if len(raw) < MIN_ROWS:
-            raise RuntimeError(f"NASA Exoplanet Archive returned only {len(raw)} planets")
-        FILE.parent.mkdir(parents=True, exist_ok=True)
-        raw.to_csv(FILE, index=False)
+    """One row per host star: hostname, gaia, hip, hd, ra, dec, dist_pc, planets (from the table
+    galmap.planets downloads: one download for the counts, the hosts and the orbits)."""
+    from ..planets import load as load_planets
+
+    return hosts_of(load_planets(refresh))
+
+
+def hosts_of(raw: pd.DataFrame) -> pd.DataFrame:
+    """One row per host star of the archive's planet table (see load)."""
     hosts = raw.groupby("hostname").agg(
         planets=("pl_name", "nunique"),
         hip_name=("hip_name", "first"),
@@ -73,14 +70,25 @@ def load(refresh: bool = False) -> pd.DataFrame:
     return out
 
 
-def attach(stars: pd.DataFrame, hosts: pd.DataFrame, matched_out: list | None = None) -> np.ndarray:
+def attach(stars: pd.DataFrame, hosts: pd.DataFrame, matched_out: list | None = None, names_out: list | None = None) -> np.ndarray:
     """Number of confirmed planets per star row (0 for none). `matched_out`: receives the mask of
-    the hosts that were matched (the rest may belong to bulk stars, see by_gaia)."""
+    the hosts that were matched (the rest may belong to bulk stars, see by_gaia); `names_out`: the
+    archive's host name per star row (None for none)."""
     n = len(stars)
     planets = np.zeros(n, dtype=np.int64)
     taken = np.zeros(n, bool)
     matched = np.zeros(len(hosts), bool)
-    counts = {"gaia": 0, "hip": 0, "hd": 0, "position": 0}
+    host_of = np.full(n, -1, dtype=np.int64)
+    counts = {"name": 0, "gaia": 0, "hip": 0, "hd": 0, "position": 0}
+    # hosts added from the archive (or found next to a star of the map) carry its host name
+    if "archive_host" in stars:
+        row_of_host = {h: k for k, h in enumerate(hosts["hostname"])}
+        for i, h in enumerate(stars["archive_host"].to_numpy(dtype=object)):
+            k = row_of_host.get(h) if isinstance(h, str) else None
+            if k is None or matched[k] or taken[i]:
+                continue
+            planets[i], taken[i], matched[k], host_of[i] = int(hosts["planets"].iat[k]), True, True, k
+            counts["name"] += 1
     for key in ("gaia", "hip", "hd"):
         if key not in stars:
             continue
@@ -93,7 +101,7 @@ def attach(stars: pd.DataFrame, hosts: pd.DataFrame, matched_out: list | None = 
             i = int(pos[v])
             if taken[i]:
                 continue
-            planets[i], taken[i], matched[h] = k, True, True
+            planets[i], taken[i], matched[h], host_of[i] = k, True, True, h
             counts[key] += 1
     # the rest by position (J2000, within 3") and distance (within 20 %)
     rest = np.nonzero(~matched & hosts["ra"].notna().to_numpy())[0]
@@ -116,7 +124,7 @@ def attach(stars: pd.DataFrame, hosts: pd.DataFrame, matched_out: list | None = 
             hd_ = hosts["dist_pc"].iloc[h]
             if taken[i] or (np.isfinite(hd_) and abs(dpc[i] - hd_) > 0.2 * hd_):
                 continue
-            planets[i], taken[i], matched[h] = int(hosts["planets"].iloc[h]), True, True
+            planets[i], taken[i], matched[h], host_of[i] = int(hosts["planets"].iloc[h]), True, True, h
             counts["position"] += 1
     log.info(
         "exoplanets: %d of %d hosts matched (%s); %d planets on the map",
@@ -124,6 +132,9 @@ def attach(stars: pd.DataFrame, hosts: pd.DataFrame, matched_out: list | None = 
     )
     if matched_out is not None:
         matched_out.append(matched)
+    if names_out is not None:
+        names = hosts["hostname"].to_numpy(dtype=object)
+        names_out.append(np.where(host_of >= 0, names[np.maximum(host_of, 0)], None))
     return planets
 
 

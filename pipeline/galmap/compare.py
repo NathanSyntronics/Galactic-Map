@@ -86,7 +86,11 @@ def decode(blob: bytes, path: str) -> pd.DataFrame:
         system[int(k)] = v
     for k, v in extra.get("p", {}).items():
         planets[int(k)] = v
+    planet_host = np.full(n, None, dtype=object)
+    for k, v in extra.get("h", {}).items():
+        planet_host[int(k)] = v
     df["spect"], df["name_en"], df["name_de"], df["rank"], df["system"], df["planets"] = spect, en, de, rank, system, planets
+    df["planet_host"] = planet_host
     return df
 
 

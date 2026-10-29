@@ -175,6 +175,7 @@ without copying once the blob is in its own `ArrayBuffer`.
 | 11  | `GIANT`           | luminosity class I–III (giant / supergiant)                     |
 | 12  | `VARIABLE`        | known variable star                                             |
 | 13  | `SRC_GAIA`        | Gaia DR3 field star between 100 and 200 pc (no other catalogue) |
+| 14  | `SRC_EXOPLANET`   | planet host from the NASA Exoplanet Archive (no other catalogue; see docs/PLANETS.md) |
 | 14–15 | –               | reserved (0)                                                    |
 
 #### spec
@@ -222,7 +223,9 @@ object keys they are strings).
   // spectral type strings for stars that have one: localIndex -> string
   "t": { "3": "A0mA1Va" },
   // number of known exoplanets (NASA Exoplanet Archive) of planet hosts: localIndex -> count
-  "p": { "5": 3 }
+  "p": { "5": 3 },
+  // the archive's name of those hosts (galmap.planets links the planets by it): localIndex -> name
+  "h": { "5": "LHS 1678" }
 }
 ```
 

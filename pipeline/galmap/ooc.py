@@ -77,7 +77,7 @@ RECORD = np.dtype(
         ("name_rank", "<i2"),
     ]
 )
-TEXT_COLUMNS = ("desig_str", "name_en", "name_de", "alt", "spect")
+TEXT_COLUMNS = ("desig_str", "name_en", "name_de", "alt", "spect", "planet_host")
 #: what the upper levels need of a candidate star (56 bytes instead of a full record and its columns)
 CANDIDATE = np.dtype([("x", "<f8"), ("y", "<f8"), ("z", "<f8"), ("imp", "<f8"), ("tie", "<u8"), ("uid", "<i8"), ("owner", "<i8")])
 def to_records(cols: dict[str, np.ndarray], uid0: int) -> tuple[np.ndarray, dict[int, tuple]]:
@@ -94,10 +94,11 @@ def to_records(cols: dict[str, np.ndarray], uid0: int) -> tuple[np.ndarray, dict
     rec["uid"] = np.arange(uid0, uid0 + n, dtype=np.int64)
     texts: dict[int, tuple] = {}
     has = np.zeros(n, bool)
-    for c in TEXT_COLUMNS:
+    present = [c for c in TEXT_COLUMNS if c in cols]  # (the bulk paths have no planet_host)
+    for c in present:
         has |= pd.notna(np.asarray(cols[c], dtype=object))
     for i in np.nonzero(has)[0]:
-        texts[uid0 + int(i)] = tuple(_clean(cols[c][i]) for c in TEXT_COLUMNS)
+        texts[uid0 + int(i)] = tuple(_clean(cols[c][i]) if c in cols else None for c in TEXT_COLUMNS)
     return rec, texts
 
 

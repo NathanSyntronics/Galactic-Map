@@ -23,6 +23,7 @@ class Flag:
     GIANT = 1 << 11
     VARIABLE = 1 << 12
     SRC_GAIA = 1 << 13  # Gaia DR3 field star (100-200 pc), not in any other catalogue
+    SRC_EXOPLANET = 1 << 14  # a planet host from the NASA Exoplanet Archive, not in any other catalogue
 
 
 class Desig:

@@ -108,7 +108,7 @@ def physics(s: pd.DataFrame, phot: Photometry) -> pd.DataFrame:
     giant = np.array([is_giant_spect(v) for v in spect], dtype=bool)
     flags |= np.where(giant, Flag.GIANT, 0)
     plx_src = s["plx_src"].astype(str).to_numpy()
-    flags |= np.where(np.isin(plx_src, ("gj", "census_est")), Flag.DIST_NO_PARALLAX, 0)
+    flags |= np.where(np.isin(plx_src, ("gj", "census_est", "exoplanet_est")), Flag.DIST_NO_PARALLAX, 0)
     variable = s.get("hyg_var", pd.Series([None] * n)).notna().to_numpy() | s.get("var_name", pd.Series([None] * n)).notna().to_numpy()
     flags |= np.where(variable, Flag.VARIABLE, 0)
 

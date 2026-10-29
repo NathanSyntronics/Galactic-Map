@@ -10,7 +10,9 @@ An interactive 3-D map of the Sun's stellar neighbourhood, built from real star 
   * every known object within 20 pc (65 ly), including brown dwarfs;
   * every star with good Gaia astrometry within 100 pc (326 ly);
   * every Gaia DR3 star between 100 and 200 pc (650 ly) whose parallax is better than 10 %;
-  * all Tycho-2 stars, which are the brighter stars, out to several thousand light years.
+  * all Tycho-2 stars, which are the brighter stars, out to several thousand light years;
+  * every star with a confirmed planet whose distance is known (Kepler, TESS and microlensing hosts
+    too, from the NASA Exoplanet Archive).
 * **The most common names first.** Each star is labelled with its most commonly used name:
   * the title of its English Wikipedia article, if that is a name or a designation up to a
     survey number ("Epsilon Eridani", "Gliese 436", "Luyten 726-8"); the IAU name, which then
@@ -43,8 +45,9 @@ An interactive 3-D map of the Sun's stellar neighbourhood, built from real star 
   get more links than faint ones. Every rule is adjustable.
 * **Route planning** through the jump network, also between distant stars: from the Sun to
   Betelgeuse it takes 114 jumps.
-* **Planets.** Zoom into a star down to a hundredth of an AU: the confirmed planets of the stars on
-  the map (about 2,950 around 2,150 stars) and the eight of the Solar System, on their measured
+* **Planets.** Zoom into a star down to a hundredth of an AU: all confirmed planets with a known
+  host distance (6,428 around 4,818 stars; hosts that no star catalogue has, such as the Kepler and
+  TESS stars, come from the NASA Exoplanet Archive) and the eight of the Solar System, on their measured
   orbits at their positions for today (or running faster), drawn larger than they are, like the
   stars. Close pairs such as Alpha Centauri A and B separate ([`docs/PLANETS.md`](docs/PLANETS.md)).
 * **Galaxies.** Zoom out past the Milky Way (a stylised model with bar and spiral arms) to the
