@@ -25,10 +25,41 @@ import { GalaxyClass, GalaxyFlag, type GalaxyCatalogue } from '../data/galaxies'
 const QUAD = new Float32Array([-1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0]);
 const QUAD_INDEX = [0, 1, 2, 0, 2, 3];
 
-/** Brightness (0..1) for a luminosity: log L 7 faint, 11 full. */
+/** Brightness (0..1) for a luminosity: log L 6.45 and below 0.35, 11 full. */
 export function galaxyBrightness(logL: number): number {
-  if (!Number.isFinite(logL)) return 0.35;
-  return Math.min(Math.max((logL - 7) / 4, 0.15), 1);
+  if (!Number.isFinite(logL)) return 0.55;
+  return Math.min(Math.max((logL - 4) / 7, 0.35), 1);
+}
+
+/**
+ * Symbol size of a galaxy as a fraction of the visible radius (before the density factor): like
+ * the stars, galaxies are drawn larger than they are, the more so the more luminous (L^0.18), so
+ * that their distribution shows at every scale. The Milky Way and Andromeda (log L 10.8) get 9 %
+ * of the radius, the Large Magellanic Cloud 5 %, a dwarf of log L 5 0.8 %. A galaxy is never
+ * drawn smaller than it is.
+ */
+export function galaxySymbolFactor(logL: number): number {
+  const l = Number.isFinite(logL) ? Math.min(Math.max(logL, 3), 11.5) : 8;
+  return 0.065 * Math.pow(10, 0.18 * (l - 10));
+}
+
+/**
+ * Density factor of the symbol sizes: with many galaxies in the visible sphere they shrink (as
+ * stars dim in dense regions), so that thousands of them do not merge into one glow; with tens of
+ * thousands (Cosmicflows-4) nearly all are drawn as small glows.
+ */
+export function galaxyDensityFactor(inView: number): number {
+  return Math.min(Math.max(Math.pow(300 / Math.max(inView, 1), 0.75), 0.01), 1);
+}
+
+/** Brightness factor of the point-like galaxies in a crowded view (Cosmicflows-4: about a quarter). */
+export function galaxyCrowdFactor(inView: number): number {
+  return Math.min(Math.max(Math.sqrt(2500 / Math.max(inView, 1)), 0.22), 1);
+}
+
+/** How much larger than its true radius a galaxy is drawn (1: true size). */
+export function galaxyScale(trueRadius: number, factor: number, exaggeration: number): number {
+  return Math.max(1, (exaggeration * factor) / Math.max(trueRadius, 1e-6));
 }
 
 /** A stable number in [0, 1) per galaxy (arm phase, noise). */
@@ -47,6 +78,8 @@ uniform float uFade;
 uniform float uScale;
 uniform float uMinPx;
 uniform float uOpacity;
+uniform float uExagg;
+uniform float uCrowd;
 float sphereFade(vec3 c) {
   return 1.0 - smoothstep(uRadius * uFade, uRadius, distance(c, uTargetRel));
 }
@@ -57,20 +90,26 @@ ${common}
 attribute vec3 aCenter;
 attribute vec3 aAxisA;
 attribute vec3 aAxisB;
-attribute vec4 aParams; // class, brightness, seed, -
+attribute vec4 aParams; // class, brightness, seed, symbol factor
 varying vec2 vUv;
 varying float vAlpha;
 varying vec4 vParams;
+varying float vSym;
 void main() {
   float a = sphereFade(aCenter);
   vec4 mvC = modelViewMatrix * vec4(aCenter, 1.0);
-  float px = length(aAxisA) / max(-mvC.z, 1e-6) * uScale;
+  float rTrue = length(aAxisA);
+  // drawn larger than it is at large scales (a symbol, like the stars)
+  float k = max(1.0, uExagg * aParams.w / max(rTrue, 1e-6));
+  float px = k * rTrue / max(-mvC.z, 1e-6) * uScale;
   if (a <= 0.0 || px < 1.5 || mvC.z > 0.0) {
     gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
     vAlpha = 0.0;
     return;
   }
-  vec3 p = aCenter + position.x * aAxisA + position.y * aAxisB;
+  vec3 p = aCenter + k * (position.x * aAxisA + position.y * aAxisB);
+  // a symbol (drawn larger than the galaxy) is drawn brighter, so that it reads at a glance
+  vSym = clamp(k - 1.0, 0.0, 1.0);
   gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
   vUv = position.xy;
   vParams = aParams;
@@ -94,6 +133,7 @@ ${noise}
 varying vec2 vUv;
 varying float vAlpha;
 varying vec4 vParams;
+varying float vSym;
 void main() {
   if (vAlpha <= 0.0) discard;
   float r = length(vUv);
@@ -126,7 +166,7 @@ void main() {
     I = exp(-r * 2.0) * (0.45 + 1.8 * c * c);
     col = vec3(0.72, 0.82, 1.0);
   }
-  gl_FragColor = vec4(col, clamp(I * edge * vParams.y * vAlpha, 0.0, 1.0));
+  gl_FragColor = vec4(col, clamp(I * edge * vParams.y * vAlpha * (1.0 + 0.8 * vSym), 0.0, 1.0));
 }
 `;
 
@@ -135,10 +175,12 @@ ${common}
 attribute vec3 aCenter;
 attribute vec3 aMajor;
 attribute vec4 aParams; // radius (ly), axis ratio, brightness, class
+attribute vec2 aSymbol; // symbol factor, true radius of the galaxy (ly)
 varying vec2 vUv;
 varying float vAlpha;
 varying float vCls;
 varying float vPoint;
+varying float vSym;
 void main() {
   float a = sphereFade(aCenter);
   vec4 mv = modelViewMatrix * vec4(aCenter, 1.0);
@@ -148,7 +190,9 @@ void main() {
     vAlpha = 0.0;
     return;
   }
-  float r = aParams.x;
+  float k = max(1.0, uExagg * aSymbol.x / max(aSymbol.y, 1e-6));
+  vSym = clamp(k - 1.0, 0.0, 1.0);
+  float r = aParams.x * k;
   float q = aParams.y;
   float px = r / dist * uScale;
   // smaller than uMinPx: a round glow of that size, as bright as the galaxy would be
@@ -164,7 +208,8 @@ void main() {
   gl_Position = projectionMatrix * mv;
   vUv = position.xy;
   vCls = aParams.w;
-  vAlpha = a * uOpacity * aParams.z;
+  // point-like galaxies in a crowded view are fainter (as the faint stars are in dense regions)
+  vAlpha = a * uOpacity * aParams.z * mix(1.0, uCrowd, vPoint);
 }
 `;
 
@@ -173,6 +218,7 @@ varying vec2 vUv;
 varying float vAlpha;
 varying float vCls;
 varying float vPoint;
+varying float vSym;
 void main() {
   if (vAlpha <= 0.0) discard;
   float r2 = dot(vUv, vUv);
@@ -186,7 +232,7 @@ void main() {
     col = vec3(1.0, 0.85, 0.66);
   } else if (vCls > 3.5 && vCls < 4.5) {
     // dwarf spheroidal: faint and shallow
-    I = exp(-3.0 * r) * 0.55;
+    I = exp(-3.0 * r) * 0.9;
     col = vec3(0.93, 0.87, 0.78);
   } else if (vCls > 2.5 && vCls < 3.5) {
     // irregular: a soft bluish glow
@@ -199,7 +245,7 @@ void main() {
   }
   // a point-like galaxy: a plain glow
   float p = exp(-r2 * 4.0);
-  I = mix(I, p, vPoint);
+  I = mix(I, p, vPoint) * (1.0 + 0.6 * vSym * (1.0 - vPoint));
   gl_FragColor = vec4(col, clamp(I * vAlpha, 0.0, 1.0));
 }
 `;
@@ -208,11 +254,14 @@ void main() {
 // x towards the Galactic Centre as seen from the Sun, y towards l = 90 deg; the Sun at (-26.7, 0).
 const mwVertex = /* glsl */ `
 uniform float uHalf;
+uniform float uK;
 varying vec2 vP;
 void main() {
-  // PlaneGeometry lies in xy; the galactic plane is world xz with galactic y = -world z
+  // PlaneGeometry lies in xy; the galactic plane is world xz with galactic y = -world z; uK: drawn
+  // larger than it is at large scales, like the other galaxies
   vP = position.xy * uHalf / 1000.0;
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(position.x * uHalf, 0.0, -position.y * uHalf, 1.0);
+  float h = uHalf * uK;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position.x * h, 0.0, -position.y * h, 1.0);
 }
 `;
 
@@ -266,15 +315,24 @@ export class GalaxyLayer {
     uScale: { value: 1 },
     uMinPx: { value: 2.5 },
     uOpacity: { value: 1 },
+    uExagg: { value: 0 },
+    uCrowd: { value: 1 },
   };
+  /** Symbol factor per galaxy (galaxySymbolFactor of its luminosity). */
+  private symbol = new Float32Array(0);
+  /** Smoothed density factor (galaxyDensityFactor of the galaxies in view). */
+  private density = 1;
+  private lastInView = 0;
+  private lastUpdate = 0;
   readonly milkyWay: Mesh<PlaneGeometry, ShaderMaterial>;
   // the Galactic Centre (Sgr A*, 8.178 kpc) in world coordinates, until the catalogue says otherwise
   private readonly mwCentre = new Vector3(26673, -21.41, 26.07);
+  private mwIndex = -1;
 
   constructor() {
     this.group.renderOrder = -2;
     const mwMat = new ShaderMaterial({
-      uniforms: { uOpacity: { value: 0 }, uHalf: { value: 60000 } },
+      uniforms: { uOpacity: { value: 0 }, uHalf: { value: 60000 }, uK: { value: 1 } },
       vertexShader: mwVertex,
       fragmentShader: mwFragment,
       side: DoubleSide,
@@ -297,6 +355,8 @@ export class GalaxyLayer {
     this.cat = cat;
     this.group.clear();
     const n = cat.count;
+    this.symbol = new Float32Array(n);
+    for (let i = 0; i < n; i++) this.symbol[i] = galaxySymbolFactor(cat.logL[i]);
     const diskIdx: number[] = [];
     for (let i = 0; i < n; i++) if (isDisk(cat.cls[i]) && !(cat.flags[i] & GalaxyFlag.MODEL)) diskIdx.push(i);
     this.diskIndex = Int32Array.from(diskIdx);
@@ -317,7 +377,7 @@ export class GalaxyLayer {
       const bx = ny * mz - nz * my, by = nz * mx - nx * mz, bz = nx * my - ny * mx;
       axisA.set([mx * r, my * r, mz * r], 3 * k);
       axisB.set([bx * r, by * r, bz * r], 3 * k);
-      dParams.set([cat.cls[i], galaxyBrightness(cat.logL[i]), seedOf(cat, i), 0], 4 * k);
+      dParams.set([cat.cls[i], galaxyBrightness(cat.logL[i]), seedOf(cat, i), this.symbol[i]], 4 * k);
     });
     dg.setAttribute('aCenter', new InstancedBufferAttribute(new Float32Array(3 * m), 3));
     dg.setAttribute('aAxisA', new InstancedBufferAttribute(axisA, 3));
@@ -332,6 +392,7 @@ export class GalaxyLayer {
     gg.setIndex(QUAD_INDEX);
     const gMajor = new Float32Array(3 * n);
     const gParams = new Float32Array(4 * n);
+    const gSymbol = new Float32Array(2 * n);
     for (let i = 0; i < n; i++) {
       const cls = cat.cls[i];
       const whole = cls === GalaxyClass.Elliptical || cls === GalaxyClass.Spheroidal;
@@ -339,10 +400,12 @@ export class GalaxyLayer {
       const radius = whole ? r : cls === GalaxyClass.MilkyWay ? r * 0.12 : r * (cls === GalaxyClass.Irregular ? 0.45 : 0.18);
       gMajor.set([cat.major[3 * i], cat.major[3 * i + 1], cat.major[3 * i + 2]], 3 * i);
       gParams.set([radius, whole ? Math.max(cat.q[i], 0.3) : 1, galaxyBrightness(cat.logL[i]), cls], 4 * i);
+      gSymbol.set([this.symbol[i], r], 2 * i);
     }
     gg.setAttribute('aCenter', new InstancedBufferAttribute(new Float32Array(3 * n), 3));
     gg.setAttribute('aMajor', new InstancedBufferAttribute(gMajor, 3));
     gg.setAttribute('aParams', new InstancedBufferAttribute(gParams, 4));
+    gg.setAttribute('aSymbol', new InstancedBufferAttribute(gSymbol, 2));
     gg.instanceCount = n;
     this.glows = new Mesh(gg, this.material(glowVertex, glowFragment));
     for (const mesh of [this.disks, this.glows]) {
@@ -352,6 +415,7 @@ export class GalaxyLayer {
     }
     // the Milky Way model sits at the first record (the Galactic Centre)
     const mw = [...Array(n).keys()].find((i) => cat.flags[i] & GalaxyFlag.MODEL);
+    this.mwIndex = mw ?? -1;
     if (mw !== undefined) this.mwCentre.set(cat.pos[3 * mw], cat.pos[3 * mw + 1], cat.pos[3 * mw + 2]);
     this.rebase(this.origin, true);
   }
@@ -397,10 +461,22 @@ export class GalaxyLayer {
 
   /**
    * Per frame: the visible sphere (`target`, `radius`), the projection scale (pixels per unit size
-   * at unit distance) and what is shown. `mwOpacity`: the Milky Way model's opacity.
+   * at unit distance) and what is shown. `mwOpacity`: the Milky Way model's opacity; `inView`:
+   * the galaxies in the visible sphere (their symbols shrink when there are many).
    */
-  update(target: Vector3, radius: number, scale: number, pixelRatio: number, show: boolean, mwOpacity: number): void {
+  update(target: Vector3, radius: number, scale: number, pixelRatio: number, show: boolean, mwOpacity: number, inView = 0): void {
     const u = this.uniforms;
+    // eases towards the density factor (the count changes in steps while zooming); a jump (the
+    // first count, a new view) is taken at once
+    const now = performance.now();
+    const goal = galaxyDensityFactor(inView);
+    const jump = inView > 3 * this.lastInView || 3 * inView < this.lastInView;
+    const ease = 1 - Math.exp(-Math.min(now - this.lastUpdate, 1000) / 300);
+    this.density = jump ? goal : this.density + (goal - this.density) * ease;
+    this.lastInView = inView;
+    this.lastUpdate = now;
+    u.uExagg.value = radius * this.density;
+    u.uCrowd.value = galaxyCrowdFactor(inView);
     u.uRadius.value = radius;
     u.uScale.value = scale;
     u.uMinPx.value = 2.2 * pixelRatio;
@@ -414,8 +490,16 @@ export class GalaxyLayer {
     const d = this.mwCentre.distanceTo(target);
     const sphere = 1 - smoothstep(radius * 0.85, radius + 60000, d);
     mat.uniforms.uOpacity.value = mwOpacity * sphere;
+    mat.uniforms.uK.value = this.mwIndex >= 0 ? this.displayScale(this.mwIndex) : 1;
     mw.visible = mat.uniforms.uOpacity.value > 0.001;
     mw.position.copy(this.mwCentre);
+  }
+
+  /** How much larger than its true size galaxy i is drawn now (1: true size). */
+  displayScale(i: number): number {
+    const cat = this.cat;
+    if (!cat) return 1;
+    return galaxyScale(cat.diam[i] / 2, this.symbol[i], this.uniforms.uExagg.value);
   }
 
   /** World position of galaxy i. */

@@ -14,6 +14,8 @@ import {
   parseStored,
   radiusForDistance,
   sliderToStarSize,
+  starDimming,
+  starLabelMode,
   starSizeText,
   starSizeToSlider,
   storedForm,
@@ -31,6 +33,22 @@ describe('stored settings', () => {
     expect(parseStored(JSON.stringify(legacy))).toEqual({ ...DEFAULT_SETTINGS, lang: 'de', grid: false, radius: undefined, labelCount: undefined });
     const changed = { ...legacy, radius: 120 };
     expect(parseStored(JSON.stringify(changed)).radius).toBe(120);
+  });
+
+  it('hides the legend by default', () => {
+    expect(DEFAULT_SETTINGS.legend).toBe(false);
+  });
+
+  it('dims the stars and drops their labels at galaxy scales', () => {
+    expect(starDimming(20)).toBe(1);
+    expect(starDimming(12_000)).toBe(1);
+    expect(starDimming(24_000)).toBeCloseTo(Math.pow(0.5, 2.5), 6);
+    expect(starDimming(150_000)).toBeLessThan(0.002);
+    expect(starDimming(2_000_000)).toBeLessThan(1e-5);
+    expect(starLabelMode(20)).toBe('all');
+    expect(starLabelMode(30_000)).toBe('all');
+    expect(starLabelMode(150_000)).toBe('sun');
+    expect(starLabelMode(2_000_000)).toBe('none');
   });
 
   it('defaults to a 20 ly radius and 30 labels', () => {

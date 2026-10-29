@@ -48,6 +48,8 @@ function jumpLineCss(s: Settings): string {
 /** Legend of the data layers (bottom left), shown while the map is coloured or sized by an attribute. */
 export class Legend {
   readonly root: HTMLElement;
+  /** The × button: hides the legend (the settings panel shows it again). */
+  onClose: () => void = () => {};
 
   constructor(parent: HTMLElement) {
     this.root = el('div', 'legend hidden');
@@ -66,6 +68,12 @@ export class Legend {
     const show = s.legend && (layers || s.jumps || route.shown);
     this.root.classList.toggle('hidden', !show);
     if (!show) return;
+    const close = el('button', 'icon-btn small legend-close', '×');
+    close.type = 'button';
+    close.setAttribute('aria-label', t('closeLegend'));
+    close.title = t('closeLegend');
+    close.addEventListener('click', () => this.onClose());
+    this.root.appendChild(close);
 
     if (color) {
       this.root.appendChild(el('div', 'legend-title', attributeLabel(color)));

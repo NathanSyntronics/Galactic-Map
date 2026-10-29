@@ -115,21 +115,34 @@ designations leave out the primary one). A galaxy without an entry is called "PG
   bulge; an irregular clumpy noise. **Ellipticals and spheroidals** face the camera, with their
   axis ratio along their major axis's projection. Every galaxy also has a small glow facing the
   camera, so that disks seen edge-on stay visible.
+* **Symbols.** Like the stars, galaxies are drawn larger than they are at large scales, so that
+  their distribution shows: a galaxy is drawn with a radius of at least a fraction of the visible
+  radius, 0.065 × 10^(0.18 (log L − 10)) (the Milky Way and Andromeda 9 %, the Large Magellanic
+  Cloud 5 %, a dwarf of log L 5 0.8 %), never smaller than its true size, and a little brighter
+  while it is enlarged. With many galaxies in the visible sphere the symbols shrink by
+  (300 / n)^0.75 (from 300 galaxies on; Cosmicflows-4 views draw nearly all of them as small
+  glows), and the small glows dim by √(2500 / n), down to 0.22. The Milky Way model grows in the
+  same way.
 * A galaxy smaller than 2 pixels on screen is drawn as a 2-pixel glow. Brightness follows the
-  luminosity (log L 7 → faint, 11 → full), colours the class (spiral disks blue-white with a
-  yellow bulge, ellipticals and lenticulars warm, irregulars blue, spheroidals pale).
+  luminosity (log L 6.45 and below → 0.35, 11 → full), colours the class (spiral disks blue-white
+  with a yellow bulge, ellipticals and lenticulars warm, irregulars blue, spheroidals pale).
 * **The Milky Way model:** a disk of 100,000 ly with a bar (half length 16,000 ly, 27° from the
   Sun–centre line) and four arms (logarithmic, pitch 12°; two major ones, Scutum-Centaurus and
   Perseus, and two minor ones) plus the Local Arm, which passes the Sun; a stylised picture, not
   data. It fades in as the visible radius grows from 4,000 to
   30,000 ly; the stars stay drawn over it.
+* **The stars at galaxy scales:** above a visible radius of 12,000 ly the stars fade
+  (radius^-2.5), so that the known stars (a few thousand light years around the Sun), crowding into
+  fewer and fewer pixels, do not outshine the Milky Way model and the galaxies. Star labels: from
+  a radius of 50,000 ly only the Sun, from 500,000 ly none (the selected star keeps its label).
 * Setting *Galaxies* (on) shows them, *Milky Way model* (on) the model.
 
 ### Labels, picking, card, search
 
 * Named galaxies (rank < 99) in the visible sphere are label candidates, ranked by name rank and
   luminosity; the Milky Way is labelled at its centre while the model is shown.
-* A click picks a star first (as before); otherwise the galaxy whose ellipse on screen contains
+* A click picks a star first (as before); otherwise the galaxy whose ellipse on screen (as drawn,
+  enlarged at large scales) contains
   the pointer (or within 6 px of a small one), the smallest of several.
 * The galaxy card shows name (and German name), class, distance with error and method, the
   catalogues, diameter, luminosity, Local Group membership and the designations; *Centre view

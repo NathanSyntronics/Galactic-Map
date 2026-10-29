@@ -75,7 +75,7 @@ export const DEFAULT_SETTINGS: Settings = {
   colorBy: '',
   sizeBy: '',
   missingStyle: 'dim',
-  legend: true,
+  legend: false,
   jumps: true,
   jumpRange: 9,
   jumpFaint: 2,
@@ -127,6 +127,24 @@ export const AUTO_RADIUS_STEP = 0.01;
 export function radiusForDistance(distance: number): number {
   const r = Math.min(Math.max(distance / AUTO_RADIUS_RATIO, RADIUS_MIN), RADIUS_MAX);
   return Number(r.toPrecision(3));
+}
+
+/** Up to this visible radius the stars are drawn at full brightness (see starDimming). */
+export const STAR_DIM_RADIUS = 12_000;
+
+/**
+ * Brightness factor of the stars for a visible radius: 1 up to STAR_DIM_RADIUS, then falling
+ * steeply (radius^-2.5). The known stars fill a few thousand light years around the Sun; zoomed
+ * out further they crowd into fewer and fewer pixels and would outshine the Milky Way and the
+ * galaxies.
+ */
+export function starDimming(radius: number): number {
+  return radius <= STAR_DIM_RADIUS ? 1 : Math.pow(STAR_DIM_RADIUS / radius, 2.5);
+}
+
+/** Which stars are labelled at a visible radius: all, only the Sun (from 50,000 ly), none (from 500,000 ly). */
+export function starLabelMode(radius: number): 'all' | 'sun' | 'none' {
+  return radius > 500_000 ? 'none' : radius > 50_000 ? 'sun' : 'all';
 }
 
 /** Camera distance that shows a radius (radius follows zoom). */

@@ -58,6 +58,8 @@ import {
   distanceForRadius,
   followZoom,
   type Settings,
+  starDimming,
+  starLabelMode,
 } from './settings';
 import { AttributesDialog } from './ui/attributes-dialog';
 import { InfoPanel, displayName, type JumpListing, type StarInfo } from './ui/info';
@@ -303,6 +305,7 @@ export class App {
     this.catchSecondTap(stack);
     this.routeBox = new RouteBox(stack);
     this.legend = new Legend(stack);
+    this.legend.onClose = () => this.store.set({ legend: false });
     this.planner = new RoutePlanner<OctreeNode>(
       {
         root: () => this.octree?.root ?? null,
@@ -712,7 +715,8 @@ export class App {
     const u = this.starfield.material.uniforms;
     u.uRadius.value = s.radius;
     u.uSizeMul.value = s.starSize;
-    u.uBrightness.value = s.brightness;
+    // zoomed out to galaxy scales the stars fade (they would outshine the Milky Way)
+    u.uBrightness.value = s.brightness * starDimming(s.radius);
     this.grid.visible = s.grid;
     this.dropLines.lines.visible = s.dropLines && s.labels;
     this.jumpLines.visible = s.jumps && !this.routeOnly;
@@ -849,7 +853,7 @@ export class App {
   /** Per frame: loads the galaxies when the view reaches galaxy scales, and draws them. */
   private updateGalaxies(s: Settings, scale: number): void {
     if ((s.galaxies || s.milkyWay) && s.radius > 20_000) void this.ensureGalaxies();
-    this.galaxyLayer.update(this.nav.target, s.radius, scale, this.renderer.getPixelRatio(), s.galaxies, s.milkyWay ? milkyWayOpacity(s.radius) : 0);
+    this.galaxyLayer.update(this.nav.target, s.radius, scale, this.renderer.getPixelRatio(), s.galaxies, s.milkyWay ? milkyWayOpacity(s.radius) : 0, this.galaxiesInView);
   }
 
   /** Label candidates of the named galaxies in the visible sphere (and the Milky Way at its centre). */
@@ -932,7 +936,8 @@ export class App {
       if (cw <= 0) continue;
       const sx = ((m[0] * x + m[4] * y + m[8] * z + m[12]) / cw * 0.5 + 0.5) * w;
       const sy = (1 - ((m[1] * x + m[5] * y + m[9] * z + m[13]) / cw * 0.5 + 0.5)) * h;
-      const size = ((cat.diam[i] / 2) / cw) * pxPerUnit;
+      // as drawn: larger than the galaxy at large scales
+      const size = ((cat.diam[i] / 2) * this.galaxyLayer.displayScale(i) / cw) * pxPerUnit;
       const reach = Math.max(size, radiusPx);
       if (Math.hypot(sx - mx, sy - my) > reach) continue;
       if (size < bestSize) {
@@ -979,7 +984,9 @@ export class App {
     // the best named stars and unnamed stars by label priority, among those on screen (a large
     // view holds tens of thousands of named stars; candidates are rebuilt after each view change)
     const named = new TopK<{ d: NodeData; i: number; size: number }>(namedCandidateLimit(s.labelCount));
-    const unnamed = new TopK<{ d: NodeData; i: number; size: number }>(s.labelDesignations ? Math.min(s.labelCount, 200) : 0);
+    // zoomed out to galaxy scales: only the Sun is labelled, then no star at all
+    const labelMode = starLabelMode(s.radius);
+    const unnamed = new TopK<{ d: NodeData; i: number; size: number }>(s.labelDesignations && labelMode === 'all' ? Math.min(s.labelCount, 200) : 0);
     const vp = this.viewProj.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse).elements;
 
     const tx = target.x;
@@ -1003,8 +1010,10 @@ export class App {
         if (dx * dx + dy * dy + dz * dz > r2) continue;
         if (rn.sizes[i] <= 0) continue;
         inView++;
-        const name = d.names.get(i);
+        if (labelMode === 'none') continue;
         const sun = (d.flags[i] & Flag.SUN) !== 0;
+        if (labelMode === 'sun' && !sun) continue;
+        const name = d.names.get(i);
         if (!name && !sun && unnamed.k === 0) continue;
         if (!sun && !onScreen(vp, x, y, z)) continue;
         const ex = x - cx;

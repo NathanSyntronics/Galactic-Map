@@ -11,7 +11,7 @@ import {
   type GalaxyMeta,
 } from '../../src/data/galaxies';
 import { formatLy, setLang } from '../../src/i18n';
-import { galaxyBrightness, milkyWayOpacity } from '../../src/render/galaxies';
+import { galaxyBrightness, galaxyCrowdFactor, galaxyDensityFactor, galaxyScale, galaxySymbolFactor, milkyWayOpacity } from '../../src/render/galaxies';
 import { scientific } from '../../src/ui/galaxy-card';
 
 // setLang marks the page language
@@ -163,8 +163,32 @@ describe('galaxy scales', () => {
     expect(milkyWayOpacity(30000)).toBe(1);
     expect(milkyWayOpacity(17000)).toBeGreaterThan(0.4);
     expect(galaxyBrightness(11.5)).toBe(1);
-    expect(galaxyBrightness(5)).toBe(0.15);
-    expect(galaxyBrightness(9)).toBeCloseTo(0.5, 6);
+    expect(galaxyBrightness(3)).toBe(0.35);
+    expect(galaxyBrightness(7.5)).toBeCloseTo(0.5, 6);
     expect(galaxyBrightness(NaN)).toBeGreaterThan(0);
+  });
+
+  it('draws galaxies as symbols larger than they are at large scales, the luminous ones larger', () => {
+    // a fraction of the visible radius: 9 % for the Milky Way and Andromeda, less for dwarfs
+    expect(galaxySymbolFactor(10.8)).toBeCloseTo(0.09, 2);
+    expect(galaxySymbolFactor(10.8)).toBeGreaterThan(galaxySymbolFactor(9.4));
+    expect(galaxySymbolFactor(5)).toBeLessThan(0.01);
+    expect(galaxySymbolFactor(NaN)).toBe(galaxySymbolFactor(8));
+    // Andromeda (radius 67,500 ly) in a view of 2 million ly: about 2.6 times its size
+    const k = galaxyScale(67_500, galaxySymbolFactor(10.73), 2_000_000 * galaxyDensityFactor(80));
+    expect(k).toBeGreaterThan(2.3);
+    expect(k).toBeLessThan(3);
+    // close up: its true size
+    expect(galaxyScale(67_500, galaxySymbolFactor(10.73), 100_000)).toBe(1);
+    // thousands of galaxies in view: the symbols shrink
+    expect(galaxyDensityFactor(50)).toBe(1);
+    expect(galaxyDensityFactor(300)).toBe(1);
+    expect(galaxyDensityFactor(4800)).toBeCloseTo(0.125, 6);
+    expect(galaxyDensityFactor(56_000)).toBeCloseTo(0.0197, 3);
+    expect(galaxyDensityFactor(1e6)).toBe(0.01);
+    // and the small glows dim
+    expect(galaxyCrowdFactor(800)).toBe(1);
+    expect(galaxyCrowdFactor(10_000)).toBeCloseTo(0.5, 6);
+    expect(galaxyCrowdFactor(56_000)).toBe(0.22);
   });
 });

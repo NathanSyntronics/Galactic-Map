@@ -808,15 +808,23 @@ label.check input {
 /* ---------------------------------------------------------------- legend */
 
 .legend {
+  position: relative;
   flex: none;
   max-width: min(240px, calc(100vw - 24px));
-  padding: 8px 10px;
+  padding: 8px 34px 8px 10px;
   background: var(--surface);
   backdrop-filter: blur(8px);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   font-size: 12px;
   pointer-events: none;
+}
+
+.legend-close {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  pointer-events: auto;
 }
 
 .legend-title {

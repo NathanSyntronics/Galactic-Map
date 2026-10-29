@@ -45,8 +45,10 @@ An interactive 3-D map of the Sun's stellar neighbourhood, built from real star 
   Betelgeuse it takes 114 jumps.
 * **Galaxies.** Zoom out past the Milky Way (a stylised model with bar and spiral arms) to the
   Local Group, the Local Volume and the 55,877 galaxies of Cosmicflows-4, out to about 1.5 billion
-  light years: every galaxy whose distance is measured independently of its redshift, at its
-  true size and orientation, with English and German names ([`docs/GALAXIES.md`](docs/GALAXIES.md)).
+  light years: every galaxy whose distance is measured independently of its redshift, in its
+  true orientation and, like the stars, drawn larger than it is when zoomed out (the more
+  luminous, the larger), with English and German names ([`docs/GALAXIES.md`](docs/GALAXIES.md)).
+  At these scales the stars fade and only the Sun keeps its label.
 * **English and German**, switchable in the settings.
 
 ## Using the map
@@ -112,7 +114,8 @@ Under *Data layers* in the settings, the star colours and sizes can follow any a
 Numbers are drawn on a colour scale (four palettes, adjustable range, optionally logarithmic or
 reversed) and can set the symbol size; text values get one colour per value; colour attributes
 (`#rrggbb`) colour each star directly. Stars without a value are drawn grey and small, hidden, or
-as usual. A legend explains the colours.
+as usual. A legend explains the colours (hidden at first: *Show legend* in the settings shows
+it, its × hides it again).
 
 **Attributes** are managed under *Attributes & CSV…*: each has a name, a type (text, number,
 colour) and optionally *whole system*: a value given to one star then applies to all stars of its
