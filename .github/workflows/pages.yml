@@ -46,6 +46,12 @@ jobs:
         working-directory: pipeline
         run: python -m galmap.build --out ../public/data
 
+      # Planets (docs/PLANETS.md): their hosts are found among the stars just built.
+      - name: Build planet data
+        working-directory: pipeline
+        continue-on-error: true
+        run: python -m galmap.planets --data ../public/data
+
       # Galaxies (docs/GALAXIES.md). Without them the map still works (stars only).
       - name: Build galaxy data
         working-directory: pipeline
