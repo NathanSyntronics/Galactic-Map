@@ -339,7 +339,8 @@ def write(rows: list[dict], stars: pd.DataFrame, out: Path) -> dict:
         if k not in hosts:
             s = stars.iloc[k]
             hosts[k] = {"i": len(hosts), "path": str(s["path"]), "index": int(s["index"]), "name": r["host"],
-                        "pos": [_r(s["x"], 6), _r(s["y"], 6), _r(s["z"], 6)], "planets": 0}
+                        # exactly the float32 values of the node (the app draws the star there)
+                        "pos": [float(s["x"]), float(s["y"]), float(s["z"])], "planets": 0}
         h = hosts[k]
         h["planets"] += 1
         planets.append([

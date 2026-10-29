@@ -24,6 +24,7 @@ from .names import GREEK, designation_key, letters_conflict, split_component
 from .octree import write_dataset
 from .photometry import MAMAJEK_URL, Photometry, load_mamajek
 from .sources import athyg, census20, exoplanets, gaia, gcns, hyg, iau, simbad, wikidata
+from . import binaries
 
 log = logging.getLogger("galmap.build")
 
@@ -289,6 +290,11 @@ def build(
     s = derive.physics(s, phot)
     s = systems.assign_systems(s)
     derive.place(s, systems.common_distances(s))
+    # components at one position: separated by their orbits where ORB6 has them
+    try:
+        binaries.separate(s, binaries.load(refresh))
+    except Exception as err:  # the map works without it (the pairs stay together)
+        log.warning("ORB6 unavailable, close pairs stay at one position: %s", err)
     ext: dict[int, dict] = {}
     for i, lst in sb_idents.items():
         ext.setdefault(i, {})["simbad"] = lst
@@ -343,6 +349,7 @@ def build(
         (simbad.SOURCE_INFO, None),
         (wikidata.SOURCE_INFO, None),
         (exoplanets.SOURCE_INFO, None),
+        (binaries.SOURCE_INFO, None),
         (MAMAJEK_INFO, None),
     ):
         entry = dict(info)
