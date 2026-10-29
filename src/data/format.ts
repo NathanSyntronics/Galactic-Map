@@ -21,6 +21,8 @@ export const Flag = {
   GIANT: 1 << 11,
   VARIABLE: 1 << 12,
   SRC_GAIA: 1 << 13,
+  /** A planet host from the NASA Exoplanet Archive that no other catalogue has. */
+  SRC_EXOPLANET: 1 << 14,
 } as const;
 
 export const DesigCat = {

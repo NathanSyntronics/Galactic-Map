@@ -249,6 +249,8 @@ export class App {
   private planetLoad: Promise<PlanetCatalogue | null> | null = null;
   private planetSearchAdded = false;
   private selectedPlanet: number | null = null;
+  /** A star picked in the search whose node was not loaded: flown to at its rounded position. */
+  private searchTarget: { hit: SearchHit; pos: Vector3 } | null = null;
   private planetCard!: PlanetCard;
   /** The date the planets are drawn for: `jd` at the moment `ms`, advancing `speed` days per second. */
   private readonly planetClock = { jd: julianDate(Date.now()), ms: performance.now(), speed: 0 };
@@ -795,7 +797,14 @@ export class App {
       this.loadingEl.classList.add('hidden');
     }
     if (this.pendingSelect && this.pendingSelect.path === node.path) {
-      this.select(this.starInfo(data, this.pendingSelect.index));
+      const pending = this.pendingSelect;
+      const info = this.starInfo(data, pending.index);
+      this.select(info);
+      // the flight went to the search index's rounded position: on to the exact one, unless the
+      // view has been moved since
+      const t = this.searchTarget;
+      if (t && t.hit === pending) this.nav.retarget(t.pos, info.pos, 0.002);
+      this.searchTarget = null;
     }
     this.planner.nodeArrived();
   }
@@ -1732,10 +1741,14 @@ export class App {
     const s = this.store.get();
     // a fixed radius: close enough to see the sphere; radius follows zoom: the zoom stays
     const dist = MathUtils.clamp(this.nav.distance, distanceForRadius(RADIUS_MIN), s.autoRadius ? Infinity : Math.max(s.radius * 1.8, 10));
-    this.nav.flyTo(hit.pos, dist);
     const data = this.loader?.get(hit.path);
-    if (data) {
-      this.select(this.starInfo(data, hit.index));
+    // the index's positions are rounded to 0.001 ly: the node's exact one where it is loaded
+    // (close up, a few AU across, the rounded one would miss the star)
+    const info = data ? this.starInfo(data, hit.index) : null;
+    this.nav.flyTo(info?.pos ?? hit.pos, dist);
+    this.searchTarget = info ? null : { hit, pos: hit.pos.clone() };
+    if (info) {
+      this.select(info);
     } else if (this.loader && !this.loader.hasFailed(hit.path)) {
       this.pendingSelect = hit;
       // make sure the node gets loaded even if the LOD would not choose it yet (in a large

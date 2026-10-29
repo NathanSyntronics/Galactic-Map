@@ -215,6 +215,24 @@ export class Navigation {
     this.flight = flight;
   }
 
+  /**
+   * Moves the destination of the running flight (or of a short new one) to `point`, if the flight
+   * goes to `from` or, without one, the view centre is within `tolerance` of it: a target that
+   * turned out a little off (a rounded position) is corrected without a second flight.
+   */
+  retarget(from: Vector3, point: Vector3, tolerance: number): boolean {
+    const f = this.flight;
+    if (f && f.toTarget.distanceTo(from) <= tolerance) {
+      f.toTarget.copy(point);
+      return true;
+    }
+    if (!f && this.controls.target.distanceTo(from) <= tolerance) {
+      this.flyTo(point);
+      return true;
+    }
+    return false;
+  }
+
   /** Sets the camera distance at once, keeping the view centre and direction (a running flight keeps its target). */
   setDistance(distance: number): void {
     const c = this.controls;

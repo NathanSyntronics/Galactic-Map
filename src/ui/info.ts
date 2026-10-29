@@ -438,5 +438,6 @@ function sourceText(flags: number): string {
   if (flags & Flag.SRC_ATHYG) s.push('AT-HYG');
   if (flags & Flag.SRC_HYG) s.push('HYG');
   if (flags & Flag.SRC_GAIA) s.push('Gaia DR3');
+  if (flags & Flag.SRC_EXOPLANET) s.push('NASA Exoplanet Archive');
   return s.join(', ') || '–';
 }
