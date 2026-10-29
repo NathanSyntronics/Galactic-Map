@@ -268,7 +268,9 @@ Array of named stars (rank ≤ 7):
 ]
 ```
 
-Coordinates in ly, rounded to 0.001. `designation` is the star's primary designation exactly as
+Coordinates in ly, rounded to 0.001 (the app flies to a picked star's exact position from its node
+once that is loaded). The alt designations leave out the primary designation (the search finds the
+star by it all the same). `designation` is the star's primary designation exactly as
 `designationOf()` renders it from the node data; it is unique over the whole dataset and is the key
 under which the web app stores user data for the star. `systemId` is the star's system (`-1` for
 single stars).

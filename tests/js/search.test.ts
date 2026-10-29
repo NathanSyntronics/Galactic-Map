@@ -109,3 +109,13 @@ describe('SearchIndex', () => {
     expect(idx.find('HIP 78372')?.[3]).toBe(1);
   });
 });
+
+describe('the primary designation', () => {
+  it('finds a star by its designation also when the other designations do not repeat it', () => {
+    const idx = new SearchIndex();
+    idx.load([['Acamar', null, 'r1', 20, 0, 0, 0, 0, ['Theta¹ Eridani', 'HD 18622'], 'HR 897', 3198]]);
+    expect(idx.query('HR 897')[0]?.nameEn).toBe('Acamar');
+    expect(idx.query('HR 897')[0]?.matched).toBe('HR 897');
+    expect(idx.find('HR 897')?.[0]).toBe('Acamar');
+  });
+});

@@ -74,6 +74,17 @@ const GENERIC_SUFFIXES = new Set([
   'nebel',
 ]);
 
+/**
+ * The names an entry is found by, in this order: the displayed names (English, German), the other
+ * designations, and the primary designation (search.json no longer repeats it among the others).
+ */
+export function searchNames(tuple: SearchTuple): string[] {
+  const [en, de, , , , , , , alt, designation] = tuple;
+  const names = [en, ...(de ? [de] : []), ...(alt ?? [])];
+  if (designation && !names.includes(designation)) names.push(designation);
+  return names;
+}
+
 export class SearchIndex {
   private entries: Entry[] = [];
   /** Exact-key lookup (normalised name or designation -> entry), built on first use. */
@@ -86,11 +97,7 @@ export class SearchIndex {
     this.exact = null;
     this.clashes = null;
     this.byDesignation = null;
-    this.entries = tuples.map((tuple) => {
-      const [en, de, , , x, y, z, , alt] = tuple;
-      const keys = [en, ...(de ? [de] : []), ...(alt ?? [])].map(normalize);
-      return { tuple, keys, pos: galacticToWorld(x, y, z) };
-    });
+    this.entries = tuples.map((tuple) => ({ tuple, keys: searchNames(tuple).map(normalize), pos: galacticToWorld(tuple[4], tuple[5], tuple[6]) }));
   }
 
   /** Adds entries (e.g. the galaxies, when they are loaded). */
@@ -98,11 +105,7 @@ export class SearchIndex {
     this.exact = null;
     this.clashes = null;
     this.byDesignation = null;
-    for (const tuple of tuples) {
-      const [en, de, , , x, y, z, , alt] = tuple;
-      const keys = [en, ...(de ? [de] : []), ...(alt ?? [])].map(normalize);
-      this.entries.push({ tuple, keys, pos: galacticToWorld(x, y, z) });
-    }
+    for (const tuple of tuples) this.entries.push({ tuple, keys: searchNames(tuple).map(normalize), pos: galacticToWorld(tuple[4], tuple[5], tuple[6]) });
   }
 
   get size(): number {
@@ -198,11 +201,7 @@ export class SearchIndex {
       hits.push({ e, score: best * 100 + shownBonus - e.tuple[7] * 5 - e.keys[0].length * 0.1, key: bestKey });
     }
     hits.sort((a, b) => b.score - a.score);
-    return hits.slice(0, limit).map(({ e, key }) => {
-      const [en, de, , , , , , , alt] = e.tuple;
-      const names = [en, ...(de ? [de] : []), ...(alt ?? [])];
-      return hitOf(e.tuple, names[key], e.pos);
-    });
+    return hits.slice(0, limit).map(({ e, key }) => hitOf(e.tuple, searchNames(e.tuple)[key], e.pos));
   }
 }
 

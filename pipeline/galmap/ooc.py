@@ -461,7 +461,9 @@ class OctreeWriter:
             if not isinstance(en, str) or not en:
                 continue
             de = cols["name_de"][gi]
-            a = cols["alt"][gi]
+            desig = designation_text(int(cols["desig_cat"][gi]), int(cols["desig_lo"][gi]), int(cols["desig_hi"][gi]), cols["desig_str"][gi])
+            # (the primary designation has a field of its own: not repeated among the others)
+            a = [v for v in cols["alt"][gi] if v != desig] if isinstance(cols["alt"][gi], (list, tuple)) else None
             x, y, z = (round(float(v), 3) for v in cols["xyz"][gi])
             self.search.append(
                 [
@@ -473,8 +475,8 @@ class OctreeWriter:
                     y,
                     z,
                     int(rank[gi]),
-                    list(a) if isinstance(a, (list, tuple)) and len(a) else None,
-                    designation_text(int(cols["desig_cat"][gi]), int(cols["desig_lo"][gi]), int(cols["desig_hi"][gi]), cols["desig_str"][gi]),
+                    a or None,
+                    desig,
                     int(cols["system_id"][gi]),
                 ]
             )
