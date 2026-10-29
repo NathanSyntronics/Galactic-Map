@@ -52,6 +52,24 @@ describe('SearchIndex', () => {
     expect(idx.query('rigil kentaurus')[0].nameEn).toBe('Alpha Centauri A');
   });
 
+  it('puts a name plus a generic word (Galaxy, Dwarf) before longer names', () => {
+    const idx = new SearchIndex();
+    idx.load([
+      ['Andromeda I', null, 'g', 1, 0, 0, 0, 0, ['And I']],
+      ['Andromeda II', null, 'g', 2, 0, 0, 0, 0],
+      ['Andromeda Galaxy', 'Andromedagalaxie', 'g', 3, 0, 0, 0, 0, ['M 31', 'NGC 224']],
+      ['Sculptor Dwarf Galaxy', 'Sculptor-Zwerggalaxie', 'g', 4, 0, 0, 0, 0, ['Sculptor']],
+      ['Sculptor Galaxy', 'Sculptor-Galaxie', 'g', 5, 0, 0, 0, 0, ['NGC 253']],
+      ['Fornax Dwarf', 'Fornax-Zwerggalaxie', 'g', 6, 0, 0, 0, 0],
+      ['Fornax II', null, 'g', 7, 0, 0, 0, 0],
+    ]);
+    expect(idx.query('Andromeda').map((h) => h.nameEn).slice(0, 2)).toEqual(['Andromeda Galaxy', 'Andromeda I']);
+    expect(idx.query('andromed')[0].nameEn).toBe('Andromeda I');
+    expect(idx.query('Sculptor').map((h) => h.nameEn)).toEqual(['Sculptor Galaxy', 'Sculptor Dwarf Galaxy']);
+    expect(idx.query('Fornax')[0].nameEn).toBe('Fornax Dwarf');
+    expect(idx.query('Andromeda II')[0].nameEn).toBe('Andromeda II');
+  });
+
   it('still finds German names and alternative designations', () => {
     expect(first('wega')).toBe('Vega');
     expect(first('55 Cnc'.replace('Cnc', 'Cancri'))).toBe('Rho¹ Cancri');

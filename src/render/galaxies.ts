@@ -69,6 +69,9 @@ function seedOf(cat: GalaxyCatalogue, i: number): number {
   return ((h >>> 0) % 10007) / 10007;
 }
 
+/** Galaxies within this many visible radii of the view centre are drawn (see GalaxyLayer.cull). */
+const CULL_MARGIN = 1.15;
+
 const isDisk = (cls: number) => cls === GalaxyClass.Spiral || cls === GalaxyClass.Lenticular || cls === GalaxyClass.Irregular;
 
 const common = /* glsl */ `
@@ -306,7 +309,24 @@ export class GalaxyLayer {
   private cat: GalaxyCatalogue | null = null;
   private disks: Mesh<InstancedBufferGeometry, ShaderMaterial> | null = null;
   private glows: Mesh<InstancedBufferGeometry, ShaderMaterial> | null = null;
-  private diskIndex = new Int32Array(0);
+  /**
+   * Instance data of every galaxy (glows) and of every disk galaxy (disks; diskSlot: galaxy ->
+   * its disk's index, -1 for none). Only the galaxies near the visible sphere are copied into the
+   * instance buffers (see cull): drawing all 56,000 every frame cost most of the frame time.
+   */
+  private src: {
+    gMajor: Float32Array;
+    gParams: Float32Array;
+    gSymbol: Float32Array;
+    dAxisA: Float32Array;
+    dAxisB: Float32Array;
+    dParams: Float32Array;
+    diskSlot: Int32Array;
+  } | null = null;
+  /** The visible radius of the last cull (0: none yet); the view centre of the last cull is the origin. */
+  private cullRadius = 0;
+  /** Instances in the buffers (glows, disks). */
+  private counts = { glows: 0, disks: 0 };
   private readonly origin = new Vector3();
   private readonly uniforms = {
     uTargetRel: { value: new Vector3() },
@@ -358,8 +378,13 @@ export class GalaxyLayer {
     this.symbol = new Float32Array(n);
     for (let i = 0; i < n; i++) this.symbol[i] = galaxySymbolFactor(cat.logL[i]);
     const diskIdx: number[] = [];
-    for (let i = 0; i < n; i++) if (isDisk(cat.cls[i]) && !(cat.flags[i] & GalaxyFlag.MODEL)) diskIdx.push(i);
-    this.diskIndex = Int32Array.from(diskIdx);
+    const diskSlot = new Int32Array(n).fill(-1);
+    for (let i = 0; i < n; i++) {
+      if (isDisk(cat.cls[i]) && !(cat.flags[i] & GalaxyFlag.MODEL)) {
+        diskSlot[i] = diskIdx.length;
+        diskIdx.push(i);
+      }
+    }
 
     // disks
     const dg = new InstancedBufferGeometry();
@@ -380,10 +405,10 @@ export class GalaxyLayer {
       dParams.set([cat.cls[i], galaxyBrightness(cat.logL[i]), seedOf(cat, i), this.symbol[i]], 4 * k);
     });
     dg.setAttribute('aCenter', new InstancedBufferAttribute(new Float32Array(3 * m), 3));
-    dg.setAttribute('aAxisA', new InstancedBufferAttribute(axisA, 3));
-    dg.setAttribute('aAxisB', new InstancedBufferAttribute(axisB, 3));
-    dg.setAttribute('aParams', new InstancedBufferAttribute(dParams, 4));
-    dg.instanceCount = m;
+    dg.setAttribute('aAxisA', new InstancedBufferAttribute(new Float32Array(3 * m), 3));
+    dg.setAttribute('aAxisB', new InstancedBufferAttribute(new Float32Array(3 * m), 3));
+    dg.setAttribute('aParams', new InstancedBufferAttribute(new Float32Array(4 * m), 4));
+    dg.instanceCount = 0;
     this.disks = new Mesh(dg, this.material(diskVertex, diskFragment));
 
     // glows: every galaxy (ellipticals and spheroidals: the galaxy itself; disks: their bulge)
@@ -403,10 +428,11 @@ export class GalaxyLayer {
       gSymbol.set([this.symbol[i], r], 2 * i);
     }
     gg.setAttribute('aCenter', new InstancedBufferAttribute(new Float32Array(3 * n), 3));
-    gg.setAttribute('aMajor', new InstancedBufferAttribute(gMajor, 3));
-    gg.setAttribute('aParams', new InstancedBufferAttribute(gParams, 4));
-    gg.setAttribute('aSymbol', new InstancedBufferAttribute(gSymbol, 2));
-    gg.instanceCount = n;
+    gg.setAttribute('aMajor', new InstancedBufferAttribute(new Float32Array(3 * n), 3));
+    gg.setAttribute('aParams', new InstancedBufferAttribute(new Float32Array(4 * n), 4));
+    gg.setAttribute('aSymbol', new InstancedBufferAttribute(new Float32Array(2 * n), 2));
+    gg.instanceCount = 0;
+    this.src = { gMajor, gParams, gSymbol, dAxisA: axisA, dAxisB: axisB, dParams, diskSlot };
     this.glows = new Mesh(gg, this.material(glowVertex, glowFragment));
     for (const mesh of [this.disks, this.glows]) {
       mesh.frustumCulled = false;
@@ -417,7 +443,8 @@ export class GalaxyLayer {
     const mw = [...Array(n).keys()].find((i) => cat.flags[i] & GalaxyFlag.MODEL);
     this.mwIndex = mw ?? -1;
     if (mw !== undefined) this.mwCentre.set(cat.pos[3 * mw], cat.pos[3 * mw + 1], cat.pos[3 * mw + 2]);
-    this.rebase(this.origin, true);
+    // the next update culls
+    this.cullRadius = 0;
   }
 
   private material(vertexShader: string, fragmentShader: string): ShaderMaterial {
@@ -434,29 +461,72 @@ export class GalaxyLayer {
     });
   }
 
-  /** Moves the origin of the float32 positions to `o` (when the view has moved far from it). */
-  private rebase(o: Vector3, force = false): void {
+  /**
+   * Copies the galaxies within CULL_MARGIN visible radii of the view centre into the instance
+   * buffers, with positions relative to the view centre (the new origin: float32 keeps them precise
+   * at hundreds of millions of light years; three.js combines the group's matrix and the camera's
+   * in double precision).
+   */
+  private cull(target: Vector3, radius: number): void {
     const cat = this.cat;
-    if (!cat || !this.disks || !this.glows) return;
-    if (!force && o.equals(this.origin)) return;
-    this.origin.copy(o);
-    this.group.position.copy(o);
-    const dc = this.disks.geometry.getAttribute('aCenter') as InstancedBufferAttribute;
-    const gc = this.glows.geometry.getAttribute('aCenter') as InstancedBufferAttribute;
-    const da = dc.array as Float32Array;
-    const ga = gc.array as Float32Array;
+    const src = this.src;
+    if (!cat || !src || !this.disks || !this.glows) return;
+    this.origin.copy(target);
+    this.group.position.copy(target);
+    this.cullRadius = radius;
+    const reach = radius * CULL_MARGIN;
+    const r2 = reach * reach;
+    const g = this.glows.geometry;
+    const d = this.disks.geometry;
+    const buf = (geo: InstancedBufferGeometry, name: string) => (geo.getAttribute(name) as InstancedBufferAttribute).array as Float32Array;
+    const gc = buf(g, 'aCenter'), gm = buf(g, 'aMajor'), gp = buf(g, 'aParams'), gs = buf(g, 'aSymbol');
+    const dc = buf(d, 'aCenter'), da = buf(d, 'aAxisA'), db = buf(d, 'aAxisB'), dp = buf(d, 'aParams');
+    const p = cat.pos;
+    const ox = target.x, oy = target.y, oz = target.z;
+    let ng = 0;
+    let nd = 0;
     for (let i = 0; i < cat.count; i++) {
-      ga[3 * i] = cat.pos[3 * i] - o.x;
-      ga[3 * i + 1] = cat.pos[3 * i + 1] - o.y;
-      ga[3 * i + 2] = cat.pos[3 * i + 2] - o.z;
+      const x = p[3 * i] - ox, y = p[3 * i + 1] - oy, z = p[3 * i + 2] - oz;
+      if (x * x + y * y + z * z > r2) continue;
+      gc[3 * ng] = x;
+      gc[3 * ng + 1] = y;
+      gc[3 * ng + 2] = z;
+      for (let j = 0; j < 3; j++) gm[3 * ng + j] = src.gMajor[3 * i + j];
+      for (let j = 0; j < 4; j++) gp[4 * ng + j] = src.gParams[4 * i + j];
+      gs[2 * ng] = src.gSymbol[2 * i];
+      gs[2 * ng + 1] = src.gSymbol[2 * i + 1];
+      ng++;
+      const k = src.diskSlot[i];
+      if (k >= 0) {
+        dc[3 * nd] = x;
+        dc[3 * nd + 1] = y;
+        dc[3 * nd + 2] = z;
+        for (let j = 0; j < 3; j++) {
+          da[3 * nd + j] = src.dAxisA[3 * k + j];
+          db[3 * nd + j] = src.dAxisB[3 * k + j];
+        }
+        for (let j = 0; j < 4; j++) dp[4 * nd + j] = src.dParams[4 * k + j];
+        nd++;
+      }
     }
-    this.diskIndex.forEach((i, k) => {
-      da[3 * k] = ga[3 * i];
-      da[3 * k + 1] = ga[3 * i + 1];
-      da[3 * k + 2] = ga[3 * i + 2];
-    });
-    dc.needsUpdate = true;
-    gc.needsUpdate = true;
+    const upload = (geo: InstancedBufferGeometry, n: number) => {
+      geo.instanceCount = n;
+      for (const name of Object.keys(geo.attributes)) {
+        if (name === 'position') continue;
+        const a = geo.getAttribute(name) as InstancedBufferAttribute;
+        a.clearUpdateRanges();
+        a.addUpdateRange(0, Math.max(n, 1) * a.itemSize);
+        a.needsUpdate = true;
+      }
+    };
+    upload(g, ng);
+    upload(d, nd);
+    this.counts = { glows: ng, disks: nd };
+  }
+
+  /** Galaxies in the instance buffers now (glows: all of them; disks: the disk galaxies among them). */
+  get instanceCounts(): { glows: number; disks: number } {
+    return this.counts;
   }
 
   /**
@@ -481,8 +551,12 @@ export class GalaxyLayer {
     u.uScale.value = scale;
     u.uMinPx.value = 2.2 * pixelRatio;
     this.group.visible = show && !!this.cat;
-    // a new origin once the view centre has moved by a hundredth of the radius from it
-    if (this.cat && this.origin.distanceTo(target) > radius * 0.01) this.rebase(target.clone());
+    // a new cull (and origin) once the view centre has moved by a hundredth of the radius, or the
+    // radius has grown past the margin or shrunk to half
+    const r0 = this.cullRadius;
+    if (this.cat && (r0 === 0 || this.origin.distanceTo(target) > radius * 0.01 || radius > r0 * 1.1 || radius < r0 * 0.5)) {
+      this.cull(target.clone(), radius);
+    }
     u.uTargetRel.value.copy(target).sub(this.origin);
     const mw = this.milkyWay;
     const mat = mw.material;
@@ -493,6 +567,16 @@ export class GalaxyLayer {
     mat.uniforms.uK.value = this.mwIndex >= 0 ? this.displayScale(this.mwIndex) : 1;
     mw.visible = mat.uniforms.uOpacity.value > 0.001;
     mw.position.copy(this.mwCentre);
+  }
+
+  /** Opacity of the Milky Way model in the last frame (0: not drawn). */
+  get milkyWayShown(): number {
+    return this.milkyWay.visible ? (this.milkyWay.material.uniforms.uOpacity.value as number) : 0;
+  }
+
+  /** Index of the Milky Way's record (-1 before the catalogue is loaded). */
+  get milkyWayIndex(): number {
+    return this.mwIndex;
   }
 
   /** How much larger than its true size galaxy i is drawn now (1: true size). */

@@ -45,6 +45,21 @@ interface Flight {
 
 const IDENTITY = new Quaternion();
 
+/** What a two-finger touch gesture does: decided after the fingers have moved a few pixels. */
+export type TwoFingerMode = 'undecided' | 'zoom' | 'pan';
+
+/**
+ * Classifies a two-finger gesture from the change of the finger distance (d0 -> d) and the
+ * movement of their midpoint (dm, CSS px): once either exceeds the threshold, a pinch (the
+ * distance changes at least about as much as the midpoint moves) only zooms, so that the view
+ * centre stays where it is; otherwise the fingers pan (and may zoom as well).
+ */
+export function twoFingerMode(d0: number, d: number, dm: number, threshold = 10): TwoFingerMode {
+  const dd = Math.abs(d - d0);
+  if (Math.max(dd, dm) < threshold) return 'undecided';
+  return dd >= 0.8 * dm ? 'zoom' : 'pan';
+}
+
 /**
  * Orbit-style navigation around a view centre (the orbit target):
  * mouse / touch via OrbitControls, plus keyboard movement and animated fly-to.
@@ -81,6 +96,7 @@ export class Navigation {
       this.flight = null;
     });
     this.controls = c;
+    this.watchTwoFingers(dom);
 
     window.addEventListener('keydown', (e) => this.keyDown(e));
     window.addEventListener('keyup', (e) => {
@@ -91,6 +107,59 @@ export class Navigation {
       this.fast = e.shiftKey;
     });
     window.addEventListener('blur', () => this.keys.clear());
+  }
+
+  /**
+   * Pinch without panning: OrbitControls zooms and pans with two fingers at once, so a pinch on a
+   * centred star moved it a little. The gesture is classified (twoFingerMode) and panning switched
+   * off for a pinch. These listeners run before OrbitControls' (capture phase on the window); panning
+   * stays on at the second finger's touch-down, so that OrbitControls starts its pan from there.
+   */
+  private watchTwoFingers(dom: HTMLElement): void {
+    const c = this.controls;
+    const pts = new Map<number, { x: number; y: number }>();
+    let gesture: { d0: number; mx: number; my: number; mode: TwoFingerMode } | null = null;
+    const geometry = () => {
+      const [a, b] = [...pts.values()];
+      return { d: Math.hypot(a.x - b.x, a.y - b.y), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 };
+    };
+    const reset = () => {
+      gesture = null;
+      c.enablePan = true;
+    };
+    window.addEventListener(
+      'pointerdown',
+      (e) => {
+        if (e.pointerType !== 'touch' || e.target !== dom) return;
+        pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        reset();
+        if (pts.size === 2) {
+          const g = geometry();
+          gesture = { d0: g.d, mx: g.mx, my: g.my, mode: 'undecided' };
+        }
+      },
+      { capture: true },
+    );
+    window.addEventListener(
+      'pointermove',
+      (e) => {
+        if (e.pointerType !== 'touch' || !pts.has(e.pointerId)) return;
+        pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (!gesture || pts.size !== 2) return;
+        if (gesture.mode === 'undecided') {
+          const g = geometry();
+          gesture.mode = twoFingerMode(gesture.d0, g.d, Math.hypot(g.mx - gesture.mx, g.my - gesture.my));
+        }
+        c.enablePan = gesture.mode === 'pan';
+      },
+      { capture: true },
+    );
+    const up = (e: PointerEvent) => {
+      if (!pts.delete(e.pointerId)) return;
+      reset();
+    };
+    window.addEventListener('pointerup', up, { capture: true });
+    window.addEventListener('pointercancel', up, { capture: true });
   }
 
   get target(): Vector3 {

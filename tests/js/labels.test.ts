@@ -18,6 +18,7 @@ import {
   type LabelCandidate,
   type Rect,
   type ScreenLabel,
+  milkyWayLabelPos,
 } from '../../src/ui/labels';
 
 describe('sharedName', () => {
@@ -243,6 +244,33 @@ describe('label priority', () => {
     const pollux: LabelCandidate = { key: 'x', pos: new Vector3(), text: 'Pollux', rank: 0, logL: 1.57, appMag: 1.23 };
     expect(labelScore(sirius, 110)).toBeGreaterThan(labelScore(pollux, 110));
     expect(labelScore(procyon, 110)).toBeGreaterThan(labelScore(pollux, 110));
+  });
+
+  it('labels the Milky Way at its centre, or towards it at the edge of the screen', () => {
+    const cam = new PerspectiveCamera(55, 0.5, 1, 1e7);
+    cam.position.set(0, 0, 50_000);
+    cam.lookAt(0, 0, 0);
+    cam.updateMatrixWorld();
+    const vp = cam.projectionMatrix.clone().multiply(cam.matrixWorldInverse).elements;
+    const target = new Vector3(0, 0, 0);
+    // centre on screen: there
+    expect(milkyWayLabelPos(vp, target, new Vector3(5_000, 0, 0))!.x).toBe(5_000);
+    // centre far off to the right: on the way to it, inside the screen
+    const p = milkyWayLabelPos(vp, target, new Vector3(200_000, 0, 0))!;
+    expect(p.x).toBeGreaterThan(5_000);
+    expect(p.x).toBeLessThan(200_000);
+    expect(p.clone().project(cam).x).toBeCloseTo(0.85, 2);
+  });
+
+  it('labels the Milky Way first, like the Sun', () => {
+    const mw: LabelCandidate = { key: 'g:0', pos: new Vector3(), text: 'Milky Way', rank: 0, logL: 10.8, galaxy: 0, priority: true };
+    const andromeda: LabelCandidate = { key: 'g:1', pos: new Vector3(), text: 'Andromeda Galaxy', rank: 0, logL: 10.7, galaxy: 1 };
+    const sun: LabelCandidate = { key: 'r:0', pos: new Vector3(), text: 'Sun', rank: 0, logL: 0, sun: true, appMag: -26.7 };
+    // far away, the Milky Way still beats a galaxy right in front of the camera
+    expect(labelScore(mw, 1e7)).toBeGreaterThan(labelScore(andromeda, 1e3));
+    expect(labelScore(mw, 1e7)).toBeGreaterThan(labelScore({ ...andromeda, priority: false }, 1));
+    // as does the Sun
+    expect(labelScore(sun, 1e7)).toBeGreaterThan(labelScore(andromeda, 1e3));
   });
 
   it('labels route waypoints before all other stars, named ones first, and the route\'s ends above everything', () => {

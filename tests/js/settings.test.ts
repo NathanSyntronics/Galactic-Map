@@ -14,8 +14,10 @@ import {
   parseStored,
   radiusForDistance,
   sliderToStarSize,
+  starDetail,
   starDimming,
   starLabelMode,
+  starsHidden,
   starSizeText,
   starSizeToSlider,
   storedForm,
@@ -49,6 +51,16 @@ describe('stored settings', () => {
     expect(starLabelMode(30_000)).toBe('all');
     expect(starLabelMode(150_000)).toBe('sun');
     expect(starLabelMode(2_000_000)).toBe('none');
+  });
+
+  it('loads fewer stars while they fade and none once they are gone', () => {
+    expect(starDetail(12_000)).toBe(1);
+    expect(starDetail(20_000)).toBeCloseTo(Math.sqrt(starDimming(20_000)), 6);
+    expect(starDetail(40_000)).toBe(0.25);
+    expect(starsHidden(50_000)).toBe(false);
+    expect(starsHidden(60_000)).toBe(true);
+    // stars are hidden before the Sun's label stands alone, and the Sun keeps it beyond
+    expect(starLabelMode(60_000)).toBe('sun');
   });
 
   it('defaults to a 20 ly radius and 30 labels', () => {

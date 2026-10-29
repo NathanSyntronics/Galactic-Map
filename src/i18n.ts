@@ -34,7 +34,7 @@ const en = {
   qualityUltra: 'Very high',
   resetSettings: 'Reset settings',
   goToSun: 'Back to the Sun',
-  search: 'Search star…',
+  search: 'Search stars and galaxies…',
   noResults: 'No matches',
   recentSearches: 'Recent',
   searchUnavailable: 'The star catalogue could not be loaded. Try again later.',
@@ -131,7 +131,7 @@ const en = {
 <p>The grid lies parallel to the galactic plane. 0° points towards the Galactic Centre, 90° in the direction of Galactic rotation.</p>
 <p>The jump network links stars up to the jump range apart (9 ly by default); brighter stars get more links. A star's info card lists its links; click one to go there.</p>
 <p>Routes: “Route from here” and “Route to here” on a star’s info card plan a route through the jump network, also between distant stars (the Sun and Betelgeuse, say). The route box lists the waypoints; zoomed out, only the route is drawn.</p>
-<p>The empty search field lists the last three stars you picked from the search. A press anywhere beside the open settings only closes them (it selects no star); a click beside a dialog closes the dialog.</p>
+<p>The search knows the stars and the galaxies. The empty search field lists the last three you picked from the search. A press anywhere beside the open settings only closes them (it selects no star); a click beside a dialog closes the dialog.</p>
 <p>A click on a star's name selects that star; where many stars crowd together, labelled stars are preferred.</p>`,
   aboutText: `
 <p>Positions are computed from measured trigonometric parallaxes and sky coordinates and converted into a heliocentric galactic coordinate system (X towards the Galactic Centre, Z towards the North Galactic Pole). Stars are drawn with symbolic sizes; true stellar diameters would be invisibly small.</p>
@@ -329,7 +329,7 @@ const de: Record<MessageKey, string> = {
   qualityUltra: 'Sehr hoch',
   resetSettings: 'Einstellungen zurücksetzen',
   goToSun: 'Zurück zur Sonne',
-  search: 'Stern suchen…',
+  search: 'Sterne und Galaxien suchen…',
   noResults: 'Keine Treffer',
   recentSearches: 'Zuletzt gesucht',
   searchUnavailable: 'Der Sternkatalog konnte nicht geladen werden. Bitte später erneut versuchen.',
@@ -426,7 +426,7 @@ const de: Record<MessageKey, string> = {
 <p>Das Gitter liegt parallel zur galaktischen Ebene. 0° zeigt zum Galaktischen Zentrum, 90° in Richtung der galaktischen Rotation.</p>
 <p>Das Sprungnetz verbindet Sterne bis zur Sprungweite (standardmäßig 9 Lj); hellere Sterne bekommen mehr Verbindungen. Die Infokarte eines Sterns listet seine Verbindungen auf; ein Klick darauf führt dorthin.</p>
 <p>Routen: „Route von hier“ und „Route hierher“ in der Infokarte eines Sterns planen eine Route durch das Sprungnetz, auch zwischen weit entfernten Sternen (etwa der Sonne und Beteigeuze). Das Routenfeld listet die Wegpunkte; herausgezoomt wird nur die Route gezeichnet.</p>
-<p>Das leere Suchfeld zeigt die drei zuletzt über die Suche gewählten Sterne. Ein Druck irgendwo neben die offenen Einstellungen schließt nur diese (es wird kein Stern gewählt); ein Klick neben einen Dialog schließt den Dialog.</p>
+<p>Die Suche kennt Sterne und Galaxien. Das leere Suchfeld zeigt die drei zuletzt über die Suche gewählten. Ein Druck irgendwo neben die offenen Einstellungen schließt nur diese (es wird kein Stern gewählt); ein Klick neben einen Dialog schließt den Dialog.</p>
 <p>Ein Klick auf den Namen eines Sterns wählt diesen Stern; wo sich viele Sterne drängen, haben beschriftete Sterne Vorrang.</p>`,
   aboutText: `
 <p>Die Positionen werden aus gemessenen trigonometrischen Parallaxen und Himmelskoordinaten berechnet und in ein heliozentrisches galaktisches Koordinatensystem umgerechnet (X zum Galaktischen Zentrum, Z zum galaktischen Nordpol). Die Sterngrößen sind symbolisch; echte Sterndurchmesser wären unsichtbar klein.</p>

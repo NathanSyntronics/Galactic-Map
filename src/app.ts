@@ -60,6 +60,8 @@ import {
   type Settings,
   starDimming,
   starLabelMode,
+  starDetail,
+  starsHidden,
 } from './settings';
 import { AttributesDialog } from './ui/attributes-dialog';
 import { InfoPanel, displayName, type JumpListing, type StarInfo } from './ui/info';
@@ -67,7 +69,7 @@ import { GalaxyCard } from './ui/galaxy-card';
 import { GalaxyFlag, galaxyDesignation, galaxyName, galaxyRank, loadGalaxies, type GalaxyCatalogue } from './data/galaxies';
 import { GalaxyLayer, milkyWayOpacity } from './render/galaxies';
 import { Legend } from './ui/legend';
-import { LabelLayer, TopK, labelUnder, labelledStarNear, namedCandidateLimit, onScreen, starPriority, type LabelCandidate } from './ui/labels';
+import { LabelLayer, TopK, labelUnder, labelledStarNear, milkyWayLabelPos, namedCandidateLimit, onScreen, starPriority, type LabelCandidate } from './ui/labels';
 import { SettingsPanel } from './ui/panel';
 import { RouteBox, type RouteNames } from './ui/route-box';
 import { SearchBox, SearchIndex, type SearchHit, type SearchTuple } from './ui/search';
@@ -84,6 +86,21 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: 
 }
 
 /** Node path and star index of a StarInfo key ("path:index"). */
+/** From this visible radius on, the view is at galaxy scales: centring on a galaxy keeps the zoom. */
+const GALAXY_SCALE_RADIUS = 20_000;
+
+const SUN_INDEX = new WeakMap<NodeData, number>();
+
+/** Index of the Sun in a node's data (-1 if it is not there). */
+function sunIndex(d: NodeData): number {
+  let i = SUN_INDEX.get(d);
+  if (i === undefined) {
+    i = d.flags.findIndex((f) => (f & Flag.SUN) !== 0);
+    SUN_INDEX.set(d, i);
+  }
+  return i;
+}
+
 function parseStarKey(key: string): { path: string; i: number } {
   const k = key.lastIndexOf(':');
   return { path: key.slice(0, k), i: Number(key.slice(k + 1)) };
@@ -716,7 +733,7 @@ export class App {
     u.uRadius.value = s.radius;
     u.uSizeMul.value = s.starSize;
     // zoomed out to galaxy scales the stars fade (they would outshine the Milky Way)
-    u.uBrightness.value = s.brightness * starDimming(s.radius);
+    u.uBrightness.value = (s.brightness * starDimming(s.radius)) / starDetail(s.radius);
     this.grid.visible = s.grid;
     this.dropLines.lines.visible = s.dropLines && s.labels;
     this.jumpLines.visible = s.jumps && !this.routeOnly;
@@ -769,6 +786,9 @@ export class App {
     if (!this.octree || !this.loader) return;
     const s = this.store.get();
     const budget = QUALITY_BUDGET[s.quality];
+    // zoomed out to galaxy scales the faded stars need fewer of them, and none once they are gone
+    const hidden = starsHidden(s.radius);
+    const viewBudget = Math.round(budget * starDetail(s.radius));
     const h = this.renderer.domElement.clientHeight || window.innerHeight;
     const pxPerUnit = h / (2 * Math.tan(MathUtils.degToRad(this.camera.fov) / 2));
     const blocked = this.jumpBlocked;
@@ -776,11 +796,13 @@ export class App {
     // the jump network also needs the stars just outside the visible sphere (faded out by the
     // shader), but only when all of them fit the budget: it never takes stars from the sphere
     const margin = s.jumps && !this.routeOnly && !this.jumpBlocked ? jumpMargin(s.jumpRange) : 0;
-    const { nodes: selected, wide } = selectWithMargin(
-      this.octree,
-      { cameraPos: this.camera.position, target: this.nav.target, radius: s.radius, budget, pixelsPerUnitAtUnitDistance: pxPerUnit },
-      margin,
-    );
+    const { nodes: selected, wide } = hidden
+      ? { nodes: [] as OctreeNode[], wide: false }
+      : selectWithMargin(
+          this.octree,
+          { cameraPos: this.camera.position, target: this.nav.target, radius: s.radius, budget: viewBudget, pixelsPerUnitAtUnitDistance: pxPerUnit },
+          margin,
+        );
     const before = this.selectedPaths;
     this.selectedPaths = new Set(selected.map((n) => n.path));
     // a view far from the stars (galaxy scales) waits for none of them
@@ -804,6 +826,8 @@ export class App {
     if (this.pendingSelect && !pending) void this.reachNode(this.pendingSelect.path);
     if (pending && !this.selectedPaths.has(pending.path)) extra.push(pending);
     for (const n of this.routeNodes) if (!this.selectedPaths.has(n.path) && n !== pending) extra.push(n);
+    // the root node holds the Sun, whose label stays while the stars are hidden (not drawn)
+    if (hidden && starLabelMode(s.radius) === 'sun' && !extra.includes(this.octree.root)) extra.push(this.octree.root);
     this.loader.request(extra.length ? [...selected, ...extra] : selected, budget * 2);
     this.starfield.setVisible(this.selectedPaths);
   }
@@ -852,7 +876,8 @@ export class App {
 
   /** Per frame: loads the galaxies when the view reaches galaxy scales, and draws them. */
   private updateGalaxies(s: Settings, scale: number): void {
-    if ((s.galaxies || s.milkyWay) && s.radius > 20_000) void this.ensureGalaxies();
+    // (the Milky Way model's label needs the catalogue as soon as the model shows)
+    if ((s.galaxies && s.radius > 20_000) || (s.milkyWay && milkyWayOpacity(s.radius) > 0.1)) void this.ensureGalaxies();
     this.galaxyLayer.update(this.nav.target, s.radius, scale, this.renderer.getPixelRatio(), s.galaxies, s.milkyWay ? milkyWayOpacity(s.radius) : 0, this.galaxiesInView);
   }
 
@@ -861,27 +886,42 @@ export class App {
     const cat = this.galaxyLayer.catalogue;
     this.galaxiesInView = 0;
     const s = this.store.get();
-    if (!cat || !s.galaxies) return;
-    const target = this.nav.target;
-    const cam = this.camera.position;
+    if (!cat) return;
     const vp = this.viewProj.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse).elements;
-    const r2 = s.radius * s.radius;
-    const top = new TopK<number>(namedCandidateLimit(s.labelCount));
     const p = cat.pos;
     const lang = getLang();
-    const mwShown = s.milkyWay && milkyWayOpacity(s.radius) > 0.3;
+    // the Milky Way: labelled whenever its model is drawn (like the Sun), at its centre, or, with
+    // the centre off screen, as far towards it from the view centre as the screen reaches
+    const mw = this.galaxyLayer.milkyWayIndex;
+    const mwPos = mw >= 0 && this.galaxyLayer.milkyWayShown > 0.15 ? milkyWayLabelPos(vp, this.nav.target, this.galaxyLayer.position(mw)) : null;
+    if (mwPos) {
+      cands.push({
+        key: `g:${mw}`,
+        pos: mwPos,
+        text: galaxyName(cat, mw, lang),
+        rank: 0,
+        logL: cat.logL[mw] || 10,
+        galaxy: mw,
+        priority: true,
+      });
+    }
+    if (!s.galaxies) return;
+    const target = this.nav.target;
+    const cam = this.camera.position;
+    const r2 = s.radius * s.radius;
+    const top = new TopK<number>(namedCandidateLimit(s.labelCount));
     for (let i = 0; i < cat.count; i++) {
       const x = p[3 * i], y = p[3 * i + 1], z = p[3 * i + 2];
       const dx = x - target.x, dy = y - target.y, dz = z - target.z;
       if (dx * dx + dy * dy + dz * dz > r2) continue;
       const model = (cat.flags[i] & GalaxyFlag.MODEL) !== 0;
-      if (!model) this.galaxiesInView++;
-      if (model && !mwShown) continue;
+      if (model) continue;
+      this.galaxiesInView++;
       const rank = galaxyRank(cat, i);
       if (rank >= 99 && i !== this.selectedGalaxy) continue;
       if (!onScreen(vp, x, y, z)) continue;
       const dist = Math.hypot(x - cam.x, y - cam.y, z - cam.z);
-      top.push(starPriority(cat.logL[i] || 8, dist, Math.min(rank, 6), undefined, model), i);
+      top.push(starPriority(cat.logL[i] || 8, dist, Math.min(rank, 6), undefined), i);
     }
     for (const i of top.items()) {
       cands.push({
@@ -961,12 +1001,18 @@ export class App {
   }
 
   /**
-   * Flies to a galaxy, at a distance that shows all of it, seen from the Sun's side (as it looks
-   * on the sky); the Milky Way model from above, a little towards the Sun.
+   * Centres the view on a galaxy. At galaxy scales (a visible radius of 20,000 ly and more) like a
+   * star: zoom and direction stay. From the stars' scales it flies out to a distance that shows
+   * all of it, seen from the Sun's side (as it looks on the sky); the Milky Way model from above,
+   * a little towards the Sun.
    */
   private flyToGalaxy(i: number): void {
     const cat = this.galaxyLayer.catalogue;
     if (!cat) return;
+    if (this.store.get().radius >= GALAXY_SCALE_RADIUS) {
+      this.nav.flyTo(this.galaxyLayer.position(i));
+      return;
+    }
     const model = (cat.flags[i] & GalaxyFlag.MODEL) !== 0;
     const dist = model ? 160_000 : Math.max(cat.diam[i] * 1.6, 5_000);
     const pos = this.galaxyLayer.position(i);
@@ -995,7 +1041,7 @@ export class App {
     const cx = camPos.x;
     const cy = camPos.y;
     const cz = camPos.z;
-    for (const rn of this.starfield.visibleNodes()) {
+    for (const rn of starsHidden(s.radius) ? [] : this.starfield.visibleNodes()) {
       const d = rn.data;
       const p = d.positions;
       // quick reject: node entirely outside the sphere
@@ -1024,6 +1070,12 @@ export class App {
         const score = name || sun ? starPriority(starLogL(d, i), dist, sun ? 0 : name!.rank, apparentMag(d, i), sun) : starPriority(starLogL(d, i), dist, 99, undefined);
         if (score > top.threshold) top.push(score, { d, i, size: rn.sizes[i] });
       }
+    }
+    // stars hidden (galaxy scales): the Sun keeps its label, from the root node (not drawn)
+    if (labelMode === 'sun' && named.items().length === 0) {
+      const root = this.octree ? this.loader?.get(this.octree.root.path) : undefined;
+      const i = root ? sunIndex(root) : -1;
+      if (root && i >= 0) named.push(Infinity, { d: root, i, size: 0 });
     }
     for (const { d, i, size } of named.items()) {
       const name = d.names.get(i);

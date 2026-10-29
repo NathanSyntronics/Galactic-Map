@@ -108,7 +108,11 @@ designations leave out the primary one). A galaxy without an entry is called "PG
 ### Drawing (`src/render/galaxies.ts`)
 
 * Like the stars, a galaxy is drawn while it lies in the visible sphere (the same fade at its
-  edge), relative to an origin near the view centre (float precision).
+  edge), relative to an origin near the view centre (float precision). Only the galaxies within
+  1.15 visible radii of the view centre are copied into the instance buffers (again when the view
+  centre has moved by 1 % of the radius, or the radius has grown by 10 % or halved): drawing all
+  56,000 every frame cost most of the frame time at the scales of the Local Group and the Local
+  Volume.
 * **Disk galaxies** (spiral, lenticular, irregular) are quads in their disk plane (seen from
   either side), of their true size and orientation, with a procedural pattern: a spiral has an exponential disk, two
   logarithmic arms (pitch 15°, a phase of its own) and a bulge; a lenticular a smooth disk and a
@@ -135,19 +139,29 @@ designations leave out the primary one). A galaxy without an entry is called "PG
   (radius^-2.5), so that the known stars (a few thousand light years around the Sun), crowding into
   fewer and fewer pixels, do not outshine the Milky Way model and the galaxies. Star labels: from
   a radius of 50,000 ly only the Sun, from 500,000 ly none (the selected star keeps its label).
+  While they fade, fewer stars are loaded: the detail level's budget times √ of the brightness
+  factor (at least a quarter), each drawn brighter by the inverse, so that the faint haze looks
+  the same. Below a factor of 0.02 (a radius of about 57,000 ly) no star is loaded or drawn at all;
+  the Sun's label then comes from the root node, which holds the Sun.
 * Setting *Galaxies* (on) shows them, *Milky Way model* (on) the model.
 
 ### Labels, picking, card, search
 
 * Named galaxies (rank < 99) in the visible sphere are label candidates, ranked by name rank and
-  luminosity; the Milky Way is labelled at its centre while the model is shown.
+  luminosity. The Milky Way is labelled first whenever its model is drawn, like the Sun: at its
+  centre, or, with the centre off screen, as far towards it from the view centre as the screen
+  reaches (also with *Galaxies* off).
 * A click picks a star first (as before); otherwise the galaxy whose ellipse on screen (as drawn,
   enlarged at large scales) contains
   the pointer (or within 6 px of a small one), the smallest of several.
 * The galaxy card shows name (and German name), class, distance with error and method, the
   catalogues, diameter, luminosity, Local Group membership and the designations; *Centre view
   here* and a link to NED.
-* The search knows the names and designations of all galaxies (PGC numbers too); picking one (or
-  *Centre view here* on its card) flies to it at a distance that shows the whole galaxy, turning
-  the view to look from the Sun's side, so that it looks as it does on the sky; the Milky Way
-  from above, a little towards the Sun.
+* The search knows the names and designations of all galaxies (PGC numbers too); a name followed
+  only by a generic word (*Galaxy*, *-galaxie*, *Dwarf*, …) counts as an exact match, so
+  "Andromeda" finds the Andromeda Galaxy first.
+* Picking a galaxy in the search, double-clicking it or *Centre view here* on its card centres the
+  view on it. At galaxy scales (a visible radius of 20,000 ly and more) like a star: the zoom and
+  the direction of view stay. From the stars' scales the view flies out to a distance that shows
+  the whole galaxy, turning to look from the Sun's side, so that it looks as it does on the sky;
+  the Milky Way from above, a little towards the Sun.

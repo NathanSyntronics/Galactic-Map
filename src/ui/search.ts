@@ -54,6 +54,26 @@ export function normalize(s: string): string {
     .replace(/[\s'‘’ʼ`´\-‐‑‒–—―−⁃﹣－_.·\u00ad]/g, '');
 }
 
+/**
+ * Generic words after a name (normalised, so without spaces): a search for the name alone finds
+ * the object with such a suffix as if exactly ('Sculptor' -> Sculptor Galaxy, 'Fornax' -> Fornax
+ * Dwarf, 'Andromeda' -> Andromedagalaxie).
+ */
+const GENERIC_SUFFIXES = new Set([
+  'galaxy',
+  'galaxie',
+  'galaxis',
+  'dwarf',
+  'dwarfgalaxy',
+  'dwarfspheroidal',
+  'dwarfspheroidalgalaxy',
+  'dwarfellipticalgalaxy',
+  'dwarfirregulargalaxy',
+  'zwerggalaxie',
+  'nebula',
+  'nebel',
+]);
+
 export class SearchIndex {
   private entries: Entry[] = [];
   /** Exact-key lookup (normalised name or designation -> entry), built on first use. */
@@ -161,6 +181,9 @@ export class SearchIndex {
         const key = e.keys[k];
         let s = -1;
         if (key === nq) s = 3;
+        // the name plus only a generic word ('Andromeda' -> Andromeda Galaxy, Andromedagalaxie)
+        // counts almost as an exact match: before Andromeda I, II, …
+        else if (key.startsWith(nq) && GENERIC_SUFFIXES.has(key.slice(nq.length))) s = 2.9;
         else if (key.startsWith(nq)) s = 2;
         else if (nq.length >= 3 && key.includes(nq)) s = 1;
         if (s > best) {

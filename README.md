@@ -58,14 +58,19 @@ An interactive 3-D map of the Sun's stellar neighbourhood, built from real star 
 | Rotate | left drag | one finger | arrow keys |
 | Move | right drag / Shift + left drag | two-finger drag | W A S D, R / F (up/down) |
 | Zoom | wheel | pinch | + / − |
-| Details | click a star | tap | |
-| Centre on a star | double-click | double-tap | |
+| Details | click a star or galaxy | tap | |
+| Centre on a star or galaxy | double-click | double-tap | |
 | Back to the Sun | | | H |
 | Names / grid / jump network / search | | | L / G / J / / |
 
-Hold Shift for faster keyboard movement.
+Hold Shift for faster keyboard movement. A pinch only zooms: the view centre stays where it is
+(a centred star stays centred); two fingers moved together move the view (and may zoom as well).
+Which of the two a gesture is, is decided after the fingers have moved 10 px: a pinch changes the
+fingers' distance at least about as much as it moves their midpoint.
 
-The search finds stars by name or catalogue designation; while the field is empty it lists the
+The search finds stars and galaxies by name or catalogue designation (exact names first, then
+names that begin with what was typed; a name followed only by a generic word such as *Galaxy*,
+*-galaxie* or *Dwarf* counts as exact: "Andromeda" finds the Andromeda Galaxy before Andromeda I); while the field is empty it lists the
 last three stars picked from the search (newest first, kept in the browser). One picked before the
 star catalogue has loaded says *Loading…* and is carried out when it arrives, unless you type or
 pick something else first; if the catalogue cannot be loaded, the list says so and the next click

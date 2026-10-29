@@ -26,6 +26,8 @@ export interface LabelCandidate {
   pinned?: boolean;
   /** A galaxy (index in the galaxy catalogue) instead of a star. */
   galaxy?: number;
+  /** Labelled first whenever it is on screen, like the Sun (the Milky Way). */
+  priority?: boolean;
   /**
    * A waypoint of the route: a candidate wherever it is (the route is drawn whole), labelled ahead
    * of all other stars, but like them only where its label overlaps no other.
@@ -203,6 +205,7 @@ export function starPriority(logL: number, distToCamera: number, rank: number, a
 /** Label priority of a candidate: the star's, plus the route bonuses. */
 export function labelScore(c: LabelCandidate, distToCamera: number): number {
   let score = starPriority(c.logL, distToCamera, c.rank, c.appMag, c.sun);
+  if (c.priority) score += 100;
   if (c.route) score += ROUTE_BONUS + (c.rank < 99 ? ROUTE_NAMED_BONUS : 0);
   if (c.pinned) score += PINNED_BONUS;
   return score;
@@ -279,6 +282,25 @@ export function onScreen(m: ArrayLike<number>, x: number, y: number, z: number, 
   const px = m[0] * x + m[4] * y + m[8] * z + m[12];
   const py = m[1] * x + m[5] * y + m[9] * z + m[13];
   return px >= -lim && px <= lim && py >= -lim && py <= lim;
+}
+
+/**
+ * Where the Milky Way is labelled: at its centre if that is on screen, else at the farthest point
+ * towards it from the view centre that still is (null if not even the view centre is).
+ */
+export function milkyWayLabelPos(vp: ArrayLike<number>, target: Vector3, centre: Vector3): Vector3 | null {
+  if (onScreen(vp, centre.x, centre.y, centre.z, -0.1)) return centre.clone();
+  const at = (t: number) => new Vector3().lerpVectors(target, centre, t);
+  const on = (v: Vector3) => onScreen(vp, v.x, v.y, v.z, -0.15);
+  if (!on(target)) return null;
+  let lo = 0;
+  let hi = 1;
+  for (let k = 0; k < 24; k++) {
+    const mid = (lo + hi) / 2;
+    if (on(at(mid))) lo = mid;
+    else hi = mid;
+  }
+  return at(lo);
 }
 
 /** Named stars kept as label candidates (the best by priority): plenty for `maxLabels` labels. */
@@ -498,7 +520,7 @@ export class LabelLayer {
         const selected = c.key === this.selectedKey;
         if (!opts.enabled && !selected && !c.pinned) continue;
         // the route is drawn whole: its labels do not fade at the edge of the sphere
-        const fade = c.sun || selected || c.pinned || c.route ? 1 : 1 - smoothstep(radius * 0.85, radius, c.pos.distanceTo(target));
+        const fade = c.sun || c.priority || selected || c.pinned || c.route ? 1 : 1 - smoothstep(radius * 0.85, radius, c.pos.distanceTo(target));
         if (fade <= 0.02) continue;
         const s = this.project(c.pos, camera, w, h);
         if (!s) continue;

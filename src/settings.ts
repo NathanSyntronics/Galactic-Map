@@ -142,6 +142,26 @@ export function starDimming(radius: number): number {
   return radius <= STAR_DIM_RADIUS ? 1 : Math.pow(STAR_DIM_RADIUS / radius, 2.5);
 }
 
+/** Below this brightness factor (a radius of about 57,000 ly) the stars are not drawn at all. */
+export const STAR_HIDE_DIMMING = 0.02;
+
+/**
+ * The stars are not loaded nor drawn at this visible radius: they have faded out (only the Sun's
+ * label stays, see starLabelMode).
+ */
+export function starsHidden(radius: number): boolean {
+  return starDimming(radius) < STAR_HIDE_DIMMING;
+}
+
+/**
+ * Share of the detail level's star budget loaded at a visible radius: fading stars need fewer of
+ * them (√ of the brightness factor, at least a quarter); the stars drawn are brightened by its
+ * inverse, so that the faint haze looks the same while far fewer stars are loaded and drawn.
+ */
+export function starDetail(radius: number): number {
+  return Math.max(Math.sqrt(starDimming(radius)), 0.25);
+}
+
 /** Which stars are labelled at a visible radius: all, only the Sun (from 50,000 ly), none (from 500,000 ly). */
 export function starLabelMode(radius: number): 'all' | 'sun' | 'none' {
   return radius > 500_000 ? 'none' : radius > 50_000 ? 'sun' : 'all';
