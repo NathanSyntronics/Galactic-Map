@@ -65,6 +65,8 @@ export class InfoPanel {
   private centreRow: { dt: HTMLElement; dd: HTMLElement } | null = null;
   onClose: () => void = () => {};
   onFlyTo: (info: StarInfo) => void = () => {};
+  /** Flies close to a star with planets (null: the planets are not known). */
+  onShowPlanets: ((info: StarInfo) => void) | null = null;
   onManageAttributes: () => void = () => {};
   /** "Route from here" / "Route to here". */
   onRoute: (info: StarInfo, end: 'from' | 'to') => void = () => {};
@@ -246,6 +248,12 @@ export class InfoPanel {
     const fly = el('button', 'btn', t('flyTo'));
     fly.addEventListener('click', () => this.onFlyTo(info));
     actions.appendChild(fly);
+    const showPlanets = this.onShowPlanets;
+    if (showPlanets && (info.planets > 0 || info.flags & Flag.SUN)) {
+      const btn = el('button', 'btn', t('showPlanets'));
+      btn.addEventListener('click', () => showPlanets(info));
+      actions.appendChild(btn);
+    }
     for (const end of ['from', 'to'] as const) {
       const btn = el('button', 'btn route-btn', t(end === 'from' ? 'routeFromHere' : 'routeToHere'));
       btn.addEventListener('click', () => this.onRoute(info, end));

@@ -62,10 +62,14 @@ import {
   starLabelMode,
   starDetail,
   starsHidden,
+  starCloseScale,
 } from './settings';
 import { AttributesDialog } from './ui/attributes-dialog';
 import { InfoPanel, displayName, type JumpListing, type StarInfo } from './ui/info';
 import { GalaxyCard } from './ui/galaxy-card';
+import { PlanetCard } from './ui/planet-card';
+import { PlanetLayer } from './render/planets';
+import { AU_PER_LY, julianDate, loadPlanets, planetName, type PlanetCatalogue, type PlanetHost } from './data/planets';
 import { GalaxyFlag, galaxyDesignation, galaxyName, galaxyRank, loadGalaxies, type GalaxyCatalogue } from './data/galaxies';
 import { GalaxyLayer, milkyWayOpacity } from './render/galaxies';
 import { Legend } from './ui/legend';
@@ -240,6 +244,14 @@ export class App {
   private galaxySearchAdded = false;
   private selectedGalaxy: number | null = null;
   private galaxyCard!: GalaxyCard;
+  /** Planets (docs/PLANETS.md): loaded when the view comes close to the stars or the search is used. */
+  private readonly planetLayer = new PlanetLayer();
+  private planetLoad: Promise<PlanetCatalogue | null> | null = null;
+  private planetSearchAdded = false;
+  private selectedPlanet: number | null = null;
+  private planetCard!: PlanetCard;
+  /** The date the planets are drawn for: `jd` at the moment `ms`, advancing `speed` days per second. */
+  private readonly planetClock = { jd: julianDate(Date.now()), ms: performance.now(), speed: 0 };
   /** Galaxies inside the visible sphere (status line). */
   private galaxiesInView = 0;
   private readonly viewProj = new Matrix4();
@@ -269,6 +281,7 @@ export class App {
     this.scene.add(
       this.galaxyLayer.milkyWay,
       this.galaxyLayer.group,
+      this.planetLayer.group,
       this.grid.group,
       this.dropLines.lines,
       this.jumpLines.group,
@@ -310,9 +323,16 @@ export class App {
     this.catchSecondTap(this.galaxyCard.root);
     this.galaxyCard.onClose = () => this.select(null);
     this.galaxyCard.onFlyTo = (i) => this.flyToGalaxy(i);
+    this.planetCard = new PlanetCard(container);
+    this.catchSecondTap(this.planetCard.root);
+    this.planetCard.onClose = () => this.select(null);
+    this.planetCard.onFlyTo = (i) => this.flyToPlanet(i);
     this.info.onManageAttributes = () => this.showAttributes();
     this.info.onClose = () => this.select(null);
     this.info.onFlyTo = (info) => this.nav.flyTo(info.pos);
+    this.info.onShowPlanets = (info) => {
+      void this.ensurePlanets().then(() => this.flyToSystem(info.key));
+    };
     this.info.jumpsOf = (info) => this.jumpListing(info);
     this.info.onRoute = (info, end) => this.planner.setEnd(end, this.routeEnd(info));
 
@@ -664,12 +684,16 @@ export class App {
     try {
       // the galaxies' names belong to the index too (loaded alongside; the stars alone if they fail)
       const galaxies = this.ensureGalaxies();
+      const planets = this.ensurePlanets();
       const res = await fetch(`${this.baseUrl}search.json`);
       if (!res.ok) throw new HttpError(res.status, res.url);
       this.searchIndex.load((await res.json()) as SearchTuple[]);
       this.galaxySearchAdded = false;
       await galaxies;
       this.addGalaxySearch();
+      this.planetSearchAdded = false;
+      await planets;
+      this.addPlanetSearch();
       this.search.indexLoaded();
       return true;
     } catch (err) {
@@ -690,6 +714,7 @@ export class App {
       this.search.updateTexts();
       this.info.rerender(this.nav.target);
       this.galaxyCard.rerender(this.nav.target);
+      this.showPlanetCard();
       this.routeBox.updateTexts();
       this.refreshChrome();
     }
@@ -731,7 +756,8 @@ export class App {
   private applySettings(s: Settings): void {
     const u = this.starfield.material.uniforms;
     u.uRadius.value = s.radius;
-    u.uSizeMul.value = s.starSize;
+    // close up (below 2 ly) the star symbols shrink, so that close pairs and planetary orbits show
+    u.uSizeMul.value = s.starSize * starCloseScale(s.radius);
     // zoomed out to galaxy scales the stars fade (they would outshine the Milky Way)
     u.uBrightness.value = (s.brightness * starDimming(s.radius)) / starDetail(s.radius);
     this.grid.visible = s.grid;
@@ -1020,6 +1046,146 @@ export class App {
     this.nav.flyTo(pos, dist, 1.6, dir);
   }
 
+  // ------------------------------------------------------------------ planets
+
+  /** Loads the planets once (null if they are unavailable). */
+  private ensurePlanets(): Promise<PlanetCatalogue | null> {
+    if (!this.planetLoad) {
+      this.planetLoad = loadPlanets(this.baseUrl).then(
+        (cat) => {
+          this.planetLayer.setCatalogue(cat);
+          this.candidatesDirty = true;
+          this.addPlanetSearch();
+          this.info.rerender(this.nav.target);
+          return cat;
+        },
+        (err: unknown) => {
+          console.warn('planets unavailable', err);
+          return null;
+        },
+      );
+    }
+    return this.planetLoad;
+  }
+
+  /** The planets' names in the search index (path 'p', index = planet; the position: their star's). */
+  private addPlanetSearch(): void {
+    const cat = this.planetLayer.catalogue;
+    if (!cat || this.planetSearchAdded || !this.searchIndex.size) return;
+    this.planetSearchAdded = true;
+    const tuples: SearchTuple[] = cat.planets.map((p, i) => {
+      const h = cat.hosts[p.host].pos;
+      return [p.name, p.nameDe, 'p', i, h.x, -h.z, h.y, 0, null, p.name, -1];
+    });
+    this.searchIndex.add(tuples);
+  }
+
+  /** The date the planets are drawn for (Julian): now, or advancing at the chosen speed. */
+  private planetJd(): number {
+    const c = this.planetClock;
+    const now = performance.now();
+    const speed = this.store.get().planetSpeed;
+    const current = c.speed === 0 ? julianDate(Date.now()) : c.jd + ((now - c.ms) / 1000) * c.speed;
+    if (speed !== c.speed) {
+      c.jd = current;
+      c.ms = now;
+      c.speed = speed;
+    }
+    return current;
+  }
+
+  /** Per frame: loads the planets when the view comes close to the stars, and draws them. */
+  private updatePlanets(s: Settings, scale: number): void {
+    if (s.planets && s.radius < 2) void this.ensurePlanets();
+    this.planetLayer.update(this.nav.target, s.radius, this.camera, scale, this.renderer.getPixelRatio(), this.planetJd(), s.planets);
+    // the selection marker follows a moving planet
+    if (this.selectedPlanet !== null) this.selMarker.show(this.planetLayer.livePosition(this.selectedPlanet), this.renderer.getPixelRatio());
+  }
+
+  /** Labels of the planets drawn, once their orbits are large enough on screen. */
+  private planetCandidates(cands: LabelCandidate[]): void {
+    const cat = this.planetLayer.catalogue;
+    if (!cat) return;
+    const lang = getLang();
+    for (const d of this.planetLayer.drawn) {
+      if ((d.orbitPx < 16 || d.alpha < 0.5) && d.index !== this.selectedPlanet) continue;
+      const p = cat.planets[d.index];
+      cands.push({ key: `p:${d.index}`, pos: d.pos, text: planetName(p, lang), rank: 0, logL: 3, planet: d.index });
+    }
+  }
+
+  /** The planet under the pointer: its label, else its symbol (or within a few pixels of it). */
+  private pickPlanet(clientX: number, clientY: number, touch: boolean): number | null {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const mx = clientX - rect.left;
+    const my = clientY - rect.top;
+    const label = labelUnder(this.labels.hits, mx, my, touch ? 6 : 2);
+    if (label) return label.c.planet ?? null;
+    let best: number | null = null;
+    let bestD = Infinity;
+    const v = new Vector3();
+    for (const d of this.planetLayer.drawn) {
+      if (d.alpha < 0.3) continue;
+      v.copy(d.pos).project(this.camera);
+      if (v.z > 1) continue;
+      const sx = (v.x * 0.5 + 0.5) * rect.width;
+      const sy = (1 - (v.y * 0.5 + 0.5)) * rect.height;
+      const dist = Math.hypot(sx - mx, sy - my);
+      if (dist <= d.px + (touch ? 14 : 8) && dist < bestD) {
+        best = d.index;
+        bestD = dist;
+      }
+    }
+    return best;
+  }
+
+  private selectPlanet(i: number | null): void {
+    const cat = this.planetLayer.catalogue;
+    this.select(null);
+    if (!cat || i === null) return;
+    this.selectedPlanet = i;
+    this.labels.selectedKey = `p:${i}`;
+    this.showPlanetCard();
+    this.candidatesDirty = true;
+  }
+
+  private showPlanetCard(): void {
+    const cat = this.planetLayer.catalogue;
+    const i = this.selectedPlanet;
+    if (!cat || i === null) {
+      this.planetCard.show(null, null);
+      return;
+    }
+    const speed = this.store.get().planetSpeed;
+    const date = speed === 0 ? '' : new Date((this.planetJd() - 2440587.5) * 86_400_000).toLocaleDateString(getLang());
+    this.planetCard.show(cat, i, this.hostName(cat.hosts[cat.planets[i].host]), date);
+  }
+
+  /** A host star's name on the map (its archive name while its node is not loaded). */
+  private hostName(h: PlanetHost): string {
+    const data = this.loader?.get(h.path);
+    if (data && data.flags[h.index] & Flag.SUN) return t('theSun');
+    const n = data?.names.get(h.index);
+    return n ? localName(n.en, n.de) : h.name === 'Sun' ? t('theSun') : h.name;
+  }
+
+  /** Flies to a planet's star, close enough to show its orbit (the camera's direction stays). */
+  private flyToPlanet(i: number): void {
+    const cat = this.planetLayer.catalogue;
+    if (!cat) return;
+    const p = cat.planets[i];
+    this.nav.flyTo(cat.hosts[p.host].pos, distanceForRadius((1.6 * p.a * (1 + p.e)) / AU_PER_LY));
+  }
+
+  /** Flies to a star with planets, close enough to show all their orbits. */
+  private flyToSystem(key: string): void {
+    const cat = this.planetLayer.catalogue;
+    const h = cat?.byStar.get(key);
+    if (!cat || h === undefined) return;
+    const host = cat.hosts[h];
+    this.nav.flyTo(host.pos, distanceForRadius(1.3 * host.reach));
+  }
+
   private rebuildCandidates(): void {
     const s = this.store.get();
     const target = this.nav.target;
@@ -1111,6 +1277,7 @@ export class App {
     }
     this.routeCandidates(cands);
     this.galaxyCandidates(cands);
+    this.planetCandidates(cands);
     // Keep the selected star labelled even if it is outside the candidate set.
     if (this.selected && !cands.some((c) => c.key === this.selected!.key)) {
       cands.push({
@@ -1227,15 +1394,19 @@ export class App {
       if (!taps.up(e.pointerId, e.clientX, e.clientY, e.timeStamp)) return;
       // (while the settings panel is open, its scrim catches every press beside it)
       const touch = e.pointerType === 'touch';
-      // a galaxy's label, then the stars, then the galaxies themselves
+      // a galaxy's label, a planet (label or symbol), then the stars, then the galaxies themselves
       const galaxyLabel = this.galaxyLabelAt(e.clientX, e.clientY, touch);
-      const hit = galaxyLabel === null ? this.pickAt(e.clientX, e.clientY, touch ? 22 : 14) : null;
-      const galaxy = galaxyLabel ?? (hit ? null : this.pickGalaxy(e.clientX, e.clientY, touch ? 22 : 12));
+      const planet = galaxyLabel === null ? this.pickPlanet(e.clientX, e.clientY, touch) : null;
+      const hit = galaxyLabel === null && planet === null ? this.pickAt(e.clientX, e.clientY, touch ? 22 : 14) : null;
+      const galaxy = galaxyLabel ?? (hit || planet !== null ? null : this.pickGalaxy(e.clientX, e.clientY, touch ? 22 : 12));
       const isDouble = secondTap;
       secondTap = false;
       // after a double-tap the next tap starts a new pair
       this.lastTap = isDouble ? { time: 0, x: 0, y: 0 } : { time: e.timeStamp, x: e.clientX, y: e.clientY };
-      if (hit) {
+      if (planet !== null) {
+        this.selectPlanet(planet);
+        if (isDouble) this.nav.flyTo(this.planetLayer.livePosition(planet).clone());
+      } else if (hit) {
         this.select(hit);
         if (isDouble) this.nav.flyTo(hit.pos);
       } else if (galaxy !== null) {
@@ -1258,7 +1429,7 @@ export class App {
     let swallowClick = false;
     const isSecondTap = (e: PointerEvent) =>
       e.isPrimary &&
-      (!!this.selected || this.selectedGalaxy !== null) &&
+      (!!this.selected || this.selectedGalaxy !== null || this.selectedPlanet !== null) &&
       e.timeStamp - this.lastTap.time < DOUBLE_TAP_MS &&
       Math.hypot(e.clientX - this.lastTap.x, e.clientY - this.lastTap.y) < 30;
     el.addEventListener(
@@ -1282,6 +1453,7 @@ export class App {
         this.lastTap = { time: 0, x: 0, y: 0 };
         if (this.selected) this.nav.flyTo(this.selected.pos);
         else if (this.selectedGalaxy !== null) this.flyToGalaxy(this.selectedGalaxy);
+        else if (this.selectedPlanet !== null) this.nav.flyTo(this.planetLayer.livePosition(this.selectedPlanet).clone());
       },
       { capture: true },
     );
@@ -1338,7 +1510,7 @@ export class App {
         const dist = Math.hypot(sx - mx, sy - my);
         if (dist > radiusPx && dist > (SPRITE_CORE * maxPx) / (2 * pr)) continue;
         // clip w is the view depth
-        const core = (SPRITE_CORE * spritePx(rn.sizes[i], s.starSize, scale, cw, minPx, maxPx)) / (2 * pr);
+        const core = (SPRITE_CORE * spritePx(rn.sizes[i], s.starSize * starCloseScale(s.radius), scale, cw, minPx, maxPx)) / (2 * pr);
         if (dist <= radiusPx) nearby++;
         const score = pickScore({ dist, core, named: d.names.has(i), logL: starLogL(d, i) }, radiusPx);
         if (score !== null && (!best || score < best.d)) best = { d: score, dist, data: d, i };
@@ -1399,6 +1571,10 @@ export class App {
     if (this.selectedGalaxy !== null) {
       this.selectedGalaxy = null;
       this.galaxyCard.show(null, null, this.nav.target);
+    }
+    if (this.selectedPlanet !== null) {
+      this.selectedPlanet = null;
+      this.planetCard.show(null, null);
     }
     this.labels.selectedKey = info?.key ?? null;
     this.selMarker.show(info?.pos ?? null, this.renderer.getPixelRatio());
@@ -1548,9 +1724,14 @@ export class App {
       this.flyToGalaxy(hit.index);
       return;
     }
+    if (hit.path === 'p') {
+      this.selectPlanet(hit.index);
+      this.flyToPlanet(hit.index);
+      return;
+    }
     const s = this.store.get();
     // a fixed radius: close enough to see the sphere; radius follows zoom: the zoom stays
-    const dist = MathUtils.clamp(this.nav.distance, 3, s.autoRadius ? Infinity : Math.max(s.radius * 1.8, 10));
+    const dist = MathUtils.clamp(this.nav.distance, distanceForRadius(RADIUS_MIN), s.autoRadius ? Infinity : Math.max(s.radius * 1.8, 10));
     this.nav.flyTo(hit.pos, dist);
     const data = this.loader?.get(hit.path);
     if (data) {
@@ -1874,8 +2055,10 @@ export class App {
       const [tx, ty, tz] = worldToGalactic(this.nav.target);
       const off = this.camera.position.clone().sub(this.nav.target);
       const [ox, oy, oz] = worldToGalactic(off);
-      const f = (x: number) => Number(x.toFixed(3));
-      const hash = `#c=${f(tx)},${f(ty)},${f(tz)}&o=${f(ox)},${f(oy)},${f(oz)}&r=${f(this.store.get().radius)}`;
+      // the centre to a billionth of a light year (planetary orbits), the rest to a few digits
+      const c = (x: number) => Number(x.toPrecision(13));
+      const f = (x: number) => Number(x.toPrecision(6));
+      const hash = `#c=${c(tx)},${c(ty)},${c(tz)}&o=${f(ox)},${f(oy)},${f(oz)}&r=${f(this.store.get().radius)}`;
       try {
         if (location.hash !== hash) history.replaceState(null, '', hash);
       } catch {
@@ -1898,7 +2081,7 @@ export class App {
       this.nav.setView(galacticToWorld(c[0], c[1], c[2]), galacticToWorld(o[0], o[1], o[2]));
     } else if (initial) {
       const R = this.store.get().radius;
-      const d = MathUtils.clamp(distanceForRadius(R), 5, 5_000_000_000);
+      const d = MathUtils.clamp(distanceForRadius(R), distanceForRadius(RADIUS_MIN), 5_000_000_000);
       const el2 = MathUtils.degToRad(28);
       // camera behind the Sun, looking towards the Galactic Centre (+X), slightly from above
       this.nav.setView(new Vector3(0, 0, 0), new Vector3(-Math.cos(el2) * d, Math.sin(el2) * d, d * 0.12));
@@ -1929,7 +2112,7 @@ export class App {
 
     const s = this.store.get();
     const dist = this.nav.distance;
-    this.camera.near = Math.max(dist * 1e-4, 1e-4);
+    this.camera.near = Math.max(dist * 1e-4, 1e-13);
     this.camera.far = dist + s.radius * 4 + 1000;
     // the route is drawn whole, however far it reaches
     const ext = this.routeLine.extent;
@@ -1947,6 +2130,7 @@ export class App {
     u.uMinAlpha.value = MathUtils.clamp(0.55 * Math.sqrt(2500 / Math.max(this.inView, 1)), 0.035, 0.55);
     u.uMinPx.value = 2.6 * this.renderer.getPixelRatio();
     this.updateGalaxies(s, u.uScale.value);
+    this.updatePlanets(s, u.uScale.value);
     // larger star sizes raise the cap too (gently), so that the brightest stars keep growing
     u.uMaxPx.value = 64 * this.renderer.getPixelRatio() * MathUtils.clamp(Math.sqrt(s.starSize), 1, 3);
 
@@ -2007,7 +2191,7 @@ export class App {
       grid: s.grid ? this.grid.labels : null,
       gridHighlight: 'rgba(255, 200, 120, 0.85)',
       // labels keep clear of large sprites
-      sprite: { scale: (s.starSize * u.uScale.value) / u.uPixelRatio.value, max: u.uMaxPx.value / u.uPixelRatio.value },
+      sprite: { scale: (u.uSizeMul.value * u.uScale.value) / u.uPixelRatio.value, max: u.uMaxPx.value / u.uPixelRatio.value },
     });
     if (s.dropLines && s.labels) this.dropLines.set(this.labels.labelledPositions, this.nav.target);
     this.dropLines.lines.visible = s.dropLines && s.labels && s.grid;

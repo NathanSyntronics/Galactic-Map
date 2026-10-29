@@ -61,7 +61,7 @@ void main() {
     return;
   }
   vec4 mv = vec4(mat3(modelViewMatrix) * rel + uCamRest, 1.0);
-  float depth = max(-mv.z, 1e-5);
+  float depth = max(-mv.z, 1e-12);
   float px = 2.0 * aSize * uSizeMul * uScale / depth;
   float intensity = 1.0;
   if (px < uMinPx) {
@@ -105,7 +105,7 @@ void main() {
 
 /** Sprite size in device pixels, as the vertex shader computes it (size: symbol radius in ly). */
 export function spritePx(size: number, sizeMul: number, scale: number, depth: number, minPx: number, maxPx: number): number {
-  const px = (2 * size * sizeMul * scale) / Math.max(depth, 1e-5);
+  const px = (2 * size * sizeMul * scale) / Math.max(depth, 1e-12);
   return Math.min(Math.max(px, minPx), maxPx);
 }
 

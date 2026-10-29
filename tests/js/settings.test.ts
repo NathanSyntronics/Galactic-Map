@@ -14,6 +14,7 @@ import {
   parseStored,
   radiusForDistance,
   sliderToStarSize,
+  starCloseScale,
   starDetail,
   starDimming,
   starLabelMode,
@@ -51,6 +52,14 @@ describe('stored settings', () => {
     expect(starLabelMode(30_000)).toBe('all');
     expect(starLabelMode(150_000)).toBe('sun');
     expect(starLabelMode(2_000_000)).toBe('none');
+  });
+
+  it('draws the stars smaller close up, so that pairs and planetary orbits show', () => {
+    expect(starCloseScale(2)).toBe(1);
+    expect(starCloseScale(20)).toBe(1);
+    expect(starCloseScale(0.2)).toBeCloseTo(Math.pow(0.1, 1.15), 9);
+    // a little faster than the view: the symbols get smaller on screen as one zooms in
+    expect(starCloseScale(0.001) / 0.001).toBeLessThan(starCloseScale(0.1) / 0.1);
   });
 
   it('loads fewer stars while they fade and none once they are gone', () => {
@@ -154,7 +163,8 @@ describe('radius follows zoom', () => {
   });
 
   it('clamps to the radius range and keeps three significant digits', () => {
-    expect(radiusForDistance(0.5)).toBe(RADIUS_MIN);
+    expect(radiusForDistance(1e-8)).toBe(RADIUS_MIN);
+    expect(radiusForDistance(0.5)).toBe(0.227);
     expect(radiusForDistance(1e10)).toBe(RADIUS_MAX);
     expect(radiusForDistance(1e7)).toBe(4_550_000);
     expect(radiusForDistance(100)).toBe(45.5);
@@ -174,7 +184,7 @@ describe('radius follows zoom', () => {
     expect(followZoom(20, 45)).toBe(20.5);
     expect(followZoom(20, 43)).toBe(19.5);
     // closer than the smallest radius allows: stays at the minimum
-    expect(followZoom(RADIUS_MIN, 1)).toBeNull();
+    expect(followZoom(RADIUS_MIN, 1e-8)).toBeNull();
   });
 
   it('follows a continuous zoom in small, regular steps', () => {

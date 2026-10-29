@@ -52,7 +52,7 @@ varying float vEnd;
 void main() {
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
   gl_Position = projectionMatrix * mv;
-  gl_PointSize = aEnd > 0.5 ? uEndPx : clamp(uWorld * uScale / max(-mv.z, 1e-5), uMinPx, uMaxPx);
+  gl_PointSize = aEnd > 0.5 ? uEndPx : clamp(uWorld * uScale / max(-mv.z, 1e-12), uMinPx, uMaxPx);
   vEnd = aEnd;
 }
 `;

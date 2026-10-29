@@ -28,6 +28,10 @@ export interface Settings {
   galaxies: boolean;
   /** The Milky Way drawn as a model when zoomed out. */
   milkyWay: boolean;
+  /** Planets and their orbits (docs/PLANETS.md). */
+  planets: boolean;
+  /** How fast the planets move: days per second (0: real time, the positions of now). */
+  planetSpeed: number;
   quality: Quality;
   /** Attribute that sets the star colours ('' natural temperature colour). */
   colorBy: string;
@@ -71,6 +75,8 @@ export const DEFAULT_SETTINGS: Settings = {
   dropLines: true,
   galaxies: true,
   milkyWay: true,
+  planets: true,
+  planetSpeed: 0,
   quality: 'medium',
   colorBy: '',
   sizeBy: '',
@@ -94,6 +100,7 @@ const CHOICES: Partial<Record<keyof Settings, readonly unknown[]>> = {
   quality: ['low', 'medium', 'high', 'ultra'],
   missingStyle: ['dim', 'hide', 'normal'],
   jumpColor: ['stars', 'uniform', 'length'],
+  planetSpeed: [0, 1, 30, 365],
 };
 
 /** Range of numeric settings whose controls are sliders with fixed ends. */
@@ -114,7 +121,8 @@ export const QUALITY_BUDGET: Record<Quality, number> = {
   ultra: 4_000_000,
 };
 
-export const RADIUS_MIN = 2;
+/** Down to about 0.006 AU: the orbits of the innermost known planets. */
+export const RADIUS_MIN = 1e-7;
 /** Up to the most distant galaxies (Cosmicflows-4 reaches about 1.5 billion ly). */
 export const RADIUS_MAX = 2_000_000_000;
 
@@ -127,6 +135,19 @@ export const AUTO_RADIUS_STEP = 0.01;
 export function radiusForDistance(distance: number): number {
   const r = Math.min(Math.max(distance / AUTO_RADIUS_RATIO, RADIUS_MIN), RADIUS_MAX);
   return Number(r.toPrecision(3));
+}
+
+/** Below this visible radius (ly) the stars are drawn smaller, see starCloseScale. */
+export const STAR_CLOSE_RADIUS = 2;
+
+/**
+ * Factor of the stars' symbol size at a visible radius: 1 from 2 ly on; below, the symbols shrink a
+ * little faster than the view (radius^1.15), so that close pairs (Alpha Centauri A and B, 23 AU
+ * apart) separate and planetary orbits stay visible around their star. At 0.001 ly the Sun's
+ * symbol is about 20 px across.
+ */
+export function starCloseScale(radius: number): number {
+  return radius >= STAR_CLOSE_RADIUS ? 1 : Math.pow(radius / STAR_CLOSE_RADIUS, 1.15);
 }
 
 /** Up to this visible radius the stars are drawn at full brightness (see starDimming). */

@@ -206,6 +206,12 @@ export class SearchIndex {
   }
 }
 
+/** The distance shown beside a hit: from the Sun (the Solar System's planets: "Solar System"). */
+function distanceText(h: SearchHit): string {
+  const d = h.pos.length();
+  return d === 0 && h.path === 'p' ? t('solarSystem') : formatLy(d);
+}
+
 /** Search hit of an index entry (matched: the name that matched, by default the English name). */
 export function hitOf(tuple: SearchTuple, matched = tuple[0], pos?: Vector3): SearchHit {
   const [en, de, path, index, x, y, z, rank, , designation] = tuple;
@@ -361,7 +367,7 @@ export class SearchBox {
     this.rows = this.index.query(this.input.value).map((h) => {
       const name = localName(h.nameEn, h.nameDe);
       const meta = h.matched !== name && h.matched !== h.nameEn ? `${h.matched} · ` : '';
-      return { name, meta: `${meta}${formatLy(h.pos.length())}`, pick: () => this.pick(h) };
+      return { name, meta: `${meta}${distanceText(h)}`, pick: () => this.pick(h) };
     });
     this.active = 0;
     this.renderList();
@@ -375,7 +381,7 @@ export class SearchBox {
     if (this.index.size > 0) {
       this.rows = this.resolveRecent().map(({ entry, tuple }) => {
         const hit = hitOf(tuple);
-        return { name: localName(entry.nameEn, entry.nameDe), meta: formatLy(hit.pos.length()), pick: () => this.pick(hit) };
+        return { name: localName(entry.nameEn, entry.nameDe), meta: distanceText(hit), pick: () => this.pick(hit) };
       });
     } else {
       this.rows = this.recent.map((entry) => ({

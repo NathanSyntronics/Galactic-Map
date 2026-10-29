@@ -26,6 +26,8 @@ export interface LabelCandidate {
   pinned?: boolean;
   /** A galaxy (index in the galaxy catalogue) instead of a star. */
   galaxy?: number;
+  /** A planet (index in the planet catalogue) instead of a star. */
+  planet?: number;
   /** Labelled first whenever it is on screen, like the Sun (the Milky Way). */
   priority?: boolean;
   /**
@@ -580,7 +582,7 @@ export class LabelLayer {
       ctx.fillText(it.text, l.tx, l.ty);
       // height lines only inside the visible sphere (route stars may lie far outside)
       const outside = (it.c.pinned || it.c.route) && it.c.pos.distanceTo(opts.target) > radius;
-      if (!it.c.sun && named && !outside) this.labelledPositions.push(it.c.pos);
+      if (!it.c.sun && named && !outside && it.c.planet === undefined) this.labelledPositions.push(it.c.pos);
     }
     ctx.globalAlpha = 1;
   }

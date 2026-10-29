@@ -272,6 +272,20 @@ export class SettingsPanel {
     b.appendChild(this.checkbox('dropLines', () => s().dropLines, (v) => this.store.set({ dropLines: v })));
     b.appendChild(this.checkbox('galaxies', () => s().galaxies, (v) => this.store.set({ galaxies: v })));
     b.appendChild(this.checkbox('milkyWay', () => s().milkyWay, (v) => this.store.set({ milkyWay: v })));
+    b.appendChild(this.checkbox('planets', () => s().planets, (v) => this.store.set({ planets: v })));
+    b.appendChild(
+      this.select<string>(
+        'planetSpeed',
+        [
+          ['0', 'speedReal'],
+          ['1', 'speedDay'],
+          ['30', 'speedMonth'],
+          ['365', 'speedYear'],
+        ],
+        () => String(s().planetSpeed),
+        (v) => this.store.set({ planetSpeed: Number(v) }),
+      ),
+    );
     b.appendChild(
       this.select<Quality>(
         'quality',

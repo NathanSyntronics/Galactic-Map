@@ -43,6 +43,10 @@ An interactive 3-D map of the Sun's stellar neighbourhood, built from real star 
   get more links than faint ones. Every rule is adjustable.
 * **Route planning** through the jump network, also between distant stars: from the Sun to
   Betelgeuse it takes 114 jumps.
+* **Planets.** Zoom into a star down to a hundredth of an AU: the confirmed planets of the stars on
+  the map (about 2,950 around 2,150 stars) and the eight of the Solar System, on their measured
+  orbits at their positions for today (or running faster), drawn larger than they are, like the
+  stars. Close pairs such as Alpha Centauri A and B separate ([`docs/PLANETS.md`](docs/PLANETS.md)).
 * **Galaxies.** Zoom out past the Milky Way (a stylised model with bar and spiral arms) to the
   Local Group, the Local Volume and the 55,877 galaxies of Cosmicflows-4, out to about 1.5 billion
   light years: every galaxy whose distance is measured independently of its redshift, in its
@@ -58,8 +62,8 @@ An interactive 3-D map of the Sun's stellar neighbourhood, built from real star 
 | Rotate | left drag | one finger | arrow keys |
 | Move | right drag / Shift + left drag | two-finger drag | W A S D, R / F (up/down) |
 | Zoom | wheel | pinch | + / − |
-| Details | click a star or galaxy | tap | |
-| Centre on a star or galaxy | double-click | double-tap | |
+| Details | click a star, planet or galaxy | tap | |
+| Centre on a star, planet or galaxy | double-click | double-tap | |
 | Back to the Sun | | | H |
 | Names / grid / jump network / search | | | L / G / J / / |
 
@@ -93,7 +97,7 @@ wide window gets the normal ones. Each tab writes only the settings it changed, 
 older tab keeps what you set in another.
 
 The settings panel (☰) controls:
-* the visible radius (2 ly to 2 billion ly), and whether it follows the zoom (on by default:
+* the visible radius (1e-7 ly, a hundredth of an AU, to 2 billion ly), and whether it follows the zoom (on by default:
   radius = camera distance / 2.2, the framing of the start view; the radius slider then moves the
   camera; switched off, the radius stays where it is);
 * brown dwarfs (off by default) and white dwarfs;
@@ -101,6 +105,7 @@ The settings panel (☰) controls:
 * labels, star size (0.2× to 12×), brightness and colour saturation;
 * the galactic grid and the height lines;
 * the galaxies and the Milky Way model (both on);
+* the planets (on) and how fast they move (real time by default, or a day, month or year per second);
 * the level of detail (how many stars may be loaded at once; it matters only for view radii of a few hundred light years and more);
 * the data layers (below);
 * the jump network (below);
@@ -287,7 +292,8 @@ specified in [`docs/ROUTES.md`](docs/ROUTES.md):
 | [IAU Catalog of Star Names](https://exopla.net/star-names/modern-iau-star-names/) (WGSN) | official proper names |
 | [SIMBAD](https://simbad.cds.unistra.fr/) (Wenger et al. 2000, CDS Strasbourg) | identifiers, common names, object types and spectral types within 100 pc |
 | [Wikidata](https://www.wikidata.org/) (CC0), queried via [QLever](https://qlever.dev/) | English and German Wikipedia article titles, the reference for the most common name |
-| [NASA Exoplanet Archive](https://exoplanetarchive.ipac.caltech.edu/) (Planetary Systems Composite Parameters, DOI 10.26133/NEA13) | number of known planets per host star |
+| [NASA Exoplanet Archive](https://exoplanetarchive.ipac.caltech.edu/) (Planetary Systems Composite Parameters, DOI 10.26133/NEA13) | number of known planets per host star; the planets' orbits, radii and masses |
+| [JPL approximate planetary elements](https://ssd.jpl.nasa.gov/planets/approx_pos.html) (E. M. Standish) | the orbits of the Solar System's planets |
 | [Mamajek's dwarf sequence](https://www.pas.rochester.edu/~emamajek/EEM_dwarf_UBVIJHK_colors_Teff.txt) (Pecaut & Mamajek 2013) | colour → temperature, bolometric corrections |
 
 Galaxies ([`docs/GALAXIES.md`](docs/GALAXIES.md)):
@@ -379,6 +385,8 @@ Requirements: Python ≥ 3.11 and Node ≥ 20.
 python -m venv .venv && .venv/bin/pip install -r pipeline/requirements.txt
 cd pipeline && ../.venv/bin/python -m galmap.build --out ../public/data
 ../.venv/bin/python -m galmap.verify ../public/data    # sanity checks against known stars
+# planets (after the stars: their hosts are found among them)
+../.venv/bin/python -m galmap.planets --data ../public/data
 # galaxies (downloads ~60 MB, mostly the 2MASS XSC, ~10 min the first time)
 ../.venv/bin/python -m galmap.galaxies --out ../public/data
 cd ..
