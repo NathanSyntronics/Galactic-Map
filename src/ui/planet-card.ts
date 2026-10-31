@@ -1,5 +1,5 @@
 import { PlanetFlag, planetKind, planetName, type PlanetCatalogue } from '../data/planets';
-import { formatNumber, getLang, t, type MessageKey } from '../i18n';
+import { formatKm, formatNumber, getLang, t, type MessageKey } from '../i18n';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -29,6 +29,8 @@ const METHODS_DE: Record<string, string> = {
   Astrometry: 'Astrometrie',
   'Disk Kinematics': 'Scheibenkinematik',
 };
+
+const KM_PER_AU = 149_597_870.7;
 
 /** A number with about three significant digits. */
 function sig(x: number): string {
@@ -100,7 +102,8 @@ export class PlanetCard {
 
     const dl = el('dl');
     const row = (k: string, v: string) => dl.append(el('dt', '', k), el('dd', '', v));
-    row(t('semiMajorAxis'), `${sig(p.a)} ${t('au')}`);
+    // below 1 AU also in kilometres (TRAPPIST-1 b: 0.0115 AU, 1.72 million km)
+    row(t('semiMajorAxis'), `${sig(p.a)} ${t('au')}${p.a < 1 ? ` (${formatKm(p.a * KM_PER_AU)})` : ''}`);
     row(t('eccentricity'), p.flags & PlanetFlag.ECCENTRICITY_ASSUMED ? t('assumedCircular') : sig(p.e));
     row(t('orbitalPeriod'), p.period >= 1000 ? t('yearsN', { n: sig(p.period / 365.25) }) : t('daysN', { n: sig(p.period) }));
     if (Number.isFinite(p.radius)) {

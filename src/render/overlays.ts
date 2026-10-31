@@ -10,6 +10,7 @@ import {
   ShaderMaterial,
   Vector3,
 } from 'three';
+import { distanceUnitScale } from '../i18n';
 
 /** "Nice" step (1, 2, 5 × 10^k) close to x. */
 export function niceStep(x: number): number {
@@ -61,7 +62,8 @@ export class PolarGrid {
   update(
     center: Vector3,
     radius: number,
-    formatDistance: (ly: number) => string,
+    /** Writes a distance in the unit of the second argument (the grid's radius). */
+    formatDistance: (ly: number, unitOf: number) => string,
     labelKey: string,
     gcLabel = 'GC',
   ): void {
@@ -75,8 +77,10 @@ export class PolarGrid {
     for (const l of this.labels) l.position.copy(l.local).add(center);
   }
 
-  private rebuild(radius: number, formatDistance: (ly: number) => string, gcLabel: string): void {
-    const step = niceStep(radius / 4);
+  private rebuild(radius: number, formatDistance: (ly: number, unitOf: number) => string, gcLabel: string): void {
+    // a nice step in the unit the labels are written in (2 million km, not 0.0000002 ly)
+    const scale = distanceUnitScale(radius);
+    const step = niceStep((radius / 4) * scale) / scale;
     const minor: number[] = [];
     const major: number[] = [];
     const seg = 128;
@@ -90,7 +94,7 @@ export class PolarGrid {
     const labels: GridLabel[] = [];
     const ringLabel = (r: number) => {
       const local = new Vector3(r * Math.SQRT1_2, 0, -r * Math.SQRT1_2);
-      labels.push({ position: local.clone(), local, text: formatDistance(r), kind: 'ring' });
+      labels.push({ position: local.clone(), local, text: formatDistance(r, radius), kind: 'ring' });
     };
     let k = 1;
     for (let r = step; r < radius * 0.999; r += step, k++) {

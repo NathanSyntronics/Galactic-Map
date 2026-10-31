@@ -1,4 +1,5 @@
-import { formatLy, formatNumber, t } from '../i18n';
+import { FLYBY_STEPS } from '../controls/tour';
+import { formatLy, formatNumber, numberText, t } from '../i18n';
 import type { RouteEnd, RouteResult, RouteStatus, Waypoint } from '../network/planner';
 import type { RouteMode } from '../network/route';
 
@@ -96,6 +97,10 @@ export class RouteBox {
   onRetry: () => void = () => {};
   /** A waypoint of the list was picked (index into the route's waypoints). */
   onPick: (index: number) => void = () => {};
+  /** The flyby button: start (or continue) the flyby, or stop it. */
+  onFlyby: () => void = () => {};
+  /** Seconds per star of the flyby chosen. */
+  onFlybyStep: (seconds: number) => void = () => {};
 
   private readonly title = el('h3', 'sr-only');
   private readonly removeBtn = el('button', 'icon-btn small', '×');
@@ -110,6 +115,11 @@ export class RouteBox {
   private readonly showAllBtn = el('button', 'btn small');
   private readonly listBtn = el('button', 'btn small subtle');
   private readonly list = el('ol', 'route-list');
+  private readonly flyBtn = el('button', 'btn small route-fly');
+  private readonly stepSel = el('select');
+  private readonly flybyEl = el('p', 'route-flyby');
+  /** The flyby in progress: the waypoint it is at (null without one). */
+  private flyby: { index: number; name: string } | null = null;
   private expanded = false;
   /** The route whose waypoints the list shows, and whether its items are built. */
   private listRoute: RouteResult | null = null;
@@ -142,13 +152,29 @@ export class RouteBox {
       this.renderList();
     });
     this.retryBtn.addEventListener('click', () => this.onRetry());
-    controls.append(this.modeSel, this.showAllBtn, this.listBtn, this.retryBtn);
+    for (const sec of FLYBY_STEPS) {
+      const o = el('option');
+      o.value = String(sec);
+      this.stepSel.appendChild(o);
+    }
+    this.stepSel.addEventListener('change', () => this.onFlybyStep(Number(this.stepSel.value)));
+    this.flyBtn.addEventListener('click', () => {
+      // on a phone the list would cover the view
+      if (!this.flyby && this.expanded && window.matchMedia?.('(max-width: 700px)').matches) {
+        this.expanded = false;
+        this.renderList();
+      }
+      this.onFlyby();
+    });
+    controls.append(this.flyBtn, this.stepSel, this.modeSel, this.showAllBtn, this.listBtn, this.retryBtn);
 
     this.statusEl.setAttribute('aria-live', 'polite');
     this.progress.appendChild(this.bar);
     this.list.id = 'route-waypoints';
     this.listBtn.setAttribute('aria-controls', this.list.id);
-    this.root.append(this.title, head, this.statusEl, this.progress, controls, this.list);
+    this.flybyEl.setAttribute('aria-live', 'polite');
+    this.flybyEl.hidden = true;
+    this.root.append(this.title, head, this.statusEl, this.flybyEl, this.progress, controls, this.list);
     parent.appendChild(this.root);
     this.updateTexts();
   }
@@ -165,6 +191,10 @@ export class RouteBox {
     this.modeSel.options[1].textContent = t('routeModeDistance');
     this.showAllBtn.textContent = t('routeShowAll');
     this.retryBtn.textContent = t('routeRetry');
+    this.stepSel.setAttribute('aria-label', t('routeFlybyStep'));
+    this.stepSel.title = t('routeFlybyStep');
+    for (const o of this.stepSel.options) o.textContent = t('routeFlybyStepN', { n: numberText(Number(o.value)) });
+    this.renderFlyby();
     this.listBuilt = false;
     if (this.state && this.names) this.update(this.state, this.names);
   }
@@ -193,6 +223,9 @@ export class RouteBox {
     if (st.kind === 'loading') this.bar.style.width = `${Math.round((100 * st.loadedBytes) / Math.max(st.totalBytes, 1))}%`;
     this.retryBtn.hidden = st.kind !== 'failed' && st.kind !== 'lookupFailed';
     const route = state.route;
+    const canFly = !!route && route.waypoints.length >= 2;
+    this.flyBtn.hidden = !canFly && !this.flyby;
+    this.stepSel.hidden = this.flyBtn.hidden;
     this.showAllBtn.hidden = !route;
     this.listBtn.hidden = !route;
     this.modeSel.hidden = !state.from || !state.to;
@@ -201,6 +234,34 @@ export class RouteBox {
       this.listBuilt = false;
     }
     this.renderList();
+  }
+
+  /** The seconds per star shown in the speed choice. */
+  setFlybyStep(seconds: number): void {
+    const v = String(seconds);
+    if (this.stepSel.value !== v) this.stepSel.value = v;
+  }
+
+  /** The flyby in progress (the waypoint it is at and its name), or null. */
+  setFlyby(f: { index: number; name: string } | null): void {
+    this.flyby = f;
+    this.renderFlyby();
+  }
+
+  private renderFlyby(): void {
+    const f = this.flyby;
+    this.flyBtn.textContent = f ? t('routeFlybyStop') : t('routeFlyby');
+    this.flyBtn.setAttribute('aria-pressed', String(!!f));
+    this.root.classList.toggle('flying', !!f);
+    const n = this.listRoute?.waypoints.length ?? 0;
+    this.flybyEl.hidden = !f;
+    const text = f ? t('routeFlybyAt', { k: formatNumber(f.index + 1), n: formatNumber(n), name: f.name }) : '';
+    if (this.flybyEl.textContent !== text) this.flybyEl.textContent = text;
+    if (this.state) {
+      const canFly = !!this.listRoute && n >= 2;
+      this.flyBtn.hidden = !canFly && !f;
+      this.stepSel.hidden = this.flyBtn.hidden;
+    }
   }
 
   private renderList(): void {

@@ -12,7 +12,7 @@ import {
   planetOffset,
   type PlanetFile,
 } from '../../src/data/planets';
-import { formatLy, setLang } from '../../src/i18n';
+import { distanceUnit, distanceUnitScale, formatLy, setLang } from '../../src/i18n';
 import { planetDrawRadius, planetSymbolFactor } from '../../src/render/planets';
 
 (globalThis as { document?: unknown }).document ??= { documentElement: {} };
@@ -98,11 +98,33 @@ describe('planets', () => {
   it('writes distances within planetary systems in AU', () => {
     setLang('en');
     expect(formatLy(23.4 / AU_PER_LY)).toBe('23.4 AU');
-    expect(formatLy(0.0485 / AU_PER_LY)).toBe('0.0485 AU');
+    expect(formatLy(1 / AU_PER_LY)).toBe('1.00 AU');
     expect(formatLy(1500 / AU_PER_LY)).toBe('1,500 AU');
     expect(formatLy(4.24)).toBe('4.24 ly');
     expect(formatLy(0)).toBe('0.00 ly');
     setLang('de');
     expect(formatLy(23.4 / AU_PER_LY)).toBe('23,4 AE');
+  });
+
+  it('writes distances below 1 AU in millions of kilometres', () => {
+    setLang('en');
+    expect(formatLy(0.387 / AU_PER_LY)).toBe('57.9 million km');
+    expect(formatLy(0.0485 / AU_PER_LY)).toBe('7.26 million km');
+    expect(formatLy(0.9 / AU_PER_LY)).toBe('135 million km');
+    expect(formatLy(1e-7)).toBe('946,000 km');
+    expect(formatLy(2e6 / 9.4607304725808e12)).toBe('2 million km');
+    setLang('de');
+    expect(formatLy(0.0115 / AU_PER_LY)).toBe('1,72 Mio. km');
+    expect(formatLy(1e-8)).toBe('94.600 km');
+  });
+
+  it('writes the rings of the grid in the unit of its radius', () => {
+    setLang('en');
+    // a radius of 2 AU: all rings in AU, also the one below 1 AU
+    expect(formatLy(0.5 / AU_PER_LY, 2 / AU_PER_LY)).toBe('0.500 AU');
+    expect(distanceUnit(2 / AU_PER_LY)).toBe('au');
+    expect(distanceUnit(1e-6)).toBe('km');
+    expect(distanceUnit(0.2)).toBe('ly');
+    expect(distanceUnitScale(1e-6)).toBeCloseTo(9.4607304725808e12, 0);
   });
 });

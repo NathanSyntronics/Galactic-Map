@@ -97,6 +97,22 @@ around the straight line from start to destination:
     the top bar in short form (start → destination and the status), and the legend is left out.
   * While the old route is recomputed (other settings, mode, swap) it stays drawn; a new start or
     destination removes it at once.
+* **Flyby** (`src/controls/tour.ts`, `Navigation.startTour`): *Fly the route* flies the camera
+  along the route, one waypoint per 0.5, 1, 2.5 (default) or 5 seconds (the choice beside the
+  button, stored with the settings, changeable during the flight).
+  * The view centre moves on a smooth curve through the waypoints (centripetal Catmull-Rom, which
+    makes no loops between jumps of uneven length); it speeds up over the first 0.6 step and brakes
+    over the last 0.6 jump.
+  * First it flies to the start (or, when the view centre is within two typical jumps of a
+    waypoint and zoomed in to at most 20 of them, to that waypoint: a stopped flyby continues
+    where it stopped); the camera then stays about three typical (median) jumps behind and 22°
+    above the direction of travel, which it takes from the route one jump back to four ahead and
+    follows smoothly, so the view turns gently where the route zigzags.
+  * The user may zoom and pan during the flight (a pan stays as an offset from the route); once
+    they turn the view, the camera no longer turns with the route. Any other flight (a search, a
+    waypoint, *show whole route*, *Centre view here*), a new route and *Stop* end it.
+  * The box shows the waypoint the flight is at ("Star 12 of 115: Gliese 250"), whose label is
+    always shown. On phones an open star card is closed and the waypoint list folded at the start.
 
 ## Implementation
 

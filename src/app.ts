@@ -1,5 +1,6 @@
 import { Color, MathUtils, Matrix4, PerspectiveCamera, Scene, Vector3, WebGLRenderer } from 'three';
 import { Navigation } from './controls/navigation';
+import { medianJump, tourStart } from './controls/tour';
 import { LABELLED_RADIUS, PRECISE_PX, SPRITE_CORE, labelledWins, pickScore } from './controls/pick';
 import { TapDetector } from './controls/tap';
 import { AttributeStore, type ChangeKind } from './data/attributes';
@@ -384,6 +385,21 @@ export class App {
     this.routeBox.onRetry = () => this.planner.retry();
     this.routeBox.onShowAll = () => this.showWholeRoute();
     this.routeBox.onPick = (k) => this.pickWaypoint(k);
+    this.routeBox.onFlyby = () => this.toggleFlyby();
+    this.routeBox.onFlybyStep = (sec) => {
+      this.store.set({ flybyStep: sec });
+      this.nav.setTourStep(sec);
+    };
+    this.routeBox.setFlybyStep(this.store.get().flybyStep);
+    this.nav.onTourStep = (k) => {
+      const w = this.route?.waypoints[k];
+      this.routeBox.setFlyby(w ? { index: k, name: this.routeNames.waypoint(w) } : null);
+      this.candidatesDirty = true;
+    };
+    this.nav.onTourEnd = () => {
+      this.routeBox.setFlyby(null);
+      this.candidatesDirty = true;
+    };
     this.placeAboveCard();
 
     this.updateLegend();
@@ -719,6 +735,10 @@ export class App {
       this.showPlanetCard();
       this.routeBox.updateTexts();
       this.refreshChrome();
+    }
+    if (has('flybyStep')) {
+      this.routeBox.setFlybyStep(s.flybyStep);
+      this.nav.setTourStep(s.flybyStep);
     }
     if (has('colorBy', 'sizeBy', 'missingStyle')) this.stylePlan = buildPlan(s, this.attrs);
     if (has('showBrownDwarfs', 'showWhiteDwarfs', 'maxDistErr', 'saturation', 'colorBy', 'sizeBy', 'missingStyle')) {
@@ -1083,8 +1103,12 @@ export class App {
     if (!cat || this.planetSearchAdded || !this.searchIndex.size) return;
     this.planetSearchAdded = true;
     const tuples: SearchTuple[] = cat.planets.map((p, i) => {
-      const h = cat.hosts[p.host].pos;
-      return [p.name, p.nameDe, 'p', i, h.x, -h.z, h.y, 0, null, p.name, -1];
+      const host = cat.hosts[p.host];
+      const h = host.pos;
+      // also found by the star's name on the map: the archive's KOI-351 b is Kepler-90 b
+      const star = this.searchIndex.at(host.path, host.index);
+      const alt = star && star[0] !== host.name && p.name.startsWith(host.name) ? [star[0] + p.name.slice(host.name.length)] : null;
+      return [p.name, p.nameDe, 'p', i, h.x, -h.z, h.y, 0, alt, p.name, -1];
     });
     this.searchIndex.add(tuples);
   }
@@ -1314,10 +1338,13 @@ export class App {
     const ends = [this.planner.from, this.planner.to].filter((e): e is RouteEnd => !!e);
     if (!this.route && !ends.length) return;
     const byKey = new Map(cands.map((c) => [c.key, c]));
-    for (const w of this.route?.waypoints ?? []) {
+    const at = this.nav.tourIndex;
+    for (const [k, w] of (this.route?.waypoints ?? []).entries()) {
       const key = `${w.data.path}:${w.index}`;
       const c = byKey.get(key) ?? this.candidateOf(w.data, w.index);
       c.route = true;
+      // the star a flyby is at is always labelled
+      if (k === at) c.pinned = true;
       if (!byKey.has(key)) {
         byKey.set(key, c);
         cands.push(c);
@@ -1854,6 +1881,8 @@ export class App {
   private routeChanged(): void {
     const p = this.planner;
     if (p.route !== this.route) {
+      // a flyby follows the route it started on
+      this.nav.stopTour();
       this.route = p.route;
       // a partial route: the destination it did not reach gets its own marker
       this.routeLine.set(this.route ? this.route.waypoints.map((w) => w.pos) : null, this.route?.found ?? true, p.to?.pos ?? null);
@@ -1889,6 +1918,26 @@ export class App {
     const up = new Vector3(0, 1, 0).applyQuaternion(this.camera.quaternion);
     const shift = ((h / 2 - (top + bottom) / 2) / (h / 2)) * d * Math.tan(half);
     this.nav.flyTo(ext.centre.clone().addScaledVector(up, -shift), d);
+  }
+
+  /**
+   * The flyby button: flies along the route, from the waypoint the view is at (if it is close to
+   * the route) or from the start, a few typical jumps behind the view centre; or stops the flyby.
+   */
+  private toggleFlyby(): void {
+    if (this.nav.touring) {
+      this.nav.stopTour();
+      return;
+    }
+    const r = this.route;
+    if (!r || r.waypoints.length < 2) return;
+    const pts = r.waypoints.map((w) => new Vector3(w.pos.x, w.pos.y, w.pos.z));
+    const jump = Math.max(medianJump(r.waypoints.map((w) => w.jump)), 0.5);
+    const from = tourStart(pts, this.nav.target, this.nav.distance, jump);
+    const dist = from > 0 ? MathUtils.clamp(this.nav.distance, 1.5 * jump, 8 * jump) : 3 * jump;
+    // on a phone the star card covers half of the view (and the route box's buttons)
+    if (window.matchMedia?.('(max-width: 700px)').matches) this.select(null);
+    this.nav.startTour(pts, this.store.get().flybyStep, dist, from);
   }
 
   /** A waypoint picked in the route box: select it and centre the view on it. */
@@ -2193,7 +2242,7 @@ export class App {
     }
 
     this.routeLine.update(u.uScale.value, this.renderer.getPixelRatio());
-    this.grid.update(this.nav.target, s.radius, (ly) => formatLy(ly), s.lang, t('galacticCentre'));
+    this.grid.update(this.nav.target, s.radius, (ly, unitOf) => formatLy(ly, unitOf), s.lang, t('galacticCentre'));
 
     this.labels.draw({
       camera: this.camera,

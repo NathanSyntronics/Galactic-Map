@@ -44,12 +44,13 @@ An interactive 3-D map of the Sun's stellar neighbourhood, built from real star 
 * **A jump network.** Stars up to a jump range apart (9 ly by default) are linked; bright stars
   get more links than faint ones. Every rule is adjustable.
 * **Route planning** through the jump network, also between distant stars: from the Sun to
-  Betelgeuse it takes 114 jumps.
+  Betelgeuse it takes 114 jumps. A route can be flown, star by star.
 * **Planets.** Zoom into a star down to a hundredth of an AU: all confirmed planets with a known
   host distance (6,428 around 4,818 stars; hosts that no star catalogue has, such as the Kepler and
   TESS stars, come from the NASA Exoplanet Archive) and the eight of the Solar System, on their measured
   orbits at their positions for today (or running faster), drawn larger than they are, like the
   stars. Close pairs such as Alpha Centauri A and B separate ([`docs/PLANETS.md`](docs/PLANETS.md)).
+  Below 1 AU distances are written in millions of kilometres.
 * **Galaxies.** Zoom out past the Milky Way (a stylised model with bar and spiral arms) to the
   Local Group, the Local Volume and the 55,877 galaxies of Cosmicflows-4, out to about 1.5 billion
   light years: every galaxy whose distance is measured independently of its redshift, in its
@@ -279,6 +280,9 @@ specified in [`docs/ROUTES.md`](docs/ROUTES.md):
   until they fit.
 * **Waypoints.** The box lists them with each jump's length; a click selects the star and flies
   there, close enough to see its links.
+* **Flyby.** *Fly the route* flies along the route, one star every 0.5, 1, 2.5 or 5 seconds, the
+  camera behind and a little above the direction of travel; *Stop* ends it, and the next start
+  continues from there. Zooming and panning work during the flight.
 * **Changes.** A change of the network settings, the filters or of data layers that hide stars
   computes the route again; the data of the last corridor is kept, so this takes a fraction of a
   second.

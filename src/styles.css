@@ -1070,6 +1070,23 @@ label.check input {
   color: var(--text-dim);
 }
 
+.route-flyby {
+  margin: 0 0 4px;
+  color: #ffb3ef;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.route-controls .route-fly {
+  border-color: rgba(255, 77, 214, 0.55);
+}
+
+.route-box.flying .route-fly {
+  background: rgba(255, 77, 214, 0.22);
+}
+
 .route-progress {
   height: 3px;
   margin: 2px 0 6px;
@@ -1184,6 +1201,15 @@ label.check input {
   .card-open > .bottom-left > .legend,
   .card-open .route-controls,
   .card-open .route-list {
+    display: none;
+  }
+
+  /* during a flyby its stop button stays */
+  .card-open .route-box.flying .route-controls {
+    display: flex;
+  }
+
+  .card-open .route-box.flying .route-controls > :not(.route-fly) {
     display: none;
   }
 

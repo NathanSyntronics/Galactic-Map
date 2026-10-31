@@ -99,7 +99,8 @@ from A in 2016 (ORB6, Akeson 2021).
 ### Zoom
 
 * The visible radius reaches down to 1e-7 ly (0.006 AU), the camera to 2.2e-7 ly. Distances below
-  0.05 ly (3,162 AU) are written in AU (AE in German).
+  0.05 ly (3,162 AU) are written in AU (AE in German), below 1 AU in millions of kilometres
+  ("57.9 million km", "1,72 Mio. km"), below a million kilometres in kilometres.
 * Below a visible radius of 2 ly the star symbols shrink a little faster than the view
   (radius^1.15, `starCloseScale`): close pairs separate (Alpha Centauri A and B, 28 AU apart on the
   map) and planetary orbits stay visible around their star.
@@ -127,7 +128,7 @@ from A in 2016 (ORB6, Akeson 2021).
   Solar System); their labels follow them.
 * A click picks a planet (its label or its symbol, within 8 px, 14 px by touch) before a star.
   A double click centres the view on it.
-* The planet card: name, star, kind, semi-major axis, eccentricity, period, radius (marked when
+* The planet card: name, star, kind, semi-major axis (below 1 AU also in kilometres), eccentricity, period, radius (marked when
   estimated), mass, equilibrium temperature, inclination (when measured), discovery (method,
   year), what the map chose, the date drawn (when not real time); *Centre view here* (flies to
   the star, close enough for the orbit) and a link to the NASA Exoplanet Archive.
@@ -135,3 +136,10 @@ from A in 2016 (ORB6, Akeson 2021).
   enough to show all orbits.
 * The search knows every planet ("Proxima Cen b", "Erde"); picking one flies to its star close
   enough to show its orbit.
+  Planets come after the stars and galaxies that match as well ("Trappist" lists the star
+  TRAPPIST-1 before its planets), but an exact planet name before a star's longer name, and a
+  star's planets right after it ("Kepler-90": the star, its planets, then Kepler-900, ...). A
+  planet the archive names after another name of its star is also found by the map's name
+  (KOI-351 b as "Kepler-90 b").
+* The grid's rings are spaced in the unit their labels use (2, 4, 6 million km rather than
+  0.0000002 ly).

@@ -90,6 +90,7 @@ export class SearchIndex {
   /** Exact-key lookup (normalised name or designation -> entry), built on first use. */
   private exact: Map<string, SearchTuple> | null = null;
   private byDesignation: Map<string, SearchTuple> | null = null;
+  private byPlace: Map<string, SearchTuple> | null = null;
   /** Other entries whose keys normalise to an exact-lookup key already taken (rare). */
   private clashes: Map<string, { raw: string; tuple: SearchTuple }[]> | null = null;
 
@@ -97,6 +98,7 @@ export class SearchIndex {
     this.exact = null;
     this.clashes = null;
     this.byDesignation = null;
+    this.byPlace = null;
     this.entries = tuples.map((tuple) => ({ tuple, keys: searchNames(tuple).map(normalize), pos: galacticToWorld(tuple[4], tuple[5], tuple[6]) }));
   }
 
@@ -105,6 +107,7 @@ export class SearchIndex {
     this.exact = null;
     this.clashes = null;
     this.byDesignation = null;
+    this.byPlace = null;
     for (const tuple of tuples) this.entries.push({ tuple, keys: searchNames(tuple).map(normalize), pos: galacticToWorld(tuple[4], tuple[5], tuple[6]) });
   }
 
@@ -162,6 +165,15 @@ export class SearchIndex {
     return clash.find((c) => c.raw === k)?.tuple ?? first;
   }
 
+  /** The entry of a star by its node path and index (named stars only). */
+  at(path: string, index: number): SearchTuple | null {
+    if (!this.byPlace) {
+      this.byPlace = new Map();
+      for (const { tuple } of this.entries) if (tuple[2] !== 'g' && tuple[2] !== 'p') this.byPlace.set(`${tuple[2]}:${tuple[3]}`, tuple);
+    }
+    return this.byPlace.get(`${path}:${index}`) ?? null;
+  }
+
   /** The entry of a star by its primary designation (named stars only). */
   byPrimary(designation: string): SearchTuple | null {
     if (!this.byDesignation) {
@@ -178,6 +190,7 @@ export class SearchIndex {
     for (const e of this.entries) {
       // the displayed names (English, German) come first in keys, then the other designations
       const shown = e.tuple[1] ? 2 : 1;
+      const planet = e.tuple[2] === 'p';
       let best = -1;
       let bestKey = 0;
       for (let k = 0; k < e.keys.length; k++) {
@@ -187,6 +200,9 @@ export class SearchIndex {
         // the name plus only a generic word ('Andromeda' -> Andromeda Galaxy, Andromedagalaxie)
         // counts almost as an exact match: before Andromeda I, II, …
         else if (key.startsWith(nq) && GENERIC_SUFFIXES.has(key.slice(nq.length))) s = 2.9;
+        // the star's name plus a planet letter: its planets right after it ('Kepler-90' -> Kepler-90,
+        // Kepler-90 b, c, … before Kepler-900)
+        else if (planet && key.length === nq.length + 1 && key.startsWith(nq) && /[a-z]/.test(key[nq.length])) s = 2.6;
         else if (key.startsWith(nq)) s = 2;
         else if (nq.length >= 3 && key.includes(nq)) s = 1;
         if (s > best) {
@@ -198,7 +214,10 @@ export class SearchIndex {
       // a match on the displayed name beats an equally good match on another designation
       // ('alpha centauri': Alpha Centauri A before Proxima Centauri, alias 'Alpha Centauri C')
       const shownBonus = bestKey < shown ? 40 : 0;
-      hits.push({ e, score: best * 100 + shownBonus - e.tuple[7] * 5 - e.keys[0].length * 0.1, key: bestKey });
+      // planets after the stars and galaxies matched as well ('Trappist-1': the star before
+      // TRAPPIST-1 b, c, …; 50 is more than the rank range, 35), but an exact planet name before
+      // a star's prefix ('Erde')
+      hits.push({ e, score: best * 100 + shownBonus - (planet ? 50 : 0) - e.tuple[7] * 5 - e.keys[0].length * 0.1, key: bestKey });
     }
     hits.sort((a, b) => b.score - a.score);
     return hits.slice(0, limit).map(({ e, key }) => hitOf(e.tuple, searchNames(e.tuple)[key], e.pos));

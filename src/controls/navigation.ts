@@ -1,5 +1,6 @@
 import { MathUtils, PerspectiveCamera, Quaternion, Spherical, Vector3 } from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { Tour } from './tour';
 
 const UP = new Vector3(0, 1, 0);
 
@@ -45,6 +46,21 @@ interface Flight {
 
 const IDENTITY = new Quaternion();
 
+/** OrbitControls states that turn the view (mouse and one finger; two fingers that also turn). */
+const ROTATE_STATES = new Set([0, 3, 6]);
+
+/** A route flyby in progress. */
+interface TourState {
+  tour: Tour;
+  /** Flying to the first waypoint, then along the route. */
+  phase: 'approach' | 'run';
+  /** The camera turns to look along the route, until the user turns the view. */
+  steer: boolean;
+  /** Where the view centre was relative to the route when the run began; fades out. */
+  lag: Vector3;
+  index: number;
+}
+
 /** What a two-finger touch gesture does: decided after the fingers have moved a few pixels. */
 export type TwoFingerMode = 'undecided' | 'zoom' | 'pan';
 
@@ -69,6 +85,7 @@ export class Navigation {
   private readonly keys = new Map<string, KeyAction>();
   private fast = false;
   private flight: Flight | null = null;
+  private tourState: TourState | null = null;
   private readonly tmp = new Vector3();
   private readonly tmp2 = new Vector3();
   private readonly spherical = new Spherical();
@@ -76,6 +93,10 @@ export class Navigation {
   onChange: () => void = () => {};
   /** Keyboard shortcuts that are not movement (handled by the app). */
   onShortcut: (key: string, e: KeyboardEvent) => void = () => {};
+  /** The flyby passed the waypoint nearest to it changed (index into its points). */
+  onTourStep: (index: number) => void = () => {};
+  /** The flyby ended: at the destination (finished) or stopped. */
+  onTourEnd: (finished: boolean) => void = () => {};
 
   constructor(
     readonly camera: PerspectiveCamera,
@@ -95,6 +116,8 @@ export class Navigation {
     c.addEventListener('change', () => this.onChange());
     c.addEventListener('start', () => {
       this.flight = null;
+      // a flyby goes on, but the view is the user's once they turn it (zooming and panning keep the steering)
+      if (this.tourState && ROTATE_STATES.has((c as unknown as { state: number }).state)) this.tourState.steer = false;
     });
     this.controls = c;
     this.watchTwoFingers(dom);
@@ -179,6 +202,7 @@ export class Navigation {
     if (action) {
       this.keys.set(e.code, action);
       this.flight = null;
+      if (this.tourState && action.startsWith('rot')) this.tourState.steer = false;
       e.preventDefault();
       return;
     }
@@ -190,6 +214,12 @@ export class Navigation {
    * from the view centre to the camera (a unit vector; kept a little away from straight up or down).
    */
   flyTo(point: Vector3, distance?: number, duration = 1.2, direction?: Vector3): void {
+    // somewhere else: a flyby stops
+    this.stopTour();
+    this.startFlight(point, distance, duration, direction);
+  }
+
+  private startFlight(point: Vector3, distance?: number, duration = 1.2, direction?: Vector3): void {
     const flight: Flight = {
       fromTarget: this.controls.target.clone(),
       toTarget: point.clone(),
@@ -248,8 +278,80 @@ export class Navigation {
     this.onChange();
   }
 
+  /**
+   * Flies along a route: first to the waypoint `from` (camera distance `distance`, looking along
+   * the route), then through the waypoints, `step` seconds each (see Tour).
+   */
+  startTour(points: Vector3[], step: number, distance: number, from = 0): void {
+    this.stopTour();
+    const tour = new Tour(points, step, from);
+    if (tour.done) return;
+    const start = tour.position(tour.s);
+    const approach = Math.min(2.2, 0.9 + Math.log10(1 + this.controls.target.distanceTo(start) / Math.max(distance, 1e-6)));
+    this.startFlight(start, distance, approach, tour.viewDirection(tour.s));
+    this.tourState = { tour, phase: 'approach', steer: true, lag: new Vector3(), index: tour.index };
+    this.onTourStep(tour.index);
+  }
+
+  /** Stops a flyby (the view stays where it is). */
+  stopTour(): void {
+    if (!this.tourState) return;
+    this.tourState = null;
+    this.onTourEnd(false);
+  }
+
+  /** Changes the seconds per waypoint of the running flyby. */
+  setTourStep(step: number): void {
+    if (this.tourState) this.tourState.tour.step = step;
+  }
+
+  get touring(): boolean {
+    return this.tourState !== null;
+  }
+
+  /** The waypoint the flyby is nearest to (-1 without one). */
+  get tourIndex(): number {
+    return this.tourState?.index ?? -1;
+  }
+
+  /** One frame of a flyby: moves view centre and camera along the route (the user's panning stays as an offset). */
+  private updateTour(dt: number): boolean {
+    const st = this.tourState!;
+    const { tour } = st;
+    const c = this.controls;
+    if (st.phase === 'approach') {
+      if (this.flight) return false;
+      // arrived (or the user took the approach over): the route from here, any distance left fades out
+      st.phase = 'run';
+      st.lag.subVectors(c.target, tour.position(tour.s));
+    }
+    const before = tour.position(tour.s);
+    const lagBefore = st.lag.clone();
+    tour.advance(dt);
+    st.lag.multiplyScalar(Math.exp(-3 * dt));
+    const move = tour.position(tour.s).sub(before).add(st.lag).sub(lagBefore);
+    c.target.add(move);
+    this.camera.position.add(move);
+    if (st.steer) {
+      const offset = this.tmp.copy(this.camera.position).sub(c.target);
+      const dist = offset.length() || 1;
+      offset.divideScalar(dist).lerp(tour.viewDirection(tour.s), 1 - Math.exp(-0.9 * dt)).normalize();
+      this.camera.position.copy(c.target).addScaledVector(offset, dist);
+    }
+    if (tour.index !== st.index) {
+      st.index = tour.index;
+      this.onTourStep(st.index);
+    }
+    if (tour.done) {
+      this.tourState = null;
+      this.onTourEnd(true);
+    }
+    return true;
+  }
+
   /** Jump without animation. */
   setView(target: Vector3, offset: Vector3): void {
+    this.stopTour();
     this.flight = null;
     this.controls.target.copy(target);
     this.camera.position.copy(target).add(offset);
@@ -274,6 +376,7 @@ export class Navigation {
       if (f.t >= 1) this.flight = null;
       changed = true;
     }
+    if (this.tourState) changed = this.updateTour(dt) || changed;
     if (this.keys.size > 0) {
       changed = this.applyKeys(dt) || changed;
     }

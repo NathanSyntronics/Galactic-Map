@@ -70,6 +70,40 @@ describe('SearchIndex', () => {
     expect(idx.query('Andromeda II')[0].nameEn).toBe('Andromeda II');
   });
 
+  it('lists stars before the planets that share their name, but an exact planet name first', () => {
+    const idx = new SearchIndex();
+    idx.load([
+      ['TRAPPIST-1 b', null, 'p', 0, 7.75, 20.968, -33.965, 0, null, 'TRAPPIST-1 b', -1],
+      ['TRAPPIST-1 c', null, 'p', 1, 7.75, 20.968, -33.965, 0, null, 'TRAPPIST-1 c', -1],
+      ['TRAPPIST-1', 'Trappist-1', 'r5222304747', 3885, 7.75, 20.968, -33.965, 7, ['2MASS J23062928-0502285'], 'TRAPPIST-1', -1],
+      ['Earth', 'Erde', 'p', 2, 0, 0, 0, 0, null, 'Earth', -1],
+      ['Erdeiland', null, 'r0', 5, 1, 1, 1, 7, null, 'Erdeiland', -1],
+    ]);
+    expect(idx.query('Trappist').map((h) => h.nameEn)).toEqual(['TRAPPIST-1', 'TRAPPIST-1 b', 'TRAPPIST-1 c']);
+    expect(idx.query('Trappist-1')[0].nameEn).toBe('TRAPPIST-1');
+    expect(idx.query('trappist-1 c')[0].nameEn).toBe('TRAPPIST-1 c');
+    expect(idx.query('Erde')[0].nameEn).toBe('Earth');
+  });
+
+  it("lists a star's planets right after it, before longer star names", () => {
+    const idx = new SearchIndex();
+    idx.load([
+      ['Kepler-900', null, 'r1', 1, 0, 0, 0, 7, null, 'Kepler-900', -1],
+      ['Kepler-901', null, 'r1', 2, 0, 0, 0, 7, null, 'Kepler-901', -1],
+      ['Kepler-90 b', null, 'p', 0, 0, 0, 0, 0, null, 'Kepler-90 b', -1],
+      ['Kepler-90 h', null, 'p', 1, 0, 0, 0, 0, null, 'Kepler-90 h', -1],
+      ['Kepler-90', null, 'r1', 3, 0, 0, 0, 7, null, 'Kepler-90', -1],
+      ['Kepler-900 b', null, 'p', 2, 0, 0, 0, 0, null, 'Kepler-900 b', -1],
+    ]);
+    expect(idx.query('Kepler-90').map((h) => h.nameEn)).toEqual(['Kepler-90', 'Kepler-90 b', 'Kepler-90 h', 'Kepler-900', 'Kepler-901', 'Kepler-900 b']);
+    expect(idx.at('r1', 3)?.[0]).toBe('Kepler-90');
+    expect(idx.at('p', 0)).toBeNull();
+    // a planet named after another name of its star (the archive's KOI-351 b), found by the map's
+    idx.add([['KOI-351 c', null, 'p', 3, 0, 0, 0, 0, ['Kepler-90 c'], 'KOI-351 c', -1]]);
+    const hits = idx.query('Kepler-90').map((h) => h.nameEn);
+    expect(hits.indexOf('KOI-351 c')).toBeLessThan(hits.indexOf('Kepler-900'));
+  });
+
   it('still finds German names and alternative designations', () => {
     expect(first('wega')).toBe('Vega');
     expect(first('55 Cnc'.replace('Cnc', 'Cancri'))).toBe('Rho¹ Cancri');

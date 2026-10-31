@@ -56,6 +56,8 @@ export interface Settings {
   jumpConnect: boolean;
   jumpColor: JumpColor;
   jumpOpacity: number;
+  /** Route flyby: seconds per star. */
+  flybyStep: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -92,6 +94,7 @@ export const DEFAULT_SETTINGS: Settings = {
   jumpConnect: true,
   jumpColor: 'length',
   jumpOpacity: 0.6,
+  flybyStep: 2.5,
 };
 
 /** Allowed values of the settings with a fixed set of choices. */
@@ -101,6 +104,7 @@ const CHOICES: Partial<Record<keyof Settings, readonly unknown[]>> = {
   missingStyle: ['dim', 'hide', 'normal'],
   jumpColor: ['stars', 'uniform', 'length'],
   planetSpeed: [0, 1, 30, 365],
+  flybyStep: [0.5, 1, 2.5, 5],
 };
 
 /** Range of numeric settings whose controls are sliders with fixed ends. */

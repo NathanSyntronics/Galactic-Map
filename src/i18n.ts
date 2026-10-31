@@ -97,6 +97,8 @@ const en = {
   daysN: '{n} days',
   yearsN: '{n} years',
   au: 'AU',
+  km: 'km',
+  kmMillion: '{n} million km',
   openExoplanetArchive: 'NASA Exoplanet Archive',
   showPlanets: 'Show planets',
   planetDate: 'Positions on {date}',
@@ -110,23 +112,23 @@ const en = {
   galaxyBarredSpiral: 'Barred spiral galaxy',
   localGroup: 'Local Group',
   distanceToCentre: 'Distance to its centre',
-  distanceMethod: 'Distance from',
-  methodTRGB: 'tip of the red giant branch',
-  methodCep: 'Cepheids',
-  methodMaser: 'water masers (geometric)',
-  methodSBF: 'surface brightness fluctuations',
-  methodSNIa: 'type Ia supernovae',
-  methodSNII: 'type II supernovae',
-  methodFP: 'fundamental plane',
-  methodTF: 'Tully-Fisher relation',
-  methodRR: 'RR Lyrae stars',
-  methodHB: 'horizontal branch',
-  methodCMD: 'colour-magnitude diagram',
-  methodBS: 'brightest stars',
-  methodPNLF: 'planetary nebulae',
-  methodMem: 'membership of a group',
-  methodTxt: 'appearance (estimate)',
-  methodGeom: 'geometric',
+  distanceMethod: 'Distance measured via',
+  methodTRGB: 'its brightest red giant stars',
+  methodCep: 'pulsating stars (Cepheids)',
+  methodMaser: 'gas clouds near its centre, geometrically',
+  methodSBF: 'how grainy its light looks',
+  methodSNIa: 'a supernova of known brightness',
+  methodSNII: 'a supernova',
+  methodFP: 'its size, brightness and the speed of its stars',
+  methodTF: 'its rotation and brightness',
+  methodRR: 'pulsating stars (RR Lyrae)',
+  methodHB: 'the brightness of its old stars',
+  methodCMD: 'the brightness and colours of its stars',
+  methodBS: 'its brightest stars (rough)',
+  methodPNLF: 'glowing gas shells of dying stars',
+  methodMem: 'the group it belongs to (estimate)',
+  methodTxt: 'its appearance (rough estimate)',
+  methodGeom: 'direct geometric measurement',
   diameter: 'Diameter',
   openNed: 'Look up in NED',
   milkyWayModelSource: 'model (stylised: bar, four arms and the Local Arm)',
@@ -303,6 +305,11 @@ const en = {
   routeModeJumps: 'Fewest jumps',
   routeModeDistance: 'Shortest distance',
   routeShowAll: 'Show whole route',
+  routeFlyby: '▶ Fly the route',
+  routeFlybyStop: '■ Stop',
+  routeFlybyStep: 'Speed of the flyby',
+  routeFlybyStepN: '{n} s per star',
+  routeFlybyAt: 'Star {k} of {n}: {name}',
   routeWaypoints: 'Waypoints ({n})',
   routeRemove: 'Remove route',
   routeRetry: 'Try again',
@@ -427,6 +434,8 @@ const de: Record<MessageKey, string> = {
   daysN: '{n} Tage',
   yearsN: '{n} Jahre',
   au: 'AE',
+  km: 'km',
+  kmMillion: '{n} Mio. km',
   openExoplanetArchive: 'NASA Exoplanet Archive',
   showPlanets: 'Planeten zeigen',
   planetDate: 'Positionen am {date}',
@@ -440,23 +449,23 @@ const de: Record<MessageKey, string> = {
   galaxyBarredSpiral: 'Balkenspiralgalaxie',
   localGroup: 'Lokale Gruppe',
   distanceToCentre: 'Entfernung zum Zentrum',
-  distanceMethod: 'Entfernung aus',
-  methodTRGB: 'Spitze des Roten-Riesen-Asts',
-  methodCep: 'Cepheiden',
-  methodMaser: 'Wassermasern (geometrisch)',
-  methodSBF: 'Flächenhelligkeitsfluktuationen',
-  methodSNIa: 'Supernovae vom Typ Ia',
-  methodSNII: 'Supernovae vom Typ II',
-  methodFP: 'Fundamentalebene',
-  methodTF: 'Tully-Fisher-Beziehung',
-  methodRR: 'RR-Lyrae-Sternen',
-  methodHB: 'Horizontalast',
-  methodCMD: 'Farben-Helligkeits-Diagramm',
-  methodBS: 'hellsten Sternen',
-  methodPNLF: 'Planetarischen Nebeln',
-  methodMem: 'Zugehörigkeit zu einer Gruppe',
-  methodTxt: 'Erscheinungsbild (Schätzung)',
-  methodGeom: 'geometrisch',
+  distanceMethod: 'Entfernung gemessen über',
+  methodTRGB: 'ihre hellsten Roten Riesen',
+  methodCep: 'pulsierende Sterne (Cepheiden)',
+  methodMaser: 'Gaswolken nahe ihrem Zentrum, geometrisch',
+  methodSBF: 'wie körnig ihr Licht aussieht',
+  methodSNIa: 'eine Supernova bekannter Helligkeit',
+  methodSNII: 'eine Supernova',
+  methodFP: 'Größe, Helligkeit und Tempo ihrer Sterne',
+  methodTF: 'ihre Rotation und Helligkeit',
+  methodRR: 'pulsierende Sterne (RR Lyrae)',
+  methodHB: 'die Helligkeit ihrer alten Sterne',
+  methodCMD: 'Helligkeit und Farbe ihrer Sterne',
+  methodBS: 'ihre hellsten Sterne (grob)',
+  methodPNLF: 'leuchtende Gashüllen sterbender Sterne',
+  methodMem: 'ihre Galaxiengruppe (Schätzung)',
+  methodTxt: 'ihr Aussehen (grobe Schätzung)',
+  methodGeom: 'direkte geometrische Messung',
   diameter: 'Durchmesser',
   openNed: 'In NED nachschlagen',
   milkyWayModelSource: 'Modell (stilisiert: Balken, vier Arme und der Orion-Arm)',
@@ -633,6 +642,11 @@ const de: Record<MessageKey, string> = {
   routeModeJumps: 'Wenigste Sprünge',
   routeModeDistance: 'Kürzeste Strecke',
   routeShowAll: 'Ganze Route zeigen',
+  routeFlyby: '▶ Route abfliegen',
+  routeFlybyStop: '■ Stopp',
+  routeFlybyStep: 'Tempo des Flugs',
+  routeFlybyStepN: '{n} s pro Stern',
+  routeFlybyAt: 'Stern {k} von {n}: {name}',
   routeWaypoints: 'Wegpunkte ({n})',
   routeRemove: 'Route entfernen',
   routeRetry: 'Erneut versuchen',
@@ -703,11 +717,43 @@ export function numberText(v: number): string {
   return current === 'de' ? s.replace('.', ',') : s;
 }
 
-/** Distance in light years with sensible precision. */
-export function formatLy(ly: number): string {
-  // within planetary systems (below 0.05 ly = 3,162 AU): in astronomical units
-  const au = Math.abs(ly) * 63241.077;
-  if (ly !== 0 && Math.abs(ly) < 0.05) return `${formatNumber(Math.sign(ly) * au, au >= 100 ? 0 : Math.max(0, Math.min(2 - Math.floor(Math.log10(au)), 6)))} ${t('au')}`;
+const AU_PER_LY = 63241.077;
+const KM_PER_LY = 9.4607304725808e12;
+
+/** Distance in kilometres: in millions with three significant digits, below a million rounded to three. */
+export function formatKm(km: number): string {
+  const r = Number(km.toPrecision(3));
+  // three significant digits without trailing zeros (the grid's 2 million km, not 2.00)
+  if (Math.abs(r) >= 1e6) return t('kmMillion', { n: (km / 1e6).toLocaleString(locale(), { maximumSignificantDigits: 3 }) });
+  return `${formatNumber(r, 0)} ${t('km')}`;
+}
+
+/**
+ * The unit a distance is written in: kilometres below 1 AU (close to a star), astronomical units
+ * below 0.05 ly (3,162 AU, within planetary systems), else light years.
+ */
+export function distanceUnit(ly: number): 'km' | 'au' | 'ly' {
+  const a = Math.abs(ly);
+  if (a !== 0 && a * AU_PER_LY < 1) return 'km';
+  if (a !== 0 && a < 0.05) return 'au';
+  return 'ly';
+}
+
+/** Units of distanceUnit(ly) per light year. */
+export function distanceUnitScale(ly: number): number {
+  const u = distanceUnit(ly);
+  return u === 'km' ? KM_PER_LY : u === 'au' ? AU_PER_LY : 1;
+}
+
+/**
+ * Distance in light years with sensible precision, in the unit of `unitOf` (by default of the
+ * distance itself; the grid writes all its rings in the unit of its radius).
+ */
+export function formatLy(ly: number, unitOf = ly): string {
+  const unit = distanceUnit(unitOf);
+  if (unit === 'km') return formatKm(ly * KM_PER_LY);
+  const au = Math.abs(ly) * AU_PER_LY;
+  if (unit === 'au') return `${formatNumber(Math.sign(ly) * au, au >= 100 || au === 0 ? 0 : Math.max(0, Math.min(2 - Math.floor(Math.log10(au)), 6)))} ${t('au')}`;
   // a million light years and more: in millions or billions, three significant digits
   if (Math.abs(ly) >= 1e9) return t('lyBillion', { n: formatNumber(ly / 1e9, sigDigits(ly / 1e9)) });
   if (Math.abs(ly) >= 1e6) return t('lyMillion', { n: formatNumber(ly / 1e6, sigDigits(ly / 1e6)) });

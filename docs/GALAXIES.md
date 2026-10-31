@@ -154,8 +154,9 @@ designations leave out the primary one). A galaxy without an entry is called "PG
 * A click picks a star first (as before); otherwise the galaxy whose ellipse on screen (as drawn,
   enlarged at large scales) contains
   the pointer (or within 6 px of a small one), the smallest of several.
-* The galaxy card shows name (and German name), class, distance with error and method, the
-  catalogues, diameter, luminosity, Local Group membership and the designations; *Centre view
+* The galaxy card shows name (and German name), class, distance with error and method (in plain
+  words: "its brightest red giant stars" for the tip of the red giant branch, "how grainy its light
+  looks" for surface brightness fluctuations, ...), the catalogues, diameter, luminosity, Local Group membership and the designations; *Centre view
   here* and a link to NED.
 * The search knows the names and designations of all galaxies (PGC numbers too); a name followed
   only by a generic word (*Galaxy*, *-galaxie*, *Dwarf*, …) counts as an exact match, so

@@ -1,6 +1,6 @@
 import { attrName, type AttributeStore, type PaletteId } from '../data/attributes';
 import { parseNumber } from '../data/csv';
-import { getLang, t, formatNumber, numberText, type MessageKey } from '../i18n';
+import { formatLy, getLang, t, formatNumber, numberText, type MessageKey } from '../i18n';
 import {
   BUILTIN_ATTRIBUTES,
   COLOR_TEMPERATURE,
@@ -203,7 +203,8 @@ export class SettingsPanel {
       0.001,
       () => radiusToSlider(s().radius),
       (v) => this.store.set({ radius: sliderToRadius(v) }),
-      () => `${formatNumber(s().radius, s().radius < 10 ? 1 : 0)} ${t('ly')}`,
+      // close to a star in AU or kilometres
+      () => (s().radius < 0.05 ? formatLy(s().radius) : `${formatNumber(s().radius, s().radius < 10 ? 1 : 0)} ${t('ly')}`),
     );
     b.appendChild(radiusRow);
     b.appendChild(this.checkbox('autoRadius', () => s().autoRadius, (v) => this.store.set({ autoRadius: v })));
