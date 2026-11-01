@@ -72,8 +72,15 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def tap_sync(endpoint: str, query: str, *, fmt: str = "csv", maxrec: int | None = None, timeout: float = 600, retries: int = 3) -> pd.DataFrame:
-    """Run a synchronous ADQL query against a TAP service and return a DataFrame (CSV transport)."""
+MAX_RETRY_DELAY = 300.0
+
+
+def tap_sync(endpoint: str, query: str, *, fmt: str = "csv", maxrec: int | None = None, timeout: float = 600, retries: int = 8) -> pd.DataFrame:
+    """Run a synchronous ADQL query against a TAP service and return a DataFrame (CSV transport).
+
+    A failed query is tried again after 3, 6, 12, ... s, at most 5 min apart (about 11 min of
+    pauses in all): an overloaded archive (the ESA Gaia archive answering 503 for a while) gets
+    time to recover before the build gives up."""
     data = {"REQUEST": "doQuery", "LANG": "ADQL", "FORMAT": fmt, "QUERY": query}
     if maxrec is not None:
         data["MAXREC"] = str(maxrec)
@@ -91,7 +98,7 @@ def tap_sync(endpoint: str, query: str, *, fmt: str = "csv", maxrec: int | None 
                 raise
             log.warning("TAP query failed (%s), retrying in %.0f s", err, delay)
             time.sleep(delay)
-            delay *= 2
+            delay = min(delay * 2, MAX_RETRY_DELAY)
     raise AssertionError("unreachable")
 
 
