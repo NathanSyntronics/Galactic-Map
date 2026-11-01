@@ -426,5 +426,12 @@ requests), otherwise from `data/` next to it.
 ### Deployment
 
 `.github/workflows/pages.yml` builds the star data and the app and deploys them to
-GitHub Pages on every push to `main`. To enable it, set *Settings → Pages → Source* to
-*GitHub Actions*. The catalogue downloads are cached between runs.
+GitHub Pages on every push to the default branch (`claude/stellar-environment-3d-4hemgg`, or
+`main`), or when started by hand (*Actions → Build star data and deploy to GitHub Pages → Run
+workflow*). To enable it, set *Settings → Pages → Source* to *GitHub Actions*.
+
+* The catalogue downloads are cached between runs (GitHub deletes a cache unused for 7 days; the
+  next run downloads the catalogues again).
+* Any failing step stops the run before the deploy, so the site online stays as it was: a
+  catalogue server that is down does not publish a map without its stars, planets or galaxies.
+  The star data is checked against known stars (`galmap.verify`) before the deploy.
