@@ -23,7 +23,8 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    # a slow catalogue server may take long; what is downloaded is kept in the cache for the next run
+    timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
 
