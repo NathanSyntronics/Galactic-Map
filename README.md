@@ -431,7 +431,12 @@ GitHub Pages on every push to the default branch (`claude/stellar-environment-3d
 workflow*). To enable it, set *Settings → Pages → Source* to *GitHub Actions*.
 
 * The catalogue downloads are cached between runs (GitHub deletes a cache unused for 7 days; the
-  next run downloads the catalogues again).
+  next run downloads the catalogues again). They are fetched first, each on its own
+  (`python -m galmap.prefetch`): a catalogue server that is down does not stop the others, what
+  arrives is cached even when the build then fails, and the next run fetches only what is missing.
+* Downloads and queries are tried again when a server is down or overloaded: after 2, 4, 8, ... s,
+  at most 5 min apart (about half an hour; TAP queries about 50 min). A server that does not
+  accept the connection counts as down after 30 s.
 * Any failing step stops the run before the deploy, so the site online stays as it was: a
   catalogue server that is down does not publish a map without its stars, planets or galaxies.
   The star data is checked against known stars (`galmap.verify`) before the deploy.

@@ -23,6 +23,12 @@ def session() -> requests.Session:
     return s
 
 
+# a server that does not accept the connection within this time counts as down (and is asked again)
+CONNECT_TIMEOUT = 30.0
+# longest pause between two attempts
+MAX_RETRY_DELAY = 300.0
+
+
 def fetch(
     url: str,
     dest: Path,
@@ -30,11 +36,15 @@ def fetch(
     sha256: str | None = None,
     refresh: bool = False,
     timeout: float = 600,
-    retries: int = 4,
+    retries: int = 10,
     method: str = "GET",
     data: dict | None = None,
 ) -> Path:
-    """Download url to dest unless it already exists (and matches sha256 if given)."""
+    """Download url to dest unless it already exists (and matches sha256 if given).
+
+    A server that does not answer is noticed after CONNECT_TIMEOUT s; a failed download is tried
+    again after 2, 4, 8, ... s, at most 5 min apart (about half an hour in all: the CDS file
+    server refused connections for most of an hour in November 2026)."""
     dest = Path(dest)
     if dest.exists() and not refresh:
         if sha256 is None or _sha256(dest) == sha256:
@@ -46,7 +56,7 @@ def fetch(
     for attempt in range(retries + 1):
         try:
             log.info("downloading %s", url)
-            with session().request(method, url, data=data, stream=True, timeout=timeout) as r:
+            with session().request(method, url, data=data, stream=True, timeout=(CONNECT_TIMEOUT, timeout)) as r:
                 r.raise_for_status()
                 with open(tmp, "wb") as fh:
                     for chunk in r.iter_content(1 << 20):
@@ -60,7 +70,25 @@ def fetch(
                 raise
             log.warning("download failed (%s), retrying in %.0f s", err, delay)
             time.sleep(delay)
-            delay *= 2
+            delay = min(delay * 2, MAX_RETRY_DELAY)
+    raise AssertionError("unreachable")
+
+
+def request(method: str, url: str, *, timeout: float = 600, retries: int = 10, **kw) -> requests.Response:
+    """An HTTP request that raises on an error status, tried again like fetch (about half an hour
+    of pauses in all) when the server is down, overloaded or the connection breaks."""
+    delay = 2.0
+    for attempt in range(retries + 1):
+        try:
+            r = session().request(method, url, timeout=(CONNECT_TIMEOUT, timeout), **kw)
+            r.raise_for_status()
+            return r
+        except requests.RequestException as err:
+            if attempt == retries:
+                raise
+            log.warning("request to %s failed (%s), retrying in %.0f s", url, err, delay)
+            time.sleep(delay)
+            delay = min(delay * 2, MAX_RETRY_DELAY)
     raise AssertionError("unreachable")
 
 
@@ -72,7 +100,6 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-MAX_RETRY_DELAY = 300.0
 
 
 def tap_sync(endpoint: str, query: str, *, fmt: str = "csv", maxrec: int | None = None, timeout: float = 600, retries: int = 16) -> pd.DataFrame:
@@ -87,7 +114,7 @@ def tap_sync(endpoint: str, query: str, *, fmt: str = "csv", maxrec: int | None 
     delay = 3.0
     for attempt in range(retries + 1):
         try:
-            r = session().post(endpoint.rstrip("/") + "/sync", data=data, timeout=timeout)
+            r = session().post(endpoint.rstrip("/") + "/sync", data=data, timeout=(CONNECT_TIMEOUT, timeout))
             r.raise_for_status()
             text = r.content.decode("utf-8")
             if text.lstrip().startswith("<?xml") or "<VOTABLE" in text[:500]:

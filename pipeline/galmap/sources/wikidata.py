@@ -28,7 +28,7 @@ import re
 import numpy as np
 import pandas as pd
 
-from ..download import CACHE_DIR, session
+from ..download import CACHE_DIR, request
 from ..names import GREEK, designation_key
 
 log = logging.getLogger(__name__)
@@ -152,8 +152,7 @@ GROUP BY ?item
 def _fetch(refresh: bool, query: str = QUERY, file=FILE, min_rows: int = MIN_ROWS) -> pd.DataFrame:
     if file.exists() and not refresh:
         return pd.read_csv(file, dtype=str, keep_default_na=False)
-    r = session().post(ENDPOINT, data={"query": query}, headers={"Accept": "text/csv"}, timeout=600)
-    r.raise_for_status()
+    r = request("POST", ENDPOINT, data={"query": query}, headers={"Accept": "text/csv"}, timeout=600)
     df = pd.read_csv(io.StringIO(r.content.decode("utf-8")), dtype=str, keep_default_na=False)
     if len(df) < min_rows:
         raise RuntimeError(f"Wikidata query returned only {len(df)} rows")

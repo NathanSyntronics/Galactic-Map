@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 
 from .coords import A_G, LY_PER_PC
-from .download import CACHE_DIR, session
+from .download import CACHE_DIR, request
 
 log = logging.getLogger(__name__)
 
@@ -91,8 +91,7 @@ def load(refresh: bool = False) -> pd.DataFrame:
     if FILE.exists() and not refresh:
         text = FILE.read_text("utf-8", errors="replace")
     else:
-        r = session().get(URL, timeout=300)
-        r.raise_for_status()
+        r = request("GET", URL, timeout=300)
         text = r.text
         FILE.parent.mkdir(parents=True, exist_ok=True)
         FILE.write_text(text, "utf-8")

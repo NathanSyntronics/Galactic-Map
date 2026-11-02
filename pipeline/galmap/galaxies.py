@@ -36,7 +36,7 @@ import pandas as pd
 from scipy.spatial import cKDTree
 
 from .coords import A_G, LY_PER_PC, unit_vectors
-from .download import CACHE_DIR, fetch, session, tap_sync
+from .download import CACHE_DIR, fetch, request, tap_sync
 
 log = logging.getLogger("galmap.galaxies")
 
@@ -291,8 +291,7 @@ WIKIDATA_CODES = """SELECT ?pgc ?code ?catLabel WHERE {
 def _sparql(query: str, dest: Path, refresh: bool) -> pd.DataFrame:
     if dest.exists() and not refresh:
         return pd.read_csv(dest, dtype=str, keep_default_na=False)
-    r = session().get(WIKIDATA, params={"query": query}, headers={"Accept": "text/csv"}, timeout=600)
-    r.raise_for_status()
+    r = request("GET", WIKIDATA, params={"query": query}, headers={"Accept": "text/csv"}, timeout=600)
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_bytes(r.content)
     return pd.read_csv(dest, dtype=str, keep_default_na=False)
@@ -357,8 +356,7 @@ def load_wikidata_by_label(names: list[str], refresh: bool = False) -> pd.DataFr
     parts = []
     for i in range(0, len(variants), 400):
         values = " ".join(json.dumps(v, ensure_ascii=False) + "@en" for v in variants[i : i + 400])
-        r = session().post(WIKIDATA, data={"query": WIKIDATA_BY_LABEL.format(values=values)}, headers={"Accept": "text/csv"}, timeout=600)
-        r.raise_for_status()
+        r = request("POST", WIKIDATA, data={"query": WIKIDATA_BY_LABEL.format(values=values)}, headers={"Accept": "text/csv"}, timeout=600)
         parts.append(pd.read_csv(io.BytesIO(r.content), dtype=str, keep_default_na=False))
     out = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=["label", "item", "ra", "dec", "en", "de", "enwiki", "dewiki"])
     dest.parent.mkdir(parents=True, exist_ok=True)

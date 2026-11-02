@@ -48,3 +48,21 @@ def test_pauses_are_capped_and_the_last_error_is_raised(monkeypatch):
     assert max(pauses) == download.MAX_RETRY_DELAY
     # rides out an outage of about 50 minutes, well within the job's 6 hours
     assert 45 * 60 < sum(pauses) < 55 * 60
+
+
+class _ReqSession(_Session):
+    def request(self, method, url, **kw):
+        self.kw = kw
+        return self.post()
+
+
+def test_plain_requests_are_tried_again_and_notice_a_dead_server_quickly(monkeypatch):
+    s = _ReqSession([_Resp(503), _Resp(502), _Resp(200, "ok")])
+    pauses = []
+    monkeypatch.setattr(download, "session", lambda: s)
+    monkeypatch.setattr(download.time, "sleep", pauses.append)
+    r = download.request("GET", "https://example.org/x", timeout=300)
+    assert r.content == b"ok"
+    assert pauses == [2, 4]
+    # connection and read time limits: a server that does not answer is noticed after 30 s
+    assert s.kw["timeout"] == (download.CONNECT_TIMEOUT, 300)

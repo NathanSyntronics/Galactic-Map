@@ -47,6 +47,13 @@ jobs:
             catalogues-v1-${{ hashFiles('pipeline/galmap/sources/*.py') }}-
             catalogues-v1-
 
+      # Every catalogue on its own: a server that is down does not stop the others, and what
+      # arrives is cached for the next run (the build below still needs all of them).
+      - name: Download catalogues
+        working-directory: pipeline
+        continue-on-error: true
+        run: python -m galmap.prefetch
+
       # Any step that fails stops the run before the deploy: the site online stays as it was
       # (a source that is down must not publish a map without its planets or galaxies).
       - name: Build star data
