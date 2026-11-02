@@ -2,6 +2,9 @@
 
 An interactive 3-D map of the Sun's stellar neighbourhood, built from real star catalogues.
 
+**Live: https://nathansyntronics.github.io/Galactic-Map/** (rebuilt from the catalogues on every
+push, see *Deployment*).
+
 * **Correct positions.** Every star is placed at its measured position: sky coordinates plus
   a trigonometric parallax from Gaia DR3, Hipparcos or the 20 pc census. The positions are
   converted into a heliocentric galactic coordinate system (X towards the Galactic Centre,
