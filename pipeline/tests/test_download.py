@@ -38,12 +38,13 @@ def test_retries_until_the_archive_answers(monkeypatch):
 
 
 def test_pauses_are_capped_and_the_last_error_is_raised(monkeypatch):
-    s = _Session([_Resp(503)] * 9)
+    s = _Session([_Resp(503)] * 17)
     pauses = []
     monkeypatch.setattr(download, "session", lambda: s)
     monkeypatch.setattr(download.time, "sleep", pauses.append)
     with pytest.raises(requests.HTTPError):
         download.tap_sync("https://example.org/tap", "SELECT 1")
-    assert s.calls == 9
+    assert s.calls == 17
     assert max(pauses) == download.MAX_RETRY_DELAY
-    assert sum(pauses) < 15 * 60
+    # rides out an outage of about 50 minutes, well within the job's 6 hours
+    assert 45 * 60 < sum(pauses) < 55 * 60

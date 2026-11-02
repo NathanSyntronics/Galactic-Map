@@ -75,12 +75,12 @@ def _sha256(path: Path) -> str:
 MAX_RETRY_DELAY = 300.0
 
 
-def tap_sync(endpoint: str, query: str, *, fmt: str = "csv", maxrec: int | None = None, timeout: float = 600, retries: int = 8) -> pd.DataFrame:
+def tap_sync(endpoint: str, query: str, *, fmt: str = "csv", maxrec: int | None = None, timeout: float = 600, retries: int = 16) -> pd.DataFrame:
     """Run a synchronous ADQL query against a TAP service and return a DataFrame (CSV transport).
 
-    A failed query is tried again after 3, 6, 12, ... s, at most 5 min apart (about 11 min of
-    pauses in all): an overloaded archive (the ESA Gaia archive answering 503 for a while) gets
-    time to recover before the build gives up."""
+    A failed query is tried again after 3, 6, 12, ... s, at most 5 min apart (about 50 min of
+    pauses in all): an overloaded archive (the ESA Gaia archive refused most queries with 503 for
+    stretches of half an hour in November 2026) gets time to recover before the build gives up."""
     data = {"REQUEST": "doQuery", "LANG": "ADQL", "FORMAT": fmt, "QUERY": query}
     if maxrec is not None:
         data["MAXREC"] = str(maxrec)
