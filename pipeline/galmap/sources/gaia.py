@@ -38,6 +38,7 @@ TABLES = {
     "tycho2": "gaiadr3.tycho2tdsc_merge_best_neighbour",
     "hipparcos2": "gaiadr3.hipparcos2_best_neighbour",
     "gcns": "external.gaiaedr3_gcns_main_1",
+    "gcns_table": "external.gaiaedr3_gcns_main_1",
 }
 # All Gaia DR3 stars in the shell beyond the GCNS (100 pc) out to about 200 pc (652 ly) whose
 # parallax is measured to better than about 11 % (the final cut, after the zero point and the
@@ -60,6 +61,14 @@ QUERIES = {
     "gcns": (
         "SELECT {cols} FROM external.gaiaedr3_gcns_main_1 AS x "
         "JOIN gaiadr3.gaia_source AS g ON g.source_id = x.source_id "
+        "WHERE x.source_id >= {lo} AND x.source_id < {hi}"
+    ),
+    # the GCNS table itself (sources.gcns, when the CDS does not answer), in the CDS file's column names
+    "gcns_table": (
+        "SELECT x.source_id, x.ra, x.dec, x.parallax AS plx, x.parallax_error AS plx_err, x.pmra, x.pmdec, "
+        "x.phot_g_mean_mag AS gmag, x.phot_bp_mean_mag AS bpmag, x.phot_rp_mean_mag AS rpmag, x.ruwe, "
+        "x.gcns_prob, x.wd_prob, x.dist_50 AS dist50, x.dist_16 AS dist16, x.dist_84 AS dist84, "
+        "x.name_2mass, x.j_m_2mass AS jmag FROM external.gaiaedr3_gcns_main_1 AS x "
         "WHERE x.source_id >= {lo} AND x.source_id < {hi}"
     ),
     "tycho2": (
@@ -140,7 +149,8 @@ def fetch_xmatch(name: str, chunks: int, cache: Path | None = None, refresh: boo
 def _numeric(df: pd.DataFrame) -> pd.DataFrame:
     df["source_id"] = exact_int64(df["source_id"])
     for c in NUMERIC:
-        df[c] = pd.to_numeric(df[c], errors="coerce")
+        if c in df:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
     return df
 
 

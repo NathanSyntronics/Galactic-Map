@@ -25,6 +25,8 @@ from ..names import letters_conflict
 log = logging.getLogger(__name__)
 
 TAP = "https://simbad.cds.unistra.fr/simbad/sim-tap"
+# the official mirror at the Harvard-Smithsonian CfA, asked in turn when the CDS does not answer
+TAP_MIRRORS = ("https://simbad.cfa.harvard.edu/simbad/sim-tap",)
 DIR = CACHE_DIR / "simbad"
 BASIC_FILE = DIR / "simbad_basic_plx10.csv"
 IDENT_FILE = DIR / "simbad_ident_plx10.csv"
@@ -77,11 +79,11 @@ def _fetch(query: str, count_query: str, dest: Path, refresh: bool) -> pd.DataFr
     checked against a COUNT(*) of the same selection."""
     if dest.exists() and not refresh:
         return pd.read_csv(dest, dtype=str, keep_default_na=False)
-    expected = int(tap_sync(TAP, count_query)["n"].iloc[0])
+    expected = int(tap_sync(TAP, count_query, mirrors=TAP_MIRRORS)["n"].iloc[0])
     if expected >= MAXREC:
         raise RuntimeError(f"SIMBAD query would return {expected} rows (> MAXREC); page it")
     for attempt in range(3):
-        df = tap_sync(TAP, query, maxrec=MAXREC, timeout=1800)
+        df = tap_sync(TAP, query, maxrec=MAXREC, timeout=1800, mirrors=TAP_MIRRORS)
         # counts can drift by a few rows while SIMBAD is being updated
         if abs(len(df) - expected) <= max(50, expected // 1000):
             break

@@ -66,3 +66,19 @@ def test_plain_requests_are_tried_again_and_notice_a_dead_server_quickly(monkeyp
     assert pauses == [2, 4]
     # connection and read time limits: a server that does not answer is noticed after 30 s
     assert s.kw["timeout"] == (download.CONNECT_TIMEOUT, 300)
+
+
+def test_tap_queries_take_turns_with_a_mirror(monkeypatch):
+    urls = []
+
+    class S(_Session):
+        def post(self, url, **kw):
+            urls.append(url)
+            return super().post()
+
+    s = S([_Resp(503), _Resp(200, "n\n7\n")])
+    monkeypatch.setattr(download, "session", lambda: s)
+    monkeypatch.setattr(download.time, "sleep", lambda _: None)
+    df = download.tap_sync("https://main.example/tap", "SELECT 1", mirrors=("https://mirror.example/tap",))
+    assert df["n"].iloc[0] == "7"
+    assert urls == ["https://main.example/tap/sync", "https://mirror.example/tap/sync"]

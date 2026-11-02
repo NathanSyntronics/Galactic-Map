@@ -100,21 +100,30 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-
-
-def tap_sync(endpoint: str, query: str, *, fmt: str = "csv", maxrec: int | None = None, timeout: float = 600, retries: int = 16) -> pd.DataFrame:
+def tap_sync(
+    endpoint: str,
+    query: str,
+    *,
+    fmt: str = "csv",
+    maxrec: int | None = None,
+    timeout: float = 600,
+    retries: int = 16,
+    mirrors: tuple[str, ...] = (),
+) -> pd.DataFrame:
     """Run a synchronous ADQL query against a TAP service and return a DataFrame (CSV transport).
 
     A failed query is tried again after 3, 6, 12, ... s, at most 5 min apart (about 50 min of
     pauses in all): an overloaded archive (the ESA Gaia archive refused most queries with 503 for
-    stretches of half an hour in November 2026) gets time to recover before the build gives up."""
+    stretches of half an hour in November 2026) gets time to recover before the build gives up. With `mirrors` the attempts take turns
+    between the service and its mirrors (SIMBAD at the CfA when the CDS is down)."""
     data = {"REQUEST": "doQuery", "LANG": "ADQL", "FORMAT": fmt, "QUERY": query}
     if maxrec is not None:
         data["MAXREC"] = str(maxrec)
     delay = 3.0
     for attempt in range(retries + 1):
         try:
-            r = session().post(endpoint.rstrip("/") + "/sync", data=data, timeout=(CONNECT_TIMEOUT, timeout))
+            service = (endpoint, *mirrors)[attempt % (1 + len(mirrors))]
+            r = session().post(service.rstrip("/") + "/sync", data=data, timeout=(CONNECT_TIMEOUT, timeout))
             r.raise_for_status()
             text = r.content.decode("utf-8")
             if text.lstrip().startswith("<?xml") or "<VOTABLE" in text[:500]:
@@ -123,7 +132,7 @@ def tap_sync(endpoint: str, query: str, *, fmt: str = "csv", maxrec: int | None 
         except (requests.RequestException, RuntimeError) as err:
             if attempt == retries:
                 raise
-            log.warning("TAP query failed (%s), retrying in %.0f s", err, delay)
+            log.warning("TAP query to %s failed (%s), retrying in %.0f s", service, err, delay)
             time.sleep(delay)
             delay = min(delay * 2, MAX_RETRY_DELAY)
     raise AssertionError("unreachable")

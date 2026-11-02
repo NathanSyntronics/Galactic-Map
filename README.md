@@ -437,6 +437,10 @@ workflow*). To enable it, set *Settings → Pages → Source* to *GitHub Actions
 * Downloads and queries are tried again when a server is down or overloaded: after 2, 4, 8, ... s,
   at most 5 min apart (about half an hour; TAP queries about 50 min). A server that does not
   accept the connection counts as down after 30 s.
+* When the CDS (Strasbourg) is down, SIMBAD is asked at its official mirror at the CfA
+  (simbad.cfa.harvard.edu, in turn with the CDS), and the GCNS table comes from the ESA Gaia
+  archive (`external.gaiaedr3_gcns_main_1`: the same 331,312 stars, the values at full precision
+  instead of the CDS file's rounded ones).
 * Any failing step stops the run before the deploy, so the site online stays as it was: a
   catalogue server that is down does not publish a map without its stars, planets or galaxies.
   The star data is checked against known stars (`galmap.verify`) before the deploy.

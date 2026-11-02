@@ -11,6 +11,8 @@ import logging
 import numpy as np
 import pandas as pd
 
+import requests
+
 from ..download import CACHE_DIR, exact_int64, fetch
 
 log = logging.getLogger(__name__)
@@ -52,15 +54,35 @@ COLSPECS = [
 
 
 def load(refresh: bool = False) -> pd.DataFrame:
-    path = fetch(BASE + "table1c.dat.gz", FILE, refresh=refresh)
+    """The GCNS table from the CDS; when the CDS does not answer, the same table from the ESA Gaia
+    archive (external.gaiaedr3_gcns_main_1: the same rows, values at full precision instead of the
+    CDS file's rounded ones)."""
+    from . import gaia
+
+    archive_copy = (CACHE_DIR / "gaia" / "gaia_dr3_gcns_table.parquet").exists()
+    if refresh or FILE.exists() or not archive_copy:
+        try:
+            return _parse(fetch(BASE + "table1c.dat.gz", FILE, refresh=refresh, retries=3))
+        except requests.RequestException as err:
+            log.warning("GCNS: the CDS does not answer (%s); taking the table from the ESA Gaia archive", err)
+    return _typed(gaia.fetch_xmatch("gcns_table", chunks=16, refresh=refresh))
+
+
+def _parse(path) -> pd.DataFrame:
     names = [c[0] for c in COLSPECS]
     specs = [(a - 1, b) for _, a, b in COLSPECS]
     df = pd.read_fwf(path, colspecs=specs, names=names, dtype=str, compression="gzip", keep_default_na=False)
-    df["source_id"] = exact_int64(df["source_id"])
+    return _typed(df)
+
+
+def _typed(df: pd.DataFrame) -> pd.DataFrame:
+    names = [c[0] for c in COLSPECS]
+    df = df[names].copy()
+    df["source_id"] = exact_int64(df["source_id"].astype(str))
     for c in names:
         if c not in ("source_id", "name_2mass"):
             df[c] = pd.to_numeric(df[c].replace("", np.nan), errors="coerce")
-    df["name_2mass"] = df["name_2mass"].str.strip().replace("", pd.NA)
+    df["name_2mass"] = df["name_2mass"].fillna("").astype(str).str.strip().replace("", pd.NA)
     df["bp_rp"] = df["bpmag"] - df["rpmag"]
     log.info("GCNS: %d rows", len(df))
     return df
