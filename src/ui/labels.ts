@@ -28,6 +28,8 @@ export interface LabelCandidate {
   galaxy?: number;
   /** A planet (index in the planet catalogue) instead of a star. */
   planet?: number;
+  /** A spacecraft (index in the probe catalogue). */
+  probe?: number;
   /** Labelled first whenever it is on screen, like the Sun (the Milky Way). */
   priority?: boolean;
   /**

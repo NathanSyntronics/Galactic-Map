@@ -18,7 +18,7 @@ log = logging.getLogger(__name__)
 
 
 def steps() -> list[tuple[str, Callable[[], object]]]:
-    from . import binaries, galaxies, planets
+    from . import binaries, galaxies, planets, probes
     from .sources import athyg, census20, gaia, gcns, hyg, iau, simbad, wikidata
 
     def gaia_core() -> None:
@@ -44,7 +44,7 @@ def steps() -> list[tuple[str, Callable[[], object]]]:
         ("LVDB", galaxies.load_lvdb),
         ("2MASS XSC (IRSA)", galaxies.load_xsc),
         ("Wikidata galaxies", galaxies.load_wikidata),
-    ]
+    ] + [(f"{name} (JPL Horizons)", lambda k=key, i=pid, a=start, b=stop: probes.fetch(k, i, a, b)) for key, pid, name, _, start, stop in probes.PROBES]
 
 
 def prefetch(todo: list[tuple[str, Callable[[], object]]] | None = None) -> list[str]:

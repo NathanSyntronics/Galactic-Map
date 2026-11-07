@@ -16,5 +16,5 @@ def test_a_failing_source_does_not_stop_the_others():
 
 def test_every_source_has_a_step():
     names = [n for n, _ in prefetch.steps()]
-    assert len(names) == len(set(names)) == 17
+    assert len(names) == len(set(names)) == 22
     assert all(callable(fn) for _, fn in prefetch.steps())

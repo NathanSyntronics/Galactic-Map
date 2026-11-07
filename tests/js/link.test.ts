@@ -18,6 +18,12 @@ describe('shared links', () => {
     expect(readLink(params(linkParams(g)))).toEqual(g);
   });
 
+  it('carries a spacecraft by its key', () => {
+    expect(linkParams({ probe: 'voyager1' })).toBe('&k=voyager1');
+    expect(readLink(params('k=voyager1'))).toEqual({ probe: 'voyager1' });
+    expect(readLink(params('k=bad key'))).toEqual({});
+  });
+
   it('carries a route with both ends and the mode', () => {
     const s: LinkState = {
       route: {

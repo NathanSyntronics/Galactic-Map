@@ -80,6 +80,9 @@ import { LabelLayer, TopK, labelUnder, labelledStarNear, milkyWayLabelPos, named
 import { SettingsPanel } from './ui/panel';
 import { RouteBox, type RouteNames } from './ui/route-box';
 import { PlanetTimeControl } from './ui/time-control';
+import { ProbeCard } from './ui/probe-card';
+import { ProbeLayer } from './render/probes';
+import { loadProbes, probePosition, type ProbeCatalogue } from './data/probes';
 import { SearchBox, SearchIndex, hitOf, type SearchHit, type SearchTuple } from './ui/search';
 
 interface DownloadsApi {
@@ -262,11 +265,17 @@ export class App {
   /** Planets (docs/PLANETS.md): loaded when the view comes close to the stars or the search is used. */
   private readonly planetLayer = new PlanetLayer();
   private planetLoad: Promise<PlanetCatalogue | null> | null = null;
+  /** The spacecraft leaving the Solar System (docs/PROBES.md). */
+  private readonly probeLayer = new ProbeLayer();
+  private probeLoad: Promise<ProbeCatalogue | null> | null = null;
+  private selectedProbe: number | null = null;
+  private probeSearchAdded = false;
   private planetSearchAdded = false;
   private selectedPlanet: number | null = null;
   /** A star picked in the search whose node was not loaded: flown to at its rounded position. */
   private searchTarget: { hit: SearchHit; pos: Vector3 } | null = null;
   private planetCard!: PlanetCard;
+  private probeCard!: ProbeCard;
   /** The date the planets are drawn for: `jd` at the moment `ms`, advancing `speed` days per second. */
   private readonly planetClock = { jd: julianDate(Date.now()), ms: performance.now(), speed: 0 };
   /** Galaxies inside the visible sphere (status line). */
@@ -299,6 +308,7 @@ export class App {
       this.galaxyLayer.milkyWay,
       this.galaxyLayer.group,
       this.planetLayer.group,
+      this.probeLayer.group,
       this.grid.group,
       this.dropLines.lines,
       this.jumpLines.group,
@@ -354,6 +364,10 @@ export class App {
     this.catchSecondTap(this.planetCard.root);
     this.planetCard.onClose = () => this.select(null);
     this.planetCard.onFlyTo = (i) => this.flyToPlanet(i);
+    this.probeCard = new ProbeCard(container);
+    this.catchSecondTap(this.probeCard.root);
+    this.probeCard.onClose = () => this.select(null);
+    this.probeCard.onFlyTo = (i) => this.flyToProbe(i);
     this.info.onManageAttributes = () => this.showAttributes();
     this.info.onClose = () => this.select(null);
     this.info.onFlyTo = (info) => this.nav.flyTo(info.pos);
@@ -730,6 +744,8 @@ export class App {
     if (this.selected) return `${displayName(this.selected)} · ${app}`;
     const pc = this.planetLayer.catalogue;
     if (this.selectedPlanet !== null && pc) return `${planetName(pc.planets[this.selectedPlanet], getLang())} · ${app}`;
+    const kc = this.probeLayer.catalogue;
+    if (this.selectedProbe !== null && kc) return `${kc.probes[this.selectedProbe].name} · ${app}`;
     const gc = this.galaxyLayer.catalogue;
     if (this.selectedGalaxy !== null && gc) return `${galaxyName(gc, this.selectedGalaxy, getLang())} · ${app}`;
     const p = this.planner;
@@ -778,15 +794,18 @@ export class App {
       // the galaxies' names belong to the index too (loaded alongside; the stars alone if they fail)
       const galaxies = this.ensureGalaxies();
       const planets = this.ensurePlanets();
+      const probes = this.ensureProbes();
       const res = await fetch(`${this.baseUrl}search.json`);
       if (!res.ok) throw new HttpError(res.status, res.url);
       this.searchIndex.load((await res.json()) as SearchTuple[]);
-      this.galaxySearchAdded = false;
+      // the new index holds none of them yet; each is added once (here, or as its file arrives)
+      this.galaxySearchAdded = this.planetSearchAdded = this.probeSearchAdded = false;
       await galaxies;
       this.addGalaxySearch();
-      this.planetSearchAdded = false;
       await planets;
       this.addPlanetSearch();
+      await probes;
+      this.addProbeSearch();
       this.search.indexLoaded();
       return true;
     } catch (err) {
@@ -809,15 +828,18 @@ export class App {
     }
     if (has('planetSpeed')) {
       this.timeControl.set(s.planetSpeed);
-      // the planet card shows the date drawn (none in real time)
+      // the planet and probe cards show the date drawn (none in real time)
       this.showPlanetCard();
+      this.showProbeCard();
     }
+    if (has('probes')) this.candidatesDirty = true;
     if (has('lang')) {
       this.timeControl.updateTexts();
       this.search.updateTexts();
       this.info.rerender(this.nav.target);
       this.galaxyCard.rerender(this.nav.target);
       this.showPlanetCard();
+      this.showProbeCard();
       this.routeBox.updateTexts();
       this.refreshChrome();
     }
@@ -1181,6 +1203,7 @@ export class App {
           this.updateHabitableMarks();
           this.candidatesDirty = true;
           this.addPlanetSearch();
+          this.addProbeSearch();
           this.info.rerender(this.nav.target);
           return cat;
         },
@@ -1209,6 +1232,104 @@ export class App {
     this.searchIndex.add(tuples);
   }
 
+  /** Loads the spacecraft (once). */
+  private ensureProbes(): Promise<ProbeCatalogue | null> {
+    if (!this.probeLoad) {
+      this.probeLoad = loadProbes(this.baseUrl).then(
+        (cat) => {
+          this.probeLayer.setCatalogue(cat);
+          this.candidatesDirty = true;
+          this.addProbeSearch();
+          return cat;
+        },
+        (err: unknown) => {
+          console.warn('probes unavailable', err);
+          return null;
+        },
+      );
+    }
+    return this.probeLoad;
+  }
+
+  /** The spacecraft in the search (at their positions of now). */
+  private addProbeSearch(): void {
+    const cat = this.probeLayer.catalogue;
+    if (!cat || this.probeSearchAdded || !this.searchIndex.size) return;
+    this.probeSearchAdded = true;
+    const now = julianDate(Date.now());
+    this.searchIndex.add(
+      cat.probes.map((p, i): SearchTuple => {
+        const w = probePosition(p, now) ?? new Vector3();
+        return [p.name, null, 'k', i, w.x, -w.z, w.y, 0, null, p.name, -1];
+      }),
+    );
+  }
+
+  private selectProbe(i: number | null): void {
+    const cat = this.probeLayer.catalogue;
+    this.select(null);
+    if (!cat || i === null) return;
+    this.selectedProbe = i;
+    this.labels.selectedKey = `k:${i}`;
+    this.showProbeCard();
+    this.candidatesDirty = true;
+    this.scheduleHash();
+  }
+
+  private showProbeCard(): void {
+    const cat = this.probeLayer.catalogue;
+    const i = this.selectedProbe;
+    if (!cat || i === null) {
+      this.probeCard.show(null, null);
+      return;
+    }
+    const speed = this.store.get().planetSpeed;
+    const jd = this.planetJd();
+    const date = speed === 0 ? '' : new Date((jd - 2440587.5) * 86_400_000).toLocaleDateString(getLang());
+    this.probeCard.show(cat, i, jd, date);
+  }
+
+  /** Flies to a spacecraft, far enough out to see the Sun and its path too (the direction stays). */
+  private flyToProbe(i: number): void {
+    const cat = this.probeLayer.catalogue;
+    const pos = cat ? probePosition(cat.probes[i], this.planetJd()) : null;
+    if (!pos) return;
+    this.nav.flyTo(pos.clone(), distanceForRadius(1.3 * pos.length()));
+  }
+
+  /** Labels of the spacecraft drawn. */
+  private probeCandidates(cands: LabelCandidate[]): void {
+    const cat = this.probeLayer.catalogue;
+    if (!cat) return;
+    for (const d of this.probeLayer.drawn) {
+      if (d.alpha < 0.5 && d.index !== this.selectedProbe) continue;
+      cands.push({ key: `k:${d.index}`, pos: d.pos, text: cat.probes[d.index].name, rank: 0, logL: 3, probe: d.index, priority: true });
+    }
+  }
+
+  /** The spacecraft under the pointer: its label, else its symbol (within a few pixels). */
+  private pickProbe(clientX: number, clientY: number, touch: boolean): number | null {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const mx = clientX - rect.left;
+    const my = clientY - rect.top;
+    const label = labelUnder(this.labels.hits, mx, my, touch ? 6 : 2);
+    if (label && label.c.probe !== undefined) return label.c.probe;
+    const v = new Vector3();
+    let best: number | null = null;
+    let bestD = Infinity;
+    for (const d of this.probeLayer.drawn) {
+      if (d.alpha < 0.3) continue;
+      v.copy(d.pos).project(this.camera);
+      if (v.z > 1) continue;
+      const dist = Math.hypot((v.x * 0.5 + 0.5) * rect.width - mx, (1 - (v.y * 0.5 + 0.5)) * rect.height - my);
+      if (dist <= (touch ? 18 : 10) && dist < bestD) {
+        best = d.index;
+        bestD = dist;
+      }
+    }
+    return best;
+  }
+
   /** The date the planets are drawn for (Julian): now, or advancing at the chosen speed. */
   private planetJd(): number {
     const c = this.planetClock;
@@ -1228,6 +1349,13 @@ export class App {
     if (s.planets && s.radius < 2) void this.ensurePlanets();
     this.planetLayer.showZones = s.habitableZones;
     this.planetLayer.update(this.nav.target, s.radius, this.camera, scale, this.renderer.getPixelRatio(), this.planetJd(), s.planets);
+    if (s.probes && s.radius < 2) void this.ensureProbes();
+    const jd = this.planetJd();
+    this.probeLayer.update(this.nav.target, s.radius, this.camera, scale, this.renderer.getPixelRatio(), jd, s.probes);
+    if (this.selectedProbe !== null) {
+      this.selMarker.show(this.probeLayer.position(this.selectedProbe), this.renderer.getPixelRatio());
+      this.probeCard.update(jd);
+    }
     const marks = this.habitableShown(s);
     if (marks !== this.habitableMarker.group.visible) {
       this.habitableMarker.group.visible = marks;
@@ -1458,6 +1586,7 @@ export class App {
     this.habitableCandidates(cands);
     this.galaxyCandidates(cands);
     this.planetCandidates(cands);
+    this.probeCandidates(cands);
     // Keep the selected star labelled even if it is outside the candidate set.
     if (this.selected && !cands.some((c) => c.key === this.selected!.key)) {
       cands.push({
@@ -1579,14 +1708,18 @@ export class App {
       const touch = e.pointerType === 'touch';
       // a galaxy's label, a planet (label or symbol), then the stars, then the galaxies themselves
       const galaxyLabel = this.galaxyLabelAt(e.clientX, e.clientY, touch);
-      const planet = galaxyLabel === null ? this.pickPlanet(e.clientX, e.clientY, touch) : null;
-      const hit = galaxyLabel === null && planet === null ? this.pickAt(e.clientX, e.clientY, touch ? 22 : 14) : null;
-      const galaxy = galaxyLabel ?? (hit || planet !== null ? null : this.pickGalaxy(e.clientX, e.clientY, touch ? 22 : 12));
+      const probe = galaxyLabel === null ? this.pickProbe(e.clientX, e.clientY, touch) : null;
+      const planet = galaxyLabel === null && probe === null ? this.pickPlanet(e.clientX, e.clientY, touch) : null;
+      const hit = galaxyLabel === null && planet === null && probe === null ? this.pickAt(e.clientX, e.clientY, touch ? 22 : 14) : null;
+      const galaxy = galaxyLabel ?? (hit || planet !== null || probe !== null ? null : this.pickGalaxy(e.clientX, e.clientY, touch ? 22 : 12));
       const isDouble = secondTap;
       secondTap = false;
       // after a double-tap the next tap starts a new pair
       this.lastTap = isDouble ? { time: 0, x: 0, y: 0 } : { time: e.timeStamp, x: e.clientX, y: e.clientY };
-      if (planet !== null) {
+      if (probe !== null) {
+        this.selectProbe(probe);
+        if (isDouble) this.nav.flyTo(this.probeLayer.position(probe).clone());
+      } else if (planet !== null) {
         this.selectPlanet(planet);
         if (isDouble) this.nav.flyTo(this.planetLayer.livePosition(planet).clone());
       } else if (hit) {
@@ -1612,7 +1745,7 @@ export class App {
     let swallowClick = false;
     const isSecondTap = (e: PointerEvent) =>
       e.isPrimary &&
-      (!!this.selected || this.selectedGalaxy !== null || this.selectedPlanet !== null) &&
+      (!!this.selected || this.selectedGalaxy !== null || this.selectedPlanet !== null || this.selectedProbe !== null) &&
       e.timeStamp - this.lastTap.time < DOUBLE_TAP_MS &&
       Math.hypot(e.clientX - this.lastTap.x, e.clientY - this.lastTap.y) < 30;
     el.addEventListener(
@@ -1637,6 +1770,7 @@ export class App {
         if (this.selected) this.nav.flyTo(this.selected.pos);
         else if (this.selectedGalaxy !== null) this.flyToGalaxy(this.selectedGalaxy);
         else if (this.selectedPlanet !== null) this.nav.flyTo(this.planetLayer.livePosition(this.selectedPlanet).clone());
+        else if (this.selectedProbe !== null) this.nav.flyTo(this.probeLayer.position(this.selectedProbe).clone());
       },
       { capture: true },
     );
@@ -1758,6 +1892,10 @@ export class App {
     if (this.selectedPlanet !== null) {
       this.selectedPlanet = null;
       this.planetCard.show(null, null);
+    }
+    if (this.selectedProbe !== null) {
+      this.selectedProbe = null;
+      this.probeCard.show(null, null);
     }
     this.labels.selectedKey = info?.key ?? null;
     this.selMarker.show(info?.pos ?? null, this.renderer.getPixelRatio());
@@ -1911,6 +2049,11 @@ export class App {
     if (hit.path === 'p') {
       this.selectPlanet(hit.index);
       this.flyToPlanet(hit.index);
+      return;
+    }
+    if (hit.path === 'k') {
+      this.selectProbe(hit.index);
+      this.flyToProbe(hit.index);
       return;
     }
     const s = this.store.get();
@@ -2245,6 +2388,7 @@ export class App {
     };
     section('sourcesStars', this.manifest?.sources ?? []);
     section('sourcesPlanets', this.ensurePlanets().then((c) => c?.sources ?? null));
+    section('sourcesProbes', this.ensureProbes().then((c) => c?.sources ?? null));
     section('sourcesGalaxies', this.ensureGalaxies().then((c) => c?.sources ?? null));
     const foot = el('p', 'cite', t('versionN', { v: VERSION }));
     if (this.manifest) foot.textContent += ` · ${formatNumber(this.manifest.starCount)} ${t('stars')} · ${this.manifest.generated}`;
@@ -2288,6 +2432,8 @@ export class App {
       out.star = { designation: p.designation, path: p.path, index: p.index };
     } else if (this.selectedPlanet !== null && this.planetLayer.catalogue) {
       out.planet = this.planetLayer.catalogue.planets[this.selectedPlanet].name;
+    } else if (this.selectedProbe !== null && this.probeLayer.catalogue) {
+      out.probe = this.probeLayer.catalogue.probes[this.selectedProbe].key;
     } else if (this.selectedGalaxy !== null && this.galaxyLayer.catalogue) {
       out.galaxy = { designation: galaxyDesignation(this.galaxyLayer.catalogue, this.selectedGalaxy), index: this.selectedGalaxy };
     }
@@ -2309,6 +2455,14 @@ export class App {
           this.ensurePlanets().then((cat) => {
             const i = cat ? cat.planets.findIndex((p) => p.name === name) : -1;
             if (i >= 0) this.selectPlanet(i);
+          }),
+        );
+      } else if (link.probe) {
+        const key = link.probe;
+        tasks.push(
+          this.ensureProbes().then((cat) => {
+            const i = cat ? cat.probes.findIndex((p) => p.key === key) : -1;
+            if (i >= 0) this.selectProbe(i);
           }),
         );
       } else if (link.galaxy) {

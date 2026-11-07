@@ -75,6 +75,11 @@ jobs:
         working-directory: pipeline
         run: python -m galmap.galaxies --out ../public/data
 
+      # The spacecraft leaving the Solar System (docs/PROBES.md).
+      - name: Build probe data
+        working-directory: pipeline
+        run: python -m galmap.probes --out ../public/data
+
       # Saved also when a step failed, so that the next run does not download everything again.
       - name: Save catalogue cache
         if: ${{ always() }}

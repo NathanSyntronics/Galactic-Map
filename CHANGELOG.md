@@ -2,6 +2,15 @@
 
 Every round of changes that goes live raises the version by 0.01 (README, *Versions*).
 
+## 1.03 (2026-11-07)
+
+* Habitable zones: around every planet host whose temperature and luminosity are known, a green
+  band (Kopparapu et al. 2013); the planet card says where a planet's orbit lies relative to it and
+  tags potentially habitable planets (79); a switch marks their stars on the map.
+* Spacecraft: Voyager 1 and 2, Pioneer 10 and 11 and New Horizons on their real trajectories (JPL
+  Horizons), with a card each, in the search and in shared links.
+* The level of detail is a slider like the other settings.
+
 ## 1.02 (2026-11-07)
 
 * The search field says what it finds: stars, planets and galaxies (shorter on narrow screens).

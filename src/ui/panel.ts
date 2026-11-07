@@ -373,6 +373,7 @@ export class SettingsPanel {
         () => t(PLANET_SPEED_KEYS[planetSpeedStop(s().planetSpeed)]),
       ),
     );
+    space.appendChild(this.checkbox('probesSetting', () => s().probes, (v) => this.store.set({ probes: v })));
     space.appendChild(this.checkbox('habitableZones', () => s().habitableZones, (v) => this.store.set({ habitableZones: v })));
     space.appendChild(this.checkbox('habitableMarks', () => s().habitableMarks, (v) => this.store.set({ habitableMarks: v })));
     space.appendChild(el('p', 'hint', t('habitableHint')));

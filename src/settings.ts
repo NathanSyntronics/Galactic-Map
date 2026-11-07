@@ -32,6 +32,8 @@ export interface Settings {
   planets: boolean;
   /** How fast the planets move: days per second (0: real time, the positions of now). */
   planetSpeed: number;
+  /** The spacecraft leaving the Solar System (docs/PROBES.md). */
+  probes: boolean;
   /** The habitable zones of the planetary systems drawn. */
   habitableZones: boolean;
   /** Rings around the stars with a potentially habitable planet, at every scale. */
@@ -83,6 +85,7 @@ export const DEFAULT_SETTINGS: Settings = {
   milkyWay: true,
   planets: true,
   planetSpeed: 30,
+  probes: true,
   habitableZones: true,
   habitableMarks: false,
   quality: 'medium',

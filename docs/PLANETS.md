@@ -76,10 +76,35 @@ M = M0 + 2π (t − J2000) / period.
 ### File
 
 `planets.json`: `epoch` (J2000), `methods`, `fields`, `flags` (1 radius estimated, 2 inclination
-assumed, 4 phase assumed, 8 eccentricity assumed, 16 Solar System, 32 circumbinary), `hosts`
-(`[node path, index, archive name, [x, y, z] galactic ly, number of planets]`) and `planets`
+assumed, 4 phase assumed, 8 eccentricity assumed, 16 Solar System, 32 circumbinary, 64 in the
+habitable zone, 128 in its narrower limits, 256 potentially habitable), `hosts`
+(`[node path, index, archive name, [x, y, z] galactic ly, number of planets, habitable zone or
+null]`) and `planets`
 (`[host, name, German name, a, e, period, M0, P, Q, radius R⊕, mass M⊕, Teq K, method, year,
 flags, inclination]`), `sources`, `stats`.
+
+### Habitable zones
+
+Each host's habitable zone after Kopparapu et al. 2013 (ApJ 765, 131, with the erratum ApJ 770, 82;
+one Earth mass): the stellar flux S_eff = S0 + a t + b t² + c t³ + d t⁴ (t = Teff − 5780 K, Teff
+clamped to 2,600–7,200 K) at which a planet crosses each limit lies at √(L / S_eff) AU. Four edges
+are written: recent Venus and early Mars (the wider, optimistic limits), runaway and maximum
+greenhouse (the narrower, conservative ones); for the Sun 0.75, 0.98, 1.69 and 1.77 AU. Teff and L
+come from the archive (L from the radius and Teff where it gives no luminosity); for 302 hosts one
+of them is unknown and no zone is drawn.
+
+A planet is *in the zone* when its semi-major axis lies within the wider limits, *potentially
+habitable* when it is moreover at most 2.5 Earth radii (without a measured radius: at most 10 Earth
+masses). 297 planets lie in a zone, 79 are potentially habitable (Proxima Cen b, TRAPPIST-1 d to
+g, TOI-700 d, LHS 1140 b, Teegarden's Star b, ...). The Solar System's planets get the zone flags
+(Earth and Mars lie in it) but not the tag.
+
+In the app the zone is drawn as two green bands in the plane of the planet nearest to it (the
+wider limits lighter), fading in with its size on screen (*Show habitable zones*, settings,
+*Space*). The planet card says where the orbit lies (inside, at the edge, too hot, too cold) with
+the narrower limits, and tags potentially habitable planets. *Mark stars with potentially habitable
+planets* draws green rings around their stars at every scale (but not at galaxy scales or within a
+system) and labels them before other stars.
 
 ### Close pairs (`pipeline/galmap/binaries.py`, in the star build)
 

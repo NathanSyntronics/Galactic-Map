@@ -179,6 +179,7 @@ const en = {
 <p>The search knows the stars, the planets and the galaxies. The empty search field lists the last five you picked from the search. A press anywhere beside the open settings only closes them (it selects no star); a click beside a dialog closes the dialog.</p>
 <p>A click on a star's name selects that star; where many stars crowd together, labelled stars are preferred.</p>
 <p>Planets: zoomed into a planetary system, a slider at the bottom sets how fast the planets move, from real time to ten years per second (also under Space in the settings).</p>
+<p>Around stars with planets a green band shows the habitable zone, where a rocky planet could have liquid water; under Space in the settings, the stars with potentially habitable planets can be marked on the map. The spacecraft Voyager 1 and 2, Pioneer 10 and 11 and New Horizons are shown on their paths out of the Solar System, and the search finds them.</p>
 <p>Sharing: the share button at the top (beside the search) sends or copies a link to what is on screen: the view, the selected star, planet or galaxy, and the route. The address in the browser always holds that link too.</p>`,
   aboutText: `
 <p>The Galactic Map is a map, not a photograph. It shows where the stars, planets and galaxies around us really are, as precisely as today's measurements allow. Like any map, though, it simplifies so that something can be seen: just as a road map draws towns as dots and roads as broad lines, much here is deliberately not drawn true to life.</p>
@@ -319,6 +320,19 @@ const en = {
   routeModeDistance: 'Shortest distance',
   routeShowAll: 'Show whole route',
   versionN: 'Version {v}',
+  probesSetting: 'Spacecraft (Voyager, Pioneer, New Horizons)',
+  probe: 'Spacecraft',
+  launched: 'Launched',
+  signalTime: 'A radio signal takes',
+  hoursN: '{n} hours',
+  speedToSun: 'Speed (relative to the Sun)',
+  missionPage: 'Mission page (NASA)',
+  sourcesProbes: 'Data sources: spacecraft',
+  probePioneer10: 'The first spacecraft to cross the asteroid belt and to fly past Jupiter (December 1973). Its last faint signal arrived in January 2003; since then it has been travelling silently in the direction of the star Aldebaran.',
+  probePioneer11: 'Flew past Jupiter in 1974 and, as the first spacecraft, past Saturn in 1979. Contact was lost in 1995; it is heading towards the constellation Aquila.',
+  probeVoyager1: "Flew past Jupiter in 1979 and Saturn in 1980. On 25 August 2012 it became the first human-made object to leave the heliosphere, the Sun's sphere of influence, and it has been flying through interstellar space since. It is the most distant human-made object and still sends data (as of 2025).",
+  probeVoyager2: 'The only spacecraft to have visited all four giant planets: Jupiter in 1979, Saturn in 1981, Uranus in 1986 and Neptune in 1989. It left the heliosphere on 5 November 2018 and still sends data (as of 2025).',
+  probeNewHorizons: 'Flew past Jupiter in 2007, explored Pluto as the first spacecraft on 14 July 2015 and the Kuiper belt object Arrokoth on 1 January 2019. It is crossing the Kuiper belt, is expected to leave the heliosphere in the 2040s and still sends data (as of 2025).',
   habitableZones: 'Show habitable zones',
   habitableMarks: 'Mark stars with potentially habitable planets',
   habitableHint: 'The habitable zone is the region around a star where a rocky planet could have liquid water on its surface (Kopparapu et al. 2013): the darker band between the narrower limits, the lighter one to the wider limits. A planet counts as potentially habitable when it is in the zone and at most 2.5 Earth radii (or, without a measured radius, 10 Earth masses).',
@@ -553,6 +567,7 @@ const de: Record<MessageKey, string> = {
 <p>Die Suche kennt Sterne, Planeten und Galaxien. Das leere Suchfeld zeigt die fünf zuletzt über die Suche gewählten. Ein Druck irgendwo neben die offenen Einstellungen schließt nur diese (es wird kein Stern gewählt); ein Klick neben einen Dialog schließt den Dialog.</p>
 <p>Ein Klick auf den Namen eines Sterns wählt diesen Stern; wo sich viele Sterne drängen, haben beschriftete Sterne Vorrang.</p>
 <p>Planeten: Hineingezoomt in ein Planetensystem stellt ein Regler unten ein, wie schnell sich die Planeten bewegen, von Echtzeit bis zehn Jahre pro Sekunde (auch unter „Weltall“ in den Einstellungen).</p>
+<p>Um Sterne mit Planeten zeigt ein grünes Band die habitable Zone, in der ein Gesteinsplanet flüssiges Wasser haben könnte; unter „Weltall“ in den Einstellungen lassen sich die Sterne mit möglicherweise lebensfreundlichen Planeten auf der Karte markieren. Die Raumsonden Voyager 1 und 2, Pioneer 10 und 11 und New Horizons sind auf ihren Bahnen aus dem Sonnensystem zu sehen, und die Suche findet sie.</p>
 <p>Teilen: Der Teilen-Knopf oben (neben der Suche) verschickt oder kopiert einen Link zu dem, was zu sehen ist: Ansicht, ausgewählter Stern, Planet oder Galaxie und Route. Auch die Adresse im Browser enthält immer diesen Link.</p>`,
   aboutText: `
 <p>Die Galaktische Karte ist eine Karte, kein Foto. Sie zeigt, wo die Sterne, Planeten und Galaxien unserer Umgebung tatsächlich stehen, so genau, wie es die heutigen Messungen erlauben. Wie jede Karte vereinfacht sie aber, damit man etwas erkennen kann: So wie eine Straßenkarte Städte als Punkte und Straßen als breite Linien zeichnet, ist hier vieles bewusst nicht naturgetreu dargestellt.</p>
@@ -693,6 +708,19 @@ const de: Record<MessageKey, string> = {
   routeModeDistance: 'Kürzeste Strecke',
   routeShowAll: 'Ganze Route zeigen',
   versionN: 'Version {v}',
+  probesSetting: 'Raumsonden (Voyager, Pioneer, New Horizons)',
+  probe: 'Raumsonde',
+  launched: 'Gestartet',
+  signalTime: 'Funksignal braucht',
+  hoursN: '{n} Stunden',
+  speedToSun: 'Geschwindigkeit (gegenüber der Sonne)',
+  missionPage: 'Missionsseite (NASA)',
+  sourcesProbes: 'Datenquellen: Raumsonden',
+  probePioneer10: 'Die erste Raumsonde, die den Asteroidengürtel durchquerte und an Jupiter vorbeiflog (Dezember 1973). Ihr letztes schwaches Signal kam im Januar 2003; seitdem fliegt sie stumm in Richtung des Sterns Aldebaran.',
+  probePioneer11: 'Flog 1974 an Jupiter und 1979 als erste Raumsonde an Saturn vorbei. Der Kontakt brach 1995 ab; sie fliegt in Richtung des Sternbilds Adler.',
+  probeVoyager1: 'Flog 1979 an Jupiter und 1980 an Saturn vorbei. Am 25. August 2012 verließ sie als erstes von Menschen gebautes Objekt die Heliosphäre, den Einflussbereich der Sonne, und fliegt seitdem durch den interstellaren Raum. Sie ist das am weitesten entfernte von Menschen gebaute Objekt und sendet noch Daten (Stand 2025).',
+  probeVoyager2: 'Die einzige Raumsonde, die alle vier Riesenplaneten besucht hat: Jupiter 1979, Saturn 1981, Uranus 1986 und Neptun 1989. Sie verließ am 5. November 2018 die Heliosphäre und sendet noch Daten (Stand 2025).',
+  probeNewHorizons: 'Flog 2007 an Jupiter vorbei, erkundete am 14. Juli 2015 als erste Raumsonde Pluto und am 1. Januar 2019 das Kuipergürtel-Objekt Arrokoth. Sie durchquert den Kuipergürtel, wird die Heliosphäre voraussichtlich in den 2040er-Jahren verlassen und sendet noch Daten (Stand 2025).',
   habitableZones: 'Habitable Zonen zeigen',
   habitableMarks: 'Sterne mit möglicherweise lebensfreundlichen Planeten markieren',
   habitableHint: 'Die habitable Zone ist der Bereich um einen Stern, in dem ein Gesteinsplanet flüssiges Wasser auf seiner Oberfläche haben könnte (Kopparapu et al. 2013): das dunklere Band zwischen den engeren Grenzen, das hellere bis zu den weiter gefassten. Als möglicherweise lebensfreundlich gilt ein Planet in der Zone mit höchstens 2,5 Erdradien (oder, ohne gemessenen Radius, 10 Erdmassen).',

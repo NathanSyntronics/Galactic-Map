@@ -18,6 +18,8 @@ export interface LinkEnd extends LinkStar {
 export interface LinkState {
   star?: LinkStar;
   planet?: string;
+  /** A spacecraft by its key (voyager1, ...). */
+  probe?: string;
   galaxy?: { designation: string; index: number };
   route?: { from: LinkEnd | null; to: LinkEnd | null; mode: 'jumps' | 'distance' };
 }
@@ -47,6 +49,7 @@ export function linkParams(s: LinkState): string {
   const out: string[] = [];
   if (s.star) out.push(`s=${enc(s.star.designation)}`, `sk=${key(s.star)}`);
   else if (s.planet) out.push(`p=${enc(s.planet)}`);
+  else if (s.probe) out.push(`k=${enc(s.probe)}`);
   else if (s.galaxy) out.push(`g=${enc(s.galaxy.designation)}`, `gi=${s.galaxy.index}`);
   const r = s.route;
   if (r && (r.from || r.to)) {
@@ -70,9 +73,11 @@ export function readLink(params: URLSearchParams): LinkState {
   if (s && sk) out.star = { designation: s, ...sk };
   const p = params.get('p');
   if (!out.star && p) out.planet = p;
+  const k = params.get('k');
+  if (!out.star && !out.planet && k && /^[a-z0-9]+$/.test(k)) out.probe = k;
   const g = params.get('g');
   const gi = Number(params.get('gi'));
-  if (!out.star && !out.planet && g) out.galaxy = { designation: g, index: Number.isInteger(gi) && gi >= 0 ? gi : -1 };
+  if (!out.star && !out.planet && !out.probe && g) out.galaxy = { designation: g, index: Number.isInteger(gi) && gi >= 0 ? gi : -1 };
   const end = (name: string): LinkEnd | null => {
     const d = params.get(name);
     const k = parseKey(params.get(`${name}k`));
@@ -87,5 +92,5 @@ export function readLink(params: URLSearchParams): LinkState {
 
 /** Whether a link carries anything besides the view. */
 export function hasLinkState(s: LinkState): boolean {
-  return !!(s.star || s.planet || s.galaxy || s.route);
+  return !!(s.star || s.planet || s.probe || s.galaxy || s.route);
 }

@@ -53,7 +53,10 @@ push, see *Deployment*).
   TESS stars, come from the NASA Exoplanet Archive) and the eight of the Solar System, on their measured
   orbits at their positions for today (or running faster), drawn larger than they are, like the
   stars. Close pairs such as Alpha Centauri A and B separate ([`docs/PLANETS.md`](docs/PLANETS.md)).
-  Below 1 AU distances are written in millions of kilometres.
+  Below 1 AU distances are written in millions of kilometres. The habitable zone of each planet
+  host is drawn as a green band, and potentially habitable planets are marked.
+* **Spacecraft.** Voyager 1 and 2, Pioneer 10 and 11 and New Horizons, the spacecraft leaving the
+  Solar System, on their real trajectories from JPL Horizons ([`docs/PROBES.md`](docs/PROBES.md)).
 * **Galaxies.** Zoom out past the Milky Way (a stylised model with bar and spiral arms) to the
   Local Group, the Local Volume and the 55,877 galaxies of Cosmicflows-4, out to about 1.5 billion
   light years: every galaxy whose distance is measured independently of its redshift, in its
@@ -113,8 +116,9 @@ The settings panel (☰) has five tabs (the last one open is remembered in the b
   many stars may be loaded at once; it matters only for view radii of a few hundred light years and
   more).
 * **Space:** the planets (on) and how fast they move: a slider from real time over an hour, a day,
-  a week, a month (the default) and a year to ten years per second; the galaxies and the Milky Way
-  model (both on).
+  a week, a month (the default) and a year to ten years per second; the spacecraft (on); the
+  habitable zones (on) and rings around the stars with a potentially habitable planet (off); the
+  galaxies and the Milky Way model (both on).
 * **Layers:** the data layers and the jump network (below).
 * **Info:** the version, the controls, *About & sources*, the language and resetting the settings.
 
@@ -321,6 +325,8 @@ specified in [`docs/ROUTES.md`](docs/ROUTES.md):
 | [Wikidata](https://www.wikidata.org/) (CC0), queried via [QLever](https://qlever.dev/) | English and German Wikipedia article titles, the reference for the most common name |
 | [NASA Exoplanet Archive](https://exoplanetarchive.ipac.caltech.edu/) (Planetary Systems Composite Parameters, DOI 10.26133/NEA13) | number of known planets per host star; the planets' orbits, radii and masses |
 | [JPL approximate planetary elements](https://ssd.jpl.nasa.gov/planets/approx_pos.html) (E. M. Standish) | the orbits of the Solar System's planets |
+| Kopparapu et al. 2013, ApJ 765, 131 (erratum ApJ 770, 82) | the habitable zones (computed from the stars' temperature and luminosity) |
+| [JPL Horizons](https://ssd.jpl.nasa.gov/horizons/) | the trajectories of Voyager 1 and 2, Pioneer 10 and 11 and New Horizons |
 | [Mamajek's dwarf sequence](https://www.pas.rochester.edu/~emamajek/EEM_dwarf_UBVIJHK_colors_Teff.txt) (Pecaut & Mamajek 2013) | colour → temperature, bolometric corrections |
 
 Galaxies ([`docs/GALAXIES.md`](docs/GALAXIES.md)):
@@ -416,6 +422,8 @@ cd pipeline && ../.venv/bin/python -m galmap.build --out ../public/data
 ../.venv/bin/python -m galmap.planets --data ../public/data
 # galaxies (downloads ~60 MB, mostly the 2MASS XSC, ~10 min the first time)
 ../.venv/bin/python -m galmap.galaxies --out ../public/data
+# spacecraft (JPL Horizons, a few seconds)
+../.venv/bin/python -m galmap.probes --out ../public/data
 cd ..
 
 # web app
