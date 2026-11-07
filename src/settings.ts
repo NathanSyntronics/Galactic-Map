@@ -32,6 +32,10 @@ export interface Settings {
   planets: boolean;
   /** How fast the planets move: days per second (0: real time, the positions of now). */
   planetSpeed: number;
+  /** The habitable zones of the planetary systems drawn. */
+  habitableZones: boolean;
+  /** Rings around the stars with a potentially habitable planet, at every scale. */
+  habitableMarks: boolean;
   quality: Quality;
   /** Attribute that sets the star colours ('' natural temperature colour). */
   colorBy: string;
@@ -79,6 +83,8 @@ export const DEFAULT_SETTINGS: Settings = {
   milkyWay: true,
   planets: true,
   planetSpeed: 30,
+  habitableZones: true,
+  habitableMarks: false,
   quality: 'medium',
   colorBy: '',
   sizeBy: '',

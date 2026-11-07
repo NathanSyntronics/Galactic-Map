@@ -56,6 +56,56 @@ F_PHASE_ASSUMED = 4  # no time of periastron or transit: a fixed pseudo-random p
 F_ECC_ASSUMED = 8  # eccentricity not measured: circular
 F_SOLAR = 16  # a planet of the Solar System (its orbit fully known)
 F_CIRCUMBINARY = 32  # orbits both stars of a binary
+F_HZ = 64  # semi-major axis within the optimistic habitable zone of its star
+F_HZ_CONSERVATIVE = 128  # ... within the conservative one
+F_HABITABLE = 256  # potentially habitable: in the optimistic zone and small (radius <= 2.5, or mass <= 10 Earth)
+
+# Habitable zone (Kopparapu et al. 2013, ApJ 765, 131, with the erratum ApJ 770, 82; one Earth mass):
+# the stellar flux S_eff = S0 + a t + b t^2 + c t^3 + d t^4 (t = Teff - 5780 K, Teff within
+# 2600..7200 K) at which a planet crosses each limit lies at sqrt(L / S_eff) AU.
+HZ_LIMITS = (
+    (1.7763, 1.4335e-4, 3.3954e-9, -7.6364e-12, -1.1950e-15),  # recent Venus (optimistic inner edge)
+    (1.0385, 1.2456e-4, 1.4612e-8, -7.6345e-12, -1.7511e-15),  # runaway greenhouse (conservative inner)
+    (0.3507, 5.9578e-5, 1.6707e-9, -3.0058e-12, -5.1925e-16),  # maximum greenhouse (conservative outer)
+    (0.3207, 5.4471e-5, 1.5275e-9, -2.1709e-12, -3.8282e-16),  # early Mars (optimistic outer edge)
+)
+SUN_TEFF = 5772.0
+
+
+def habitable_zone(teff: float, lum: float) -> tuple[float, float, float, float] | None:
+    """The habitable zone of a star (Teff in K, L in solar luminosities): optimistic inner,
+    conservative inner, conservative outer and optimistic outer edge in AU; None when unknown."""
+    if not (np.isfinite(teff) and np.isfinite(lum)) or teff <= 0 or lum <= 0:
+        return None
+    t = min(max(teff, 2600.0), 7200.0) - 5780.0
+    edges = []
+    for s0, a, b, c, d in HZ_LIMITS:
+        s_eff = s0 + a * t + b * t**2 + c * t**3 + d * t**4
+        edges.append(math.sqrt(lum / s_eff))
+    return edges[0], edges[1], edges[2], edges[3]
+
+
+def star_luminosity(lum_log: float, radius: float, teff: float) -> float:
+    """L / L_sun from the archive's log10 L, else from the radius and the temperature."""
+    if np.isfinite(lum_log):
+        return 10.0**lum_log
+    if np.isfinite(radius) and np.isfinite(teff) and radius > 0 and teff > 0:
+        return radius**2 * (teff / SUN_TEFF) ** 4
+    return float("nan")
+
+
+def hz_flags(a: float, hz: tuple[float, float, float, float] | None, small: bool) -> int:
+    """F_HZ, F_HZ_CONSERVATIVE and F_HABITABLE of a planet at semi-major axis a (AU)."""
+    if hz is None or not np.isfinite(a):
+        return 0
+    flags = 0
+    if hz[0] <= a <= hz[3]:
+        flags |= F_HZ
+        if small:
+            flags |= F_HABITABLE
+    if hz[1] <= a <= hz[2]:
+        flags |= F_HZ_CONSERVATIVE
+    return flags
 
 METHODS = [
     "Transit", "Radial Velocity", "Imaging", "Microlensing", "Transit Timing Variations",
@@ -272,9 +322,12 @@ def exoplanet_rows(planets: pd.DataFrame, host_of: dict[str, int], stars: pd.Dat
     rows = []
     p = planets[planets["hostname"].isin(host_of.keys())].copy()
     for c in ("ra", "dec", "pl_orbper", "pl_orbsmax", "pl_orbeccen", "pl_orbincl", "pl_orblper", "pl_orbtper",
-              "pl_tranmid", "pl_rade", "pl_bmasse", "pl_eqt", "st_mass", "disc_year", "cb_flag"):
-        p[c] = _num(p[c])
+              "pl_tranmid", "pl_rade", "pl_bmasse", "pl_eqt", "st_mass", "st_rad", "st_teff", "st_lum", "disc_year", "cb_flag"):
+        p[c] = _num(p[c]) if c in p else np.nan
     for host, g in p.groupby("hostname", sort=True):
+        # the star's habitable zone, from the archive's stellar parameters (the planets' rows agree)
+        teff = float(g["st_teff"].median())
+        hz = habitable_zone(teff, star_luminosity(float(g["st_lum"].median()), float(g["st_rad"].median()), teff))
         # the system's plane: the planets' measured inclinations (median), else a fixed
         # pseudo-random one (isotropic); its node line on the sky: unknown, fixed pseudo-random
         known_i = g["pl_orbincl"].dropna()
@@ -316,25 +369,30 @@ def exoplanet_rows(planets: pd.DataFrame, host_of: dict[str, int], stars: pd.Dat
                 radius, flags = radius_from_mass(r["pl_bmasse"]), flags | F_RADIUS_EST
             if r["cb_flag"] == 1:
                 flags |= F_CIRCUMBINARY
+            # small enough to be rocky: by the measured radius, else by the mass
+            small = radius <= 2.5 if not flags & F_RADIUS_EST else bool(np.isfinite(r["pl_bmasse"]) and r["pl_bmasse"] <= 10)
+            flags |= hz_flags(a, hz, small)
             method = METHODS.index(r["discoverymethod"]) if r["discoverymethod"] in METHODS else -1
             rows.append({
                 "host": host, "star": host_of[host], "name": str(r["pl_name"]), "de": None, "a": a, "e": e,
                 "period": per, "m0": m0 % (2 * math.pi), "P": P, "Q": Q, "incl": incl,
                 "radius": radius, "mass": r["pl_bmasse"], "eqt": r["pl_eqt"], "method": method,
-                "year": r["disc_year"], "flags": flags,
+                "year": r["disc_year"], "flags": flags, "hz": hz,
             })
     return rows
 
 
 def solar_rows(sun: int) -> list[dict]:
     rows = []
+    hz = habitable_zone(SUN_TEFF, 1.0)
     for en, de, a, e, i, L, peri, node, per, radius, mass in SOLAR_SYSTEM:
         P, Q = ecliptic_orbit_vectors(i, node, peri)
+        # the zone, but no "potentially habitable" for planets whose conditions are known
         rows.append({
             "host": "Sun", "star": sun, "name": en, "de": de if de != en else None, "a": a, "e": e, "period": per,
             "m0": math.radians(L - peri) % (2 * math.pi), "P": P, "Q": Q, "incl": i, "radius": radius,
             "mass": mass, "eqt": float("nan"), "method": METHODS.index("Solar System"), "year": float("nan"),
-            "flags": F_SOLAR,
+            "flags": F_SOLAR | hz_flags(a, hz, False), "hz": hz,
         })
     return rows
 
@@ -352,7 +410,8 @@ def write(rows: list[dict], stars: pd.DataFrame, out: Path) -> dict:
             s = stars.iloc[k]
             hosts[k] = {"i": len(hosts), "path": str(s["path"]), "index": int(s["index"]), "name": r["host"],
                         # exactly the float32 values of the node (the app draws the star there)
-                        "pos": [float(s["x"]), float(s["y"]), float(s["z"])], "planets": 0}
+                        "pos": [float(s["x"]), float(s["y"]), float(s["z"])], "planets": 0,
+                        "hz": None if r.get("hz") is None else [_r(v, 5) for v in r["hz"]]}
         h = hosts[k]
         h["planets"] += 1
         planets.append([
@@ -370,16 +429,21 @@ def write(rows: list[dict], stars: pd.DataFrame, out: Path) -> dict:
         "units": {"a": "AU", "period": "d", "m0": "rad", "radius": "Earth radii", "mass": "Earth masses", "eqt": "K"},
         "fields": ["host", "name", "nameDe", "a", "e", "period", "m0", "P", "Q", "radius", "mass", "eqt", "method", "year", "flags", "incl"],
         "flags": {"radiusEstimated": F_RADIUS_EST, "inclinationAssumed": F_INCL_ASSUMED, "phaseAssumed": F_PHASE_ASSUMED,
-                  "eccentricityAssumed": F_ECC_ASSUMED, "solarSystem": F_SOLAR, "circumbinary": F_CIRCUMBINARY},
+                  "eccentricityAssumed": F_ECC_ASSUMED, "solarSystem": F_SOLAR, "circumbinary": F_CIRCUMBINARY,
+                  "habitableZone": F_HZ, "habitableZoneConservative": F_HZ_CONSERVATIVE, "potentiallyHabitable": F_HABITABLE},
+        "habitableZone": "Kopparapu et al. 2013 (ApJ 765, 131; erratum ApJ 770, 82): recent Venus, runaway greenhouse, maximum greenhouse, early Mars",
         "methods": METHODS,
-        "hosts": [[h["path"], h["index"], h["name"], h["pos"], h["planets"]] for h in sorted(hosts.values(), key=lambda h: h["i"])],
+        # [node path, index, archive name, position, planets, habitable zone (4 edges, AU) or null]
+        "hosts": [[h["path"], h["index"], h["name"], h["pos"], h["planets"], h["hz"]] for h in sorted(hosts.values(), key=lambda h: h["i"])],
         "planets": planets,
         "sources": [SOURCE_INFO, {
             "key": "jpl-elements",
             "title": "E. M. Standish, Keplerian Elements for Approximate Positions of the Major Planets (JPL)",
             "url": "https://ssd.jpl.nasa.gov/planets/approx_pos.html",
         }],
-        "stats": {"hosts": len(hosts), "planets": len(planets)},
+        "stats": {"hosts": len(hosts), "planets": len(planets),
+                  "inHabitableZone": sum(1 for p in planets if p[14] & F_HZ),
+                  "potentiallyHabitable": sum(1 for p in planets if p[14] & F_HABITABLE)},
     }
     out.mkdir(parents=True, exist_ok=True)
     (out / "planets.json").write_text(json.dumps(meta, ensure_ascii=False, separators=(",", ":"), allow_nan=False), "utf-8")
@@ -394,12 +458,9 @@ def build(data: Path, refresh: bool = False) -> dict:
     sun = stars.index[(stars["key"] == "Sun") & (stars["x"] == 0) & (stars["y"] == 0) & (stars["z"] == 0)]
     hosts = stars[stars["planets"] > 0].reset_index(drop=True)
     stars_used = pd.concat([hosts, stars.loc[sun]], ignore_index=True)
-    rows = []
-    try:
-        raw = load(refresh)
-        rows += exoplanet_rows(raw, match_hosts(raw, hosts), hosts)
-    except Exception as err:  # the Solar System alone then
-        log.warning("NASA Exoplanet Archive unavailable, the Solar System only: %s", err)
+    # the archive must answer: a website build stops rather than publish the Solar System alone
+    raw = load(refresh)
+    rows = exoplanet_rows(raw, match_hosts(raw, hosts), hosts)
     if len(sun):
         rows += solar_rows(len(hosts))
     return write(rows, stars_used, data)

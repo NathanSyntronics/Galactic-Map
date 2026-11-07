@@ -117,3 +117,30 @@ def test_match_hosts():
     )
     out = PL.match_hosts(planets, stars)
     assert out == {"Proxima Cen": 0, "Far": 1}
+
+
+def test_habitable_zone_of_the_sun_and_of_trappist_1():
+    from galmap.planets import habitable_zone
+
+    opt_in, cons_in, cons_out, opt_out = habitable_zone(5772, 1.0)
+    # Kopparapu et al. 2013: 0.75 / 0.99 / 1.70 / 1.77 AU for the Sun
+    assert abs(opt_in - 0.75) < 0.01 and abs(cons_in - 0.98) < 0.01
+    assert abs(cons_out - 1.69) < 0.01 and abs(opt_out - 1.77) < 0.01
+    hz = habitable_zone(2566, 0.000553)
+    # TRAPPIST-1 e (0.029 AU), f (0.038), g (0.047) in the conservative zone, h (0.062) beyond
+    assert hz[1] < 0.029 < 0.047 < hz[2] < 0.062
+    assert habitable_zone(float("nan"), 1.0) is None and habitable_zone(5000, 0) is None
+
+
+def test_luminosity_and_flags():
+    from galmap.planets import F_HABITABLE, F_HZ, F_HZ_CONSERVATIVE, hz_flags, star_luminosity
+
+    assert star_luminosity(0.0, 9.9, 9999) == 1.0
+    assert abs(star_luminosity(float("nan"), 2.0, 5772) - 4.0) < 1e-9
+    assert star_luminosity(float("nan"), float("nan"), 5772) != star_luminosity(float("nan"), float("nan"), 5772)  # NaN
+    hz = (0.75, 0.98, 1.69, 1.77)
+    assert hz_flags(1.0, hz, True) == F_HZ | F_HZ_CONSERVATIVE | F_HABITABLE
+    assert hz_flags(1.0, hz, False) == F_HZ | F_HZ_CONSERVATIVE
+    assert hz_flags(0.8, hz, True) == F_HZ | F_HABITABLE
+    assert hz_flags(0.72, hz, True) == 0
+    assert hz_flags(1.0, None, True) == 0

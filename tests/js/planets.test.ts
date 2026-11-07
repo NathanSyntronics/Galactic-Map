@@ -13,7 +13,7 @@ import {
   type PlanetFile,
 } from '../../src/data/planets';
 import { distanceUnit, distanceUnitScale, formatLy, setLang } from '../../src/i18n';
-import { planetDrawRadius, planetSymbolFactor } from '../../src/render/planets';
+import { planetDrawRadius, planetSymbolFactor, zonePlaneNormal } from '../../src/render/planets';
 
 (globalThis as { document?: unknown }).document ??= { documentElement: {} };
 
@@ -33,6 +33,37 @@ const FILE: PlanetFile = {
   ],
   sources: [],
 };
+
+describe('habitable zones', () => {
+  it("reads a host's zone and marks hosts with a potentially habitable planet", () => {
+    const f: PlanetFile = {
+      ...FILE,
+      hosts: [
+        ['r', 0, 'Sun', [0, 0, 0], 1, [0.75055, 0.98176, 1.68977, 1.76704]],
+        ['r5', 12, 'Proxima Cen', [2.944215, -3.056768, -0.142107], 1, null],
+      ],
+      planets: [
+        FILE.planets[0],
+        [1, 'Proxima Cen b', null, 0.0485, 0.3, 11.19, 1, [0, 0, 1], [1, 0, 0], 1.02, 1.07, 234, 1, 2016, PlanetFlag.HABITABLE_ZONE | PlanetFlag.POTENTIALLY_HABITABLE, null],
+      ],
+    };
+    const c = decodePlanets(f);
+    expect(c.hosts[0].hz).toEqual([0.75055, 0.98176, 1.68977, 1.76704]);
+    expect(c.hosts[1].hz).toBeNull();
+    expect(c.hosts[0].habitable).toBe(false);
+    expect(c.hosts[1].habitable).toBe(true);
+    // files of version 1.02 and older have no zones
+    expect(decodePlanets(FILE).hosts[0].hz).toBeNull();
+  });
+
+  it('draws the zone in the plane of the planet nearest to it', () => {
+    const c = decodePlanets(FILE);
+    const n = zonePlaneNormal([c.planets[0]], 1.3);
+    // Earth's orbit: P = x, Q = y (galactic) -> world (1,0,0) x (0,0,-1)
+    expect(n.toArray().map((v) => Math.round(v * 1e9) / 1e9)).toEqual([0, 1, 0]);
+    expect(zonePlaneNormal([], 1).toArray()).toEqual([0, 1, 0]);
+  });
+});
 
 describe('planets', () => {
   const cat = decodePlanets(FILE);

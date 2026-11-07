@@ -18,6 +18,12 @@ export const PlanetFlag = {
   ECCENTRICITY_ASSUMED: 8,
   SOLAR_SYSTEM: 16,
   CIRCUMBINARY: 32,
+  /** Semi-major axis within the optimistic habitable zone of the star. */
+  HABITABLE_ZONE: 64,
+  /** ... within the conservative one. */
+  HABITABLE_ZONE_CONSERVATIVE: 128,
+  /** Potentially habitable: in the optimistic zone and small (radius up to 2.5 R⊕, or mass up to 10 M⊕). */
+  POTENTIALLY_HABITABLE: 256,
 } as const;
 
 /** [host, name, German name, a (AU), e, period (d), M0 (rad), P, Q, radius (R⊕), mass (M⊕), Teq (K), method, year, flags, inclination (deg)] */
@@ -31,11 +37,18 @@ export interface PlanetFile {
   version: number;
   epoch: number;
   methods: string[];
-  /** [node path, index in the node, archive name, galactic position (ly), number of planets] */
-  hosts: [string, number, string, [number, number, number], number][];
+  /** [node path, index in the node, archive name, galactic position (ly), number of planets, habitable zone (AU) or null] */
+  hosts: [string, number, string, [number, number, number], number, (HabitableZone | null)?][];
   planets: PlanetRow[];
   sources: SourceInfo[];
 }
+
+/**
+ * The habitable zone of a star (Kopparapu et al. 2013), AU: optimistic inner edge (recent
+ * Venus), conservative inner (runaway greenhouse), conservative outer (maximum greenhouse),
+ * optimistic outer (early Mars).
+ */
+export type HabitableZone = [number, number, number, number];
 
 export interface PlanetHost {
   /** Star key in the map ("path:index"). */
@@ -50,6 +63,10 @@ export interface PlanetHost {
   planets: number[];
   /** Largest apoapsis of its planets (ly). */
   reach: number;
+  /** Its habitable zone (null: the star's temperature or luminosity is unknown). */
+  hz: HabitableZone | null;
+  /** It has a potentially habitable planet. */
+  habitable: boolean;
 }
 
 export interface Planet {
@@ -90,7 +107,7 @@ const world = (v: [number, number, number]) => new Vector3(v[0], v[2], -v[1]);
 const num = (v: number | null) => (v === null ? NaN : v);
 
 export function decodePlanets(file: PlanetFile): PlanetCatalogue {
-  const hosts: PlanetHost[] = file.hosts.map(([path, index, name, pos]) => ({
+  const hosts: PlanetHost[] = file.hosts.map(([path, index, name, pos, , hz]) => ({
     key: `${path}:${index}`,
     path,
     index,
@@ -98,12 +115,15 @@ export function decodePlanets(file: PlanetFile): PlanetCatalogue {
     pos: new Vector3(Math.fround(pos[0]), Math.fround(pos[2]), Math.fround(-pos[1])),
     planets: [],
     reach: 0,
+    hz: Array.isArray(hz) && hz.length === 4 && hz.every(Number.isFinite) ? hz : null,
+    habitable: false,
   }));
   const planets: Planet[] = file.planets.map((r, i) => {
     const [host, name, nameDe, a, e, period, m0, P, Q, radius, mass, eqt, method, year, flags, incl] = r;
     const h = hosts[host];
     h.planets.push(i);
     h.reach = Math.max(h.reach, (a * (1 + e)) / AU_PER_LY);
+    if (flags & PlanetFlag.POTENTIALLY_HABITABLE) h.habitable = true;
     return {
       host, name, nameDe, a, e, period, m0, P: world(P), Q: world(Q), radius: num(radius), mass: num(mass), eqt: num(eqt),
       method: file.methods[method] ?? '', year, flags, incl: num(incl),

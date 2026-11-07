@@ -373,22 +373,31 @@ export class SettingsPanel {
         () => t(PLANET_SPEED_KEYS[planetSpeedStop(s().planetSpeed)]),
       ),
     );
+    space.appendChild(this.checkbox('habitableZones', () => s().habitableZones, (v) => this.store.set({ habitableZones: v })));
+    space.appendChild(this.checkbox('habitableMarks', () => s().habitableMarks, (v) => this.store.set({ habitableMarks: v })));
+    space.appendChild(el('p', 'hint', t('habitableHint')));
     space.appendChild(el('h3', '', t('galaxiesSection')));
     space.appendChild(this.checkbox('galaxies', () => s().galaxies, (v) => this.store.set({ galaxies: v })));
     space.appendChild(this.checkbox('milkyWay', () => s().milkyWay, (v) => this.store.set({ milkyWay: v })));
     // --- Detail (stars: how many may be loaded)
     stars.appendChild(el('h3', '', t('detailSection')));
+    // a slider with four stops, like the other settings
+    const QUALITIES: [Quality, MessageKey][] = [
+      ['low', 'qualityLow'],
+      ['medium', 'qualityMedium'],
+      ['high', 'qualityHigh'],
+      ['ultra', 'qualityUltra'],
+    ];
+    const qualityStop = () => Math.max(0, QUALITIES.findIndex(([q]) => q === s().quality));
     stars.appendChild(
-      this.select<Quality>(
+      this.slider(
         'quality',
-        [
-          ['low', 'qualityLow'],
-          ['medium', 'qualityMedium'],
-          ['high', 'qualityHigh'],
-          ['ultra', 'qualityUltra'],
-        ],
-        () => s().quality,
-        (v) => this.store.set({ quality: v }),
+        0,
+        QUALITIES.length - 1,
+        1,
+        qualityStop,
+        (v) => this.store.set({ quality: QUALITIES[v][0] }),
+        () => t(QUALITIES[qualityStop()][1]),
       ),
     );
     stars.appendChild(el('p', 'hint', t('qualityHint')));

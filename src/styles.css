@@ -1362,3 +1362,10 @@ label.check input {
   border: 1px solid var(--border);
   border-radius: 6px;
 }
+
+/* a potentially habitable planet's tag */
+.tag.habitable {
+  color: #7be3a4;
+  background: rgba(63, 207, 122, 0.14);
+  border-color: rgba(63, 207, 122, 0.4);
+}

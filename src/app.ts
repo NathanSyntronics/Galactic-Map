@@ -40,7 +40,7 @@ import {
 import { boxIntersectsCapsule } from './network/capsule';
 import { ROUTE_STORAGE_KEY, RoutePlanner, parseStoredRoute, type RouteEnd, type RouteResult, type StoredRoute, type Waypoint } from './network/planner';
 import { JumpLines } from './render/links';
-import { DropLines, Marker, PolarGrid } from './render/overlays';
+import { DropLines, Marker, MarkerSet, PolarGrid } from './render/overlays';
 import { RouteLine, fitDistance, routeBounds } from './render/route';
 import { Starfield, apparentMag, computeStyle, spritePx, starLogL } from './render/starfield';
 import {
@@ -177,6 +177,8 @@ export class App {
   private readonly grid = new PolarGrid();
   private readonly dropLines = new DropLines();
   private readonly selMarker = new Marker(0xffc861, 30);
+  /** Rings around the stars with a potentially habitable planet (setting habitableMarks). */
+  private readonly habitableMarker = new MarkerSet(0x3fcf7a, 22, 0.85);
   private readonly jumpLines = new JumpLines();
   private readonly planner: RoutePlanner<OctreeNode>;
   private readonly routeLine = new RouteLine();
@@ -302,6 +304,7 @@ export class App {
       this.jumpLines.group,
       this.routeLine.group,
       this.starfield.group,
+      this.habitableMarker.group,
       this.selMarker.points,
     );
 
@@ -488,6 +491,7 @@ export class App {
     this.loader.onFailed = (node) => this.nodeFailed(node);
     this.lodDirty = true;
     if (this.pendingLink) void this.applyLink(this.pendingLink);
+    if (this.store.get().habitableMarks) void this.ensurePlanets();
     // a route kept from the last visit
     this.planner.invalidate();
     this.loop();
@@ -799,6 +803,10 @@ export class App {
     // switch the language before anything re-renders
     if (has('lang')) setLang(s.lang);
     this.panel.settingsChanged(changed);
+    if (has('habitableMarks')) {
+      if (s.habitableMarks) void this.ensurePlanets();
+      this.candidatesDirty = true;
+    }
     if (has('planetSpeed')) {
       this.timeControl.set(s.planetSpeed);
       // the planet card shows the date drawn (none in real time)
@@ -1170,6 +1178,7 @@ export class App {
       this.planetLoad = loadPlanets(this.baseUrl).then(
         (cat) => {
           this.planetLayer.setCatalogue(cat);
+          this.updateHabitableMarks();
           this.candidatesDirty = true;
           this.addPlanetSearch();
           this.info.rerender(this.nav.target);
@@ -1217,7 +1226,13 @@ export class App {
   /** Per frame: loads the planets when the view comes close to the stars, and draws them. */
   private updatePlanets(s: Settings, scale: number): void {
     if (s.planets && s.radius < 2) void this.ensurePlanets();
+    this.planetLayer.showZones = s.habitableZones;
     this.planetLayer.update(this.nav.target, s.radius, this.camera, scale, this.renderer.getPixelRatio(), this.planetJd(), s.planets);
+    const marks = this.habitableShown(s);
+    if (marks !== this.habitableMarker.group.visible) {
+      this.habitableMarker.group.visible = marks;
+      this.candidatesDirty = true;
+    }
     // the speed control while planets can be made out (their orbits as large as for their labels;
     // it goes when they fade, so that it does not flicker at the edge)
     const drawn = this.planetLayer.drawn;
@@ -1230,6 +1245,39 @@ export class App {
     }
     // the selection marker follows a moving planet
     if (this.selectedPlanet !== null) this.selMarker.show(this.planetLayer.livePosition(this.selectedPlanet), this.renderer.getPixelRatio());
+  }
+
+  /** Whether the rings around the stars with a potentially habitable planet are shown now (not at galaxy scales, nor close up). */
+  private habitableShown(s: Settings): boolean {
+    return s.habitableMarks && !!this.planetLayer.catalogue && s.radius >= 0.05 && !starsHidden(s.radius);
+  }
+
+  /** The rings around the stars with a potentially habitable planet, from the planet catalogue. */
+  private updateHabitableMarks(): void {
+    const cat = this.planetLayer.catalogue;
+    this.habitableMarker.set(cat ? cat.hosts.filter((h) => h.habitable).map((h) => h.pos) : null, this.renderer.getPixelRatio());
+  }
+
+  /** While they are marked, the stars with a potentially habitable planet are labelled before others. */
+  private habitableCandidates(cands: LabelCandidate[]): void {
+    const cat = this.planetLayer.catalogue;
+    if (!cat || !this.habitableShown(this.store.get())) return;
+    const byKey = new Map(cands.map((c) => [c.key, c]));
+    for (const h of cat.hosts) {
+      if (!h.habitable) continue;
+      const c = byKey.get(h.key);
+      if (c) {
+        c.priority = true;
+        continue;
+      }
+      const data = this.loader?.get(h.path);
+      const cand: LabelCandidate =
+        data && h.index < data.count
+          ? this.candidateOf(data, h.index)
+          : { key: h.key, pos: h.pos.clone(), text: this.hostName(h), rank: 0, logL: 0 };
+      cand.priority = true;
+      cands.push(cand);
+    }
   }
 
   /** Labels of the planets drawn, once their orbits are large enough on screen. */
@@ -1407,6 +1455,7 @@ export class App {
       });
     }
     this.routeCandidates(cands);
+    this.habitableCandidates(cands);
     this.galaxyCandidates(cands);
     this.planetCandidates(cands);
     // Keep the selected star labelled even if it is outside the candidate set.

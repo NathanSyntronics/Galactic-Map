@@ -11,10 +11,15 @@ import {
   BufferAttribute,
   BufferGeometry,
   CanvasTexture,
+  DoubleSide,
   Group,
   LineBasicMaterial,
   LineLoop,
+  Mesh,
+  MeshBasicMaterial,
   PerspectiveCamera,
+  Quaternion,
+  RingGeometry,
   Sprite,
   SpriteMaterial,
   Vector3,
@@ -31,6 +36,10 @@ import {
 } from '../data/planets';
 
 const ORBIT_POINTS = 256;
+const HZ_COLOR = 0x3fcf7a;
+/** Opacity of the wider (optimistic) band; the narrower one is drawn on top of it. */
+const HZ_OPACITY = 0.08;
+const HZ_CONSERVATIVE_OPACITY = 0.1;
 /** At most this many systems are drawn at once (the nearest to the camera). */
 const MAX_SYSTEMS = 16;
 
@@ -84,7 +93,21 @@ interface SystemView {
   group: Group;
   orbits: LineLoop<BufferGeometry, LineBasicMaterial>[];
   sprites: Sprite[];
+  /** The habitable zone: the wider and the narrower band (none when the star's values are unknown). */
+  zones: Mesh<RingGeometry, MeshBasicMaterial>[];
   lastUsed: number;
+}
+
+/**
+ * The plane a system's habitable zone is drawn in: that of the planet whose orbit lies nearest to
+ * the zone (the planets of a system share their plane where it is not measured).
+ */
+export function zonePlaneNormal(planets: Planet[], zoneMiddle: number, out = new Vector3()): Vector3 {
+  let best: Planet | null = null;
+  for (const p of planets) if (!best || Math.abs(Math.log(p.a / zoneMiddle)) < Math.abs(Math.log(best.a / zoneMiddle))) best = p;
+  if (!best) return out.set(0, 1, 0);
+  out.crossVectors(best.P, best.Q);
+  return out.lengthSq() > 0 ? out.normalize() : out.set(0, 1, 0);
 }
 
 /** A planet drawn this frame (for labels and picking). */
@@ -109,6 +132,8 @@ export class PlanetLayer {
   private readonly live = new Map<number, Vector3>();
   /** The planets drawn in the last frame. */
   drawn: DrawnPlanet[] = [];
+  /** Draw the habitable zones. */
+  showZones = true;
 
   constructor() {
     this.group.renderOrder = 4;
@@ -171,6 +196,14 @@ export class PlanetLayer {
       view.lastUsed = this.frame;
       view.group.visible = true;
       const host = cat.hosts[h];
+      if (view.zones.length && host.hz) {
+        // the zone fades in with its size on screen, like the orbits
+        const zonePx = (host.hz[3] / AU_PER_LY / camD) * css;
+        const a = this.showZones ? smoothstep(6, 24, zonePx) * fade : 0;
+        view.zones[0].material.opacity = HZ_OPACITY * a;
+        view.zones[1].material.opacity = HZ_CONSERVATIVE_OPACITY * a;
+        for (const z of view.zones) z.visible = a > 0.01;
+      }
       host.planets.forEach((k, j) => {
         const p = cat.planets[k];
         const orbitPx = (p.a / AU_PER_LY / camD) * css;
@@ -238,8 +271,27 @@ export class PlanetLayer {
       orbits.push(line);
       sprites.push(sprite);
     }
+    // the habitable zone: two flat bands in the plane of the planet nearest to it
+    const zones: SystemView['zones'] = [];
+    if (host.hz) {
+      const [optIn, consIn, consOut, optOut] = host.hz.map((au) => au / AU_PER_LY);
+      const normal = zonePlaneNormal(host.planets.map((k) => cat.planets[k]), Math.sqrt(host.hz[1] * host.hz[2]));
+      const turn = new Quaternion().setFromUnitVectors(new Vector3(0, 0, 1), normal);
+      for (const [inner, outer, order] of [[optIn, optOut, 2], [consIn, consOut, 3]] as const) {
+        const ring = new Mesh(
+          new RingGeometry(inner, outer, 128, 1),
+          new MeshBasicMaterial({ color: HZ_COLOR, transparent: true, opacity: 0, side: DoubleSide, depthTest: false, depthWrite: false }),
+        );
+        ring.quaternion.copy(turn);
+        ring.frustumCulled = false;
+        ring.renderOrder = order;
+        ring.visible = false;
+        group.add(ring);
+        zones.push(ring);
+      }
+    }
     this.group.add(group);
-    const view = { group, orbits, sprites, lastUsed: this.frame };
+    const view = { group, orbits, sprites, zones, lastUsed: this.frame };
     this.systems.set(h, view);
     return view;
   }
@@ -250,6 +302,10 @@ export class PlanetLayer {
       l.material.dispose();
     }
     for (const s of view.sprites) (s.material as SpriteMaterial).dispose();
+    for (const z of view.zones) {
+      z.geometry.dispose();
+      z.material.dispose();
+    }
     this.group.remove(view.group);
   }
 

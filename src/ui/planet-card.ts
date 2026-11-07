@@ -98,6 +98,7 @@ export class PlanetCard {
     tags.appendChild(el('span', 'tag', t(KIND_KEYS[planetKind(p)])));
     if (Number.isFinite(p.eqt) && p.eqt > 1300) tags.appendChild(el('span', 'tag', t('planetHot')));
     if (solar) tags.appendChild(el('span', 'tag', t('solarSystem')));
+    if (p.flags & PlanetFlag.POTENTIALLY_HABITABLE) tags.appendChild(el('span', 'tag habitable', t('potentiallyHabitable')));
     this.root.appendChild(tags);
 
     const dl = el('dl');
@@ -105,6 +106,13 @@ export class PlanetCard {
     // below 1 AU also in kilometres (TRAPPIST-1 b: 0.0115 AU, 1.72 million km)
     row(t('semiMajorAxis'), `${sig(p.a)} ${t('au')}${p.a < 1 ? ` (${formatKm(p.a * KM_PER_AU)})` : ''}`);
     row(t('eccentricity'), p.flags & PlanetFlag.ECCENTRICITY_ASSUMED ? t('assumedCircular') : sig(p.e));
+    // where the orbit lies relative to the star's habitable zone (its narrower limits shown)
+    const hz = cat.hosts[p.host].hz;
+    if (hz) {
+      const where: MessageKey =
+        p.flags & PlanetFlag.HABITABLE_ZONE_CONSERVATIVE ? 'hzInside' : p.flags & PlanetFlag.HABITABLE_ZONE ? 'hzEdge' : p.a < hz[1] ? 'hzInner' : 'hzOuter';
+      row(t('habitableZone'), `${t(where)} · ${sig(hz[1])}–${sig(hz[2])} ${t('au')}`);
+    }
     row(t('orbitalPeriod'), p.period >= 1000 ? t('yearsN', { n: sig(p.period / 365.25) }) : t('daysN', { n: sig(p.period) }));
     if (Number.isFinite(p.radius)) {
       row(t('planetRadius'), `${sig(p.radius)} R⊕${p.flags & PlanetFlag.RADIUS_ESTIMATED ? ` (${t('estimatedFromMass')})` : ''}`);

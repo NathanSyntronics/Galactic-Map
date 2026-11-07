@@ -232,3 +232,44 @@ export class Marker {
     this.points.visible = true;
   }
 }
+
+/**
+ * Screen-space rings at several places (the stars with a potentially habitable planet). Each ring
+ * is its own object at its place, so that the positions keep double precision on the CPU.
+ */
+export class MarkerSet {
+  readonly group = new Group();
+  private readonly material: ShaderMaterial;
+  private readonly geometry = new BufferGeometry().setAttribute('position', new BufferAttribute(new Float32Array(3), 3));
+  private readonly px: number;
+
+  constructor(color: number, px: number, opacity = 1) {
+    this.px = px;
+    this.material = new ShaderMaterial({
+      vertexShader: markerVertex,
+      fragmentShader: markerFragment,
+      uniforms: {
+        uPx: { value: px },
+        uColor: { value: new Color(color) },
+        uOpacity: { value: opacity },
+      },
+      transparent: true,
+      depthTest: false,
+      depthWrite: false,
+    });
+    this.group.visible = false;
+  }
+
+  /** The places of the rings (null: none). */
+  set(places: Vector3[] | null, pixelRatio: number): void {
+    this.group.clear();
+    this.material.uniforms.uPx.value = this.px * pixelRatio;
+    for (const p of places ?? []) {
+      const pts = new Points(this.geometry, this.material);
+      pts.position.copy(p);
+      pts.frustumCulled = false;
+      pts.renderOrder = 999;
+      this.group.add(pts);
+    }
+  }
+}
