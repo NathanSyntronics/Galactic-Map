@@ -100,11 +100,14 @@ g, TOI-700 d, LHS 1140 b, Teegarden's Star b, ...). The Solar System's planets g
 (Earth and Mars lie in it) but not the tag.
 
 In the app the zone is drawn as two green bands in the plane of the planet nearest to it (the
-wider limits lighter), fading in with its size on screen (*Show habitable zones*, settings,
-*Space*). The planet card says where the orbit lies (inside, at the edge, too hot, too cold) with
-the narrower limits, and tags potentially habitable planets. *Mark stars with potentially habitable
-planets* draws green rings around their stars at every scale (but not at galaxy scales or within a
-system) and labels them before other stars.
+wider limits fainter, with a line along their inner and outer edge), fading in with its size on
+screen (*Show habitable zones*, settings, *Space*). The planet card says where the orbit lies
+(inside, at the edge, too hot, too cold) with the narrower limits, and tags potentially habitable
+planets. *Label stars with potentially habitable planets in green* writes their stars' names in
+green, *Label stars with planets in blue* those of all planet hosts in blue (green wins). Both
+apply only to stars on the map anyway (in the visible sphere and shown by the filters, not at
+galaxy scales): such a star gets a label candidate if it has none and is labelled before most
+others, but no star is added. Merged system labels take the colour of a marked component.
 
 ### Close pairs (`pipeline/galmap/binaries.py`, in the star build)
 
@@ -144,12 +147,17 @@ from A in 2016 (ORB6, Akeson 2021).
   Earth radii^0.33 (Jupiter 3.1 %), at least its true size, at most a third of its periapsis.
 * **Colours:** the Solar System's planets their own; the others by kind (rocky below 1.6 R⊕, mini-
   Neptune below 4, ice giant below 8, gas giant), hot ones (Teq above 1,300 K) red-orange.
-* **Time:** *Planet motion* (settings, *Space*): a slider with the stops real time (the positions
-  of now), an hour, a day, a week, a month (the default) and a year and ten years per second,
-  running from the moment it is chosen. The same slider appears on the map (on top of the
-  bottom-left stack) while planets can be made out: when a planet's orbit is at least 16 px on
-  screen and its symbol has faded in (it goes again below 10 px), since close-in planets race at a
-  month per second and outer ones hardly move.
+* **Time:** the planets and the spacecraft are drawn for the date of a clock that starts at now
+  when the map opens and runs at the speed of *Planet motion* (settings, *Space*): a slider with the
+  stops real time (one second per second, from whatever date the clock shows), an hour, a day, a
+  week, a month (the default) and a year and ten years per second; a new speed runs on from the
+  date reached. The clock appears on the map (on top of the bottom-left stack; on a phone with a
+  card open, at the top) while planets or spacecraft can be made out: when a planet's orbit is at
+  least 16 px on screen and its symbol has faded in (it goes again below 10 px), or a spacecraft is
+  drawn. It shows the date drawn (with the time of day at real time and an hour per second), *Now*
+  (back to the present, the speed stays; hidden while the clock is within half a minute of now), a
+  calendar button that opens the device's date picker (years 1000 to 3000, at the present time of
+  day) and the speed slider.
 
 ### Labels, picking, card, search
 
@@ -159,7 +167,7 @@ from A in 2016 (ORB6, Akeson 2021).
   A double click centres the view on it.
 * The planet card: name, star, kind, semi-major axis (below 1 AU also in kilometres), eccentricity, period, radius (marked when
   estimated), mass, equilibrium temperature, inclination (when measured), discovery (method,
-  year), what the map chose, the date drawn (when not real time); *Centre view here* (flies to
+  year), what the map chose, the date drawn (it follows the clock); *Centre view here* (flies to
   the star, close enough for the orbit) and a link to the NASA Exoplanet Archive.
 * The star card of a planet host (and of the Sun) has *Show planets*: it flies to the star, close
   enough to show all orbits.

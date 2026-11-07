@@ -74,7 +74,7 @@ push, see *Deployment*).
 | Zoom | wheel | pinch | + / − |
 | Details | click a star, planet or galaxy | tap | |
 | Centre on a star, planet or galaxy | double-click | double-tap | |
-| Back to the Sun | | | H |
+| The Sun's neighbourhood (10 ly) | | | H |
 | Names / grid / jump network / search | | | L / G / J / / |
 
 Hold Shift for faster keyboard movement. A pinch only zooms: the view centre stays where it is
@@ -109,16 +109,18 @@ older tab keeps what you set in another.
 The settings panel (☰) has five tabs (the last one open is remembered in the browser):
 * **View:** the visible radius (1e-7 ly, a hundredth of an AU, to 2 billion ly), and whether it
   follows the zoom (on by default: radius = camera distance / 2.2, the framing of the start view;
-  the radius slider then moves the camera; switched off, the radius stays where it is); the labels;
-  the galactic grid and the height lines.
+  the radius slider then moves the camera; switched off, the radius stays where it is); *Go to*:
+  the Earth (2 AU around it, from above its orbit), the Sun (10 ly) and the Galaxy (the Milky Way
+  from above, 100,000 ly); the labels; the galactic grid and the height lines.
 * **Stars:** brown dwarfs (off by default) and white dwarfs; a maximum distance uncertainty; star
   size (0.2× to 12×, 4× by default), brightness and colour saturation; the level of detail (how
   many stars may be loaded at once; it matters only for view radii of a few hundred light years and
   more).
-* **Space:** the planets (on) and how fast they move: a slider from real time over an hour, a day,
-  a week, a month (the default) and a year to ten years per second; the spacecraft (on); the
-  habitable zones (on) and rings around the stars with a potentially habitable planet (off); the
-  galaxies and the Milky Way model (both on).
+* **Space:** the planets (on) and how fast the time runs: a slider from real time (one second per
+  second) over an hour, a day, a week, a month (the default) and a year to ten years per second;
+  the spacecraft (on); the habitable zones (on); the names of the stars with a potentially
+  habitable planet in green and of all stars with planets in blue (both off; only stars shown on
+  the map anyway); the galaxies and the Milky Way model (both on).
 * **Layers:** the data layers and the jump network (below).
 * **Info:** the version, the controls, *About & sources*, the language and resetting the settings.
 

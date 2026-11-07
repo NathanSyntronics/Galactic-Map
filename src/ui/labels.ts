@@ -32,6 +32,8 @@ export interface LabelCandidate {
   probe?: number;
   /** Labelled first whenever it is on screen, like the Sun (the Milky Way). */
   priority?: boolean;
+  /** Name in colour: a star with a potentially habitable planet (green) or with planets (blue). */
+  tint?: 'habitable' | 'planets';
   /**
    * A waypoint of the route: a candidate wherever it is (the route is drawn whole), labelled ahead
    * of all other stars, but like them only where its label overlaps no other.
@@ -59,6 +61,8 @@ export interface ScreenLabel {
   merged?: string[];
   /** Extra distance (CSS px) of the label from the star, beside a large sprite. */
   gap?: number;
+  /** Name colour (set by mergeSystems): the strongest of the components merged into it. */
+  tint?: LabelCandidate['tint'];
 }
 
 /** A label drawn in the last frame: its star's screen position and its text box (CSS px). */
@@ -206,10 +210,17 @@ export function starPriority(logL: number, distToCamera: number, rank: number, a
   return score;
 }
 
-/** Label priority of a candidate: the star's, plus the route bonuses. */
+/** Stars whose names are coloured (planets) are labelled before most others in view. */
+export const TINT_BONUS = 8;
+
+/** Name colours of the marked stars. */
+export const TINT_COLORS = { habitable: '#7ee2a0', planets: '#8cc0ff' } as const;
+
+/** Label priority of a candidate: the star's, plus the route and marking bonuses. */
 export function labelScore(c: LabelCandidate, distToCamera: number): number {
   let score = starPriority(c.logL, distToCamera, c.rank, c.appMag, c.sun);
   if (c.priority) score += 100;
+  if (c.tint) score += TINT_BONUS;
   if (c.route) score += ROUTE_BONUS + (c.rank < 99 ? ROUTE_NAMED_BONUS : 0);
   if (c.pinned) score += PINNED_BONUS;
   return score;
@@ -327,6 +338,7 @@ export function mergeSystems(items: ScreenLabel[], selectedKey: string | null): 
     const selected = it.c.key === selectedKey || !!it.c.pinned;
     it.text = it.c.text;
     it.merged = undefined;
+    it.tint = it.c.tint;
     if (sys === undefined || (it.c.rank >= 99 && !selected)) {
       visible.push(it);
       continue;
@@ -335,6 +347,7 @@ export function mergeSystems(items: ScreenLabel[], selectedKey: string | null): 
     const leader = group.find((l) => Math.abs(l.x - it.x) < MERGE_PX && Math.abs(l.y - it.y) < MERGE_PX);
     if (leader && !selected) {
       (leader.merged ??= [leader.c.text]).push(it.c.text);
+      if (it.c.tint === 'habitable' || !leader.tint) leader.tint = it.c.tint ?? leader.tint;
       continue;
     }
     group.push(it);
@@ -578,9 +591,11 @@ export class LabelLayer {
           ? ROUTE_LABEL
           : it.c.sun
             ? '#fff1b8'
-            : named
-              ? 'rgba(232, 238, 250, 0.95)'
-              : 'rgba(160, 178, 205, 0.85)';
+            : it.tint
+              ? TINT_COLORS[it.tint]
+              : named
+                ? 'rgba(232, 238, 250, 0.95)'
+                : 'rgba(160, 178, 205, 0.85)';
       ctx.fillText(it.text, l.tx, l.ty);
       // height lines only inside the visible sphere (route stars may lie far outside)
       const outside = (it.c.pinned || it.c.route) && it.c.pos.distanceTo(opts.target) > radius;

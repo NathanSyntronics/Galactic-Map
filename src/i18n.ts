@@ -34,6 +34,14 @@ const en = {
   qualityUltra: 'Very high',
   resetSettings: 'Reset settings',
   goToSun: 'Back to the Sun',
+  goToSection: 'Go to',
+  goEarth: 'Earth',
+  goSun: 'Sun',
+  goGalaxy: 'Galaxy',
+  goEarthHint: 'The Earth at the date drawn, 2 AU around it',
+  goSunHint: 'The Sun, 10 light years around it',
+  goGalaxyHint: 'The Milky Way from above, 100,000 light years around its centre',
+  goHint: 'Earth: 2 AU around it · Sun: 10 light years · Galaxy: the Milky Way from above, 100,000 light years.',
   search: 'Search stars, planets and galaxies…',
   searchShort: 'Stars, planets, galaxies…',
   noResults: 'No matches',
@@ -106,6 +114,9 @@ const en = {
   openExoplanetArchive: 'NASA Exoplanet Archive',
   showPlanets: 'Show planets',
   planetDate: 'Positions on {date}',
+  timeNow: 'Now',
+  timeNowHint: 'Back to the present date (the speed stays)',
+  timePick: 'Choose a date',
   milkyWay: 'Milky Way as a model',
   galaxy: 'Galaxy',
   galaxySpiral: 'Spiral galaxy',
@@ -178,8 +189,8 @@ const en = {
 <p>Routes: “Route from here” and “Route to here” on a star’s info card plan a route through the jump network, also between distant stars (the Sun and Betelgeuse, say). The route box lists the waypoints; zoomed out, only the route is drawn.</p>
 <p>The search knows the stars, the planets and the galaxies. The empty search field lists the last five you picked from the search. A press anywhere beside the open settings only closes them (it selects no star); a click beside a dialog closes the dialog.</p>
 <p>A click on a star's name selects that star; where many stars crowd together, labelled stars are preferred.</p>
-<p>Planets: zoomed into a planetary system, a slider at the bottom sets how fast the planets move, from real time to ten years per second (also under Space in the settings).</p>
-<p>Around stars with planets a green band shows the habitable zone, where a rocky planet could have liquid water; under Space in the settings, the stars with potentially habitable planets can be marked on the map. The spacecraft Voyager 1 and 2, Pioneer 10 and 11 and New Horizons are shown on their paths out of the Solar System, and the search finds them.</p>
+<p>Planets: zoomed into a planetary system (or out to the spacecraft), a small clock shows the date drawn. Its slider sets how fast the time runs, from real time (one second per second) to ten years per second (also under Space in the settings); “Now” goes back to the present date and the calendar button sets any date, past or future. The View tab takes you to the Earth, the Sun or the whole Galaxy.</p>
+<p>Around stars with planets a green band shows the habitable zone, where a rocky planet could have liquid water; under Space in the settings, the names of the stars with potentially habitable planets can be written in green, and those of all stars with planets in blue. The spacecraft Voyager 1 and 2, Pioneer 10 and 11 and New Horizons are shown on their paths out of the Solar System, and the search finds them.</p>
 <p>Sharing: the share button at the top (beside the search) sends or copies a link to what is on screen: the view, the selected star, planet or galaxy, and the route. The address in the browser always holds that link too.</p>`,
   aboutText: `
 <p>The Galactic Map is a map, not a photograph. It shows where the stars, planets and galaxies around us really are, as precisely as today's measurements allow. Like any map, though, it simplifies so that something can be seen: just as a road map draws towns as dots and roads as broad lines, much here is deliberately not drawn true to life.</p>
@@ -334,8 +345,9 @@ const en = {
   probeVoyager2: 'The only spacecraft to have visited all four giant planets: Jupiter in 1979, Saturn in 1981, Uranus in 1986 and Neptune in 1989. It left the heliosphere on 5 November 2018 and still sends data (as of 2025).',
   probeNewHorizons: 'Flew past Jupiter in 2007, explored Pluto as the first spacecraft on 14 July 2015 and the Kuiper belt object Arrokoth on 1 January 2019. It is crossing the Kuiper belt, is expected to leave the heliosphere in the 2040s and still sends data (as of 2025).',
   habitableZones: 'Show habitable zones',
-  habitableMarks: 'Mark stars with potentially habitable planets',
-  habitableHint: 'The habitable zone is the region around a star where a rocky planet could have liquid water on its surface (Kopparapu et al. 2013): the darker band between the narrower limits, the lighter one to the wider limits. A planet counts as potentially habitable when it is in the zone and at most 2.5 Earth radii (or, without a measured radius, 10 Earth masses).',
+  habitableMarks: 'Label stars with potentially habitable planets in green',
+  planetHostMarks: 'Label stars with planets in blue',
+  habitableHint: 'The habitable zone is the region around a star where a rocky planet could have liquid water on its surface (Kopparapu et al. 2013): the stronger band between the narrower limits, the fainter one out to the wider limits. A planet counts as potentially habitable when it is in the zone and at most 2.5 Earth radii (or, without a measured radius, 10 Earth masses). The coloured names apply to the stars shown on the map at the time.',
   habitableZone: 'Habitable zone',
   hzInside: 'inside',
   hzEdge: 'at its edge (within the wider limits only)',
@@ -422,6 +434,14 @@ const de: Record<MessageKey, string> = {
   qualityUltra: 'Sehr hoch',
   resetSettings: 'Einstellungen zurücksetzen',
   goToSun: 'Zurück zur Sonne',
+  goToSection: 'Gehe zu',
+  goEarth: 'Erde',
+  goSun: 'Sonne',
+  goGalaxy: 'Galaxis',
+  goEarthHint: 'Die Erde am gezeigten Datum, 2 AE um sie herum',
+  goSunHint: 'Die Sonne, 10 Lichtjahre um sie herum',
+  goGalaxyHint: 'Die Milchstraße von oben, 100.000 Lichtjahre um ihr Zentrum',
+  goHint: 'Erde: 2 AE um sie herum · Sonne: 10 Lichtjahre · Galaxis: die Milchstraße von oben, 100.000 Lichtjahre.',
   search: 'Sterne, Planeten und Galaxien suchen …',
   searchShort: 'Sterne, Planeten, Galaxien …',
   noResults: 'Keine Treffer',
@@ -494,6 +514,9 @@ const de: Record<MessageKey, string> = {
   openExoplanetArchive: 'NASA Exoplanet Archive',
   showPlanets: 'Planeten zeigen',
   planetDate: 'Positionen am {date}',
+  timeNow: 'Jetzt',
+  timeNowHint: 'Zurück zum heutigen Datum (die Geschwindigkeit bleibt)',
+  timePick: 'Datum wählen',
   milkyWay: 'Milchstraße als Modell',
   galaxy: 'Galaxie',
   galaxySpiral: 'Spiralgalaxie',
@@ -566,8 +589,8 @@ const de: Record<MessageKey, string> = {
 <p>Routen: „Route von hier“ und „Route hierher“ in der Infokarte eines Sterns planen eine Route durch das Sprungnetz, auch zwischen weit entfernten Sternen (etwa der Sonne und Beteigeuze). Das Routenfeld listet die Wegpunkte; herausgezoomt wird nur die Route gezeichnet.</p>
 <p>Die Suche kennt Sterne, Planeten und Galaxien. Das leere Suchfeld zeigt die fünf zuletzt über die Suche gewählten. Ein Druck irgendwo neben die offenen Einstellungen schließt nur diese (es wird kein Stern gewählt); ein Klick neben einen Dialog schließt den Dialog.</p>
 <p>Ein Klick auf den Namen eines Sterns wählt diesen Stern; wo sich viele Sterne drängen, haben beschriftete Sterne Vorrang.</p>
-<p>Planeten: Hineingezoomt in ein Planetensystem stellt ein Regler unten ein, wie schnell sich die Planeten bewegen, von Echtzeit bis zehn Jahre pro Sekunde (auch unter „Weltall“ in den Einstellungen).</p>
-<p>Um Sterne mit Planeten zeigt ein grünes Band die habitable Zone, in der ein Gesteinsplanet flüssiges Wasser haben könnte; unter „Weltall“ in den Einstellungen lassen sich die Sterne mit möglicherweise lebensfreundlichen Planeten auf der Karte markieren. Die Raumsonden Voyager 1 und 2, Pioneer 10 und 11 und New Horizons sind auf ihren Bahnen aus dem Sonnensystem zu sehen, und die Suche findet sie.</p>
+<p>Planeten: Hineingezoomt in ein Planetensystem (oder hinaus bis zu den Raumsonden) zeigt eine kleine Uhr das Datum der Darstellung. Ihr Regler stellt ein, wie schnell die Zeit läuft, von Echtzeit (eine Sekunde pro Sekunde) bis zehn Jahre pro Sekunde (auch unter „Weltall“ in den Einstellungen); „Jetzt“ springt zurück zum heutigen Datum, und der Kalender-Knopf stellt ein beliebiges Datum ein, in der Vergangenheit oder der Zukunft. Der Reiter „Ansicht“ bringt dich zur Erde, zur Sonne oder zur ganzen Galaxis.</p>
+<p>Um Sterne mit Planeten zeigt ein grünes Band die habitable Zone, in der ein Gesteinsplanet flüssiges Wasser haben könnte; unter „Weltall“ in den Einstellungen lassen sich die Namen der Sterne mit möglicherweise lebensfreundlichen Planeten grün schreiben und die aller Sterne mit Planeten blau. Die Raumsonden Voyager 1 und 2, Pioneer 10 und 11 und New Horizons sind auf ihren Bahnen aus dem Sonnensystem zu sehen, und die Suche findet sie.</p>
 <p>Teilen: Der Teilen-Knopf oben (neben der Suche) verschickt oder kopiert einen Link zu dem, was zu sehen ist: Ansicht, ausgewählter Stern, Planet oder Galaxie und Route. Auch die Adresse im Browser enthält immer diesen Link.</p>`,
   aboutText: `
 <p>Die Galaktische Karte ist eine Karte, kein Foto. Sie zeigt, wo die Sterne, Planeten und Galaxien unserer Umgebung tatsächlich stehen, so genau, wie es die heutigen Messungen erlauben. Wie jede Karte vereinfacht sie aber, damit man etwas erkennen kann: So wie eine Straßenkarte Städte als Punkte und Straßen als breite Linien zeichnet, ist hier vieles bewusst nicht naturgetreu dargestellt.</p>
@@ -722,8 +745,9 @@ const de: Record<MessageKey, string> = {
   probeVoyager2: 'Die einzige Raumsonde, die alle vier Riesenplaneten besucht hat: Jupiter 1979, Saturn 1981, Uranus 1986 und Neptun 1989. Sie verließ am 5. November 2018 die Heliosphäre und sendet noch Daten (Stand 2025).',
   probeNewHorizons: 'Flog 2007 an Jupiter vorbei, erkundete am 14. Juli 2015 als erste Raumsonde Pluto und am 1. Januar 2019 das Kuipergürtel-Objekt Arrokoth. Sie durchquert den Kuipergürtel, wird die Heliosphäre voraussichtlich in den 2040er-Jahren verlassen und sendet noch Daten (Stand 2025).',
   habitableZones: 'Habitable Zonen zeigen',
-  habitableMarks: 'Sterne mit möglicherweise lebensfreundlichen Planeten markieren',
-  habitableHint: 'Die habitable Zone ist der Bereich um einen Stern, in dem ein Gesteinsplanet flüssiges Wasser auf seiner Oberfläche haben könnte (Kopparapu et al. 2013): das dunklere Band zwischen den engeren Grenzen, das hellere bis zu den weiter gefassten. Als möglicherweise lebensfreundlich gilt ein Planet in der Zone mit höchstens 2,5 Erdradien (oder, ohne gemessenen Radius, 10 Erdmassen).',
+  habitableMarks: 'Sterne mit möglicherweise lebensfreundlichen Planeten grün beschriften',
+  planetHostMarks: 'Sterne mit Planeten blau beschriften',
+  habitableHint: 'Die habitable Zone ist der Bereich um einen Stern, in dem ein Gesteinsplanet flüssiges Wasser auf seiner Oberfläche haben könnte (Kopparapu et al. 2013): das kräftigere Band zwischen den engeren Grenzen, das blassere bis zu den weiter gefassten. Als möglicherweise lebensfreundlich gilt ein Planet in der Zone mit höchstens 2,5 Erdradien (oder, ohne gemessenen Radius, 10 Erdmassen). Die farbigen Namen gelten für die Sterne, die gerade auf der Karte zu sehen sind.',
   habitableZone: 'Habitable Zone',
   hzInside: 'innerhalb',
   hzEdge: 'am Rand (nur nach den weiter gefassten Grenzen)',

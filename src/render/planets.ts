@@ -38,8 +38,10 @@ import {
 const ORBIT_POINTS = 256;
 const HZ_COLOR = 0x3fcf7a;
 /** Opacity of the wider (optimistic) band; the narrower one is drawn on top of it. */
-const HZ_OPACITY = 0.08;
+const HZ_OPACITY = 0.12;
 const HZ_CONSERVATIVE_OPACITY = 0.1;
+/** Opacity of the lines along the inner and outer edge of the wider band. */
+const HZ_EDGE_OPACITY = 0.45;
 /** At most this many systems are drawn at once (the nearest to the camera). */
 const MAX_SYSTEMS = 16;
 
@@ -95,6 +97,8 @@ interface SystemView {
   sprites: Sprite[];
   /** The habitable zone: the wider and the narrower band (none when the star's values are unknown). */
   zones: Mesh<RingGeometry, MeshBasicMaterial>[];
+  /** Lines along the inner and outer edge of the wider band. */
+  edges: LineLoop<BufferGeometry, LineBasicMaterial>[];
   lastUsed: number;
 }
 
@@ -203,6 +207,10 @@ export class PlanetLayer {
         view.zones[0].material.opacity = HZ_OPACITY * a;
         view.zones[1].material.opacity = HZ_CONSERVATIVE_OPACITY * a;
         for (const z of view.zones) z.visible = a > 0.01;
+        for (const e of view.edges) {
+          e.material.opacity = HZ_EDGE_OPACITY * a;
+          e.visible = a > 0.01;
+        }
       }
       host.planets.forEach((k, j) => {
         const p = cat.planets[k];
@@ -273,6 +281,7 @@ export class PlanetLayer {
     }
     // the habitable zone: two flat bands in the plane of the planet nearest to it
     const zones: SystemView['zones'] = [];
+    const edges: SystemView['edges'] = [];
     if (host.hz) {
       const [optIn, consIn, consOut, optOut] = host.hz.map((au) => au / AU_PER_LY);
       const normal = zonePlaneNormal(host.planets.map((k) => cat.planets[k]), Math.sqrt(host.hz[1] * host.hz[2]));
@@ -289,9 +298,27 @@ export class PlanetLayer {
         group.add(ring);
         zones.push(ring);
       }
+      // the edges of the wider band, so that its outer part stands out from the dark
+      for (const r of [optIn, optOut]) {
+        const pts = new Float32Array(3 * 256);
+        for (let n = 0; n < 256; n++) {
+          const ang = (2 * Math.PI * n) / 256;
+          v.set(Math.cos(ang) * r, Math.sin(ang) * r, 0).applyQuaternion(turn);
+          pts.set([v.x, v.y, v.z], 3 * n);
+        }
+        const edge = new LineLoop(
+          new BufferGeometry().setAttribute('position', new BufferAttribute(pts, 3)),
+          new LineBasicMaterial({ color: HZ_COLOR, transparent: true, opacity: 0, depthTest: false, depthWrite: false }),
+        );
+        edge.frustumCulled = false;
+        edge.renderOrder = 3;
+        edge.visible = false;
+        group.add(edge);
+        edges.push(edge);
+      }
     }
     this.group.add(group);
-    const view = { group, orbits, sprites, zones, lastUsed: this.frame };
+    const view = { group, orbits, sprites, zones, edges, lastUsed: this.frame };
     this.systems.set(h, view);
     return view;
   }
@@ -302,7 +329,7 @@ export class PlanetLayer {
       l.material.dispose();
     }
     for (const s of view.sprites) (s.material as SpriteMaterial).dispose();
-    for (const z of view.zones) {
+    for (const z of [...view.zones, ...view.edges]) {
       z.geometry.dispose();
       z.material.dispose();
     }

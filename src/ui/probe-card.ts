@@ -29,6 +29,7 @@ export class ProbeCard {
   private jd = 0;
   private dateText = '';
   private dl: HTMLElement | null = null;
+  private dateEl: HTMLElement | null = null;
   onClose: () => void = () => {};
   onFlyTo: (i: number) => void = () => {};
 
@@ -42,7 +43,7 @@ export class ProbeCard {
     return this.index;
   }
 
-  /** `jd`: the date the probes are drawn for; `date`: its text when not real time. */
+  /** `jd`: the date the probes are drawn for; `date`: its text. */
   show(cat: ProbeCatalogue | null, i: number | null, jd = 0, date = ''): void {
     this.cat = cat;
     this.index = cat ? i : null;
@@ -51,29 +52,39 @@ export class ProbeCard {
     this.render();
   }
 
-  /** The distance and speed for a new date (without rebuilding the card). */
-  update(jd: number): void {
+  /** The distance, speed and date for a new date (without rebuilding the card). */
+  update(jd: number, date: string): void {
     this.jd = jd;
     if (this.dl) this.fillRows(this.dl);
+    if (date !== this.dateText) {
+      this.dateText = date;
+      if (this.dateEl) this.dateEl.textContent = date ? t('planetDate', { date }) : '';
+    }
   }
+
+  private rowsText = '';
 
   private fillRows(dl: HTMLElement): void {
     const cat = this.cat;
     const i = this.index;
     if (!cat || i === null) return;
     const probe = cat.probes[i];
-    dl.replaceChildren();
-    const row = (k: string, v: string) => dl.append(el('dt', '', k), el('dd', '', v));
+    const rows: [string, string][] = [];
     const [y, m, d] = probe.launch.split('-').map(Number);
-    row(t('launched'), new Date(Date.UTC(y, m - 1, d)).toLocaleDateString(getLang(), { timeZone: 'UTC' }));
+    rows.push([t('launched'), new Date(Date.UTC(y, m - 1, d)).toLocaleDateString(getLang(), { timeZone: 'UTC' })]);
     const pos = probePosition(probe, this.jd);
     if (pos) {
       const au = pos.length() * AU_PER_LY;
-      row(t('distanceFromSun'), `${formatNumber(au, au < 100 ? 1 : 0)} ${t('au')}`);
-      row(t('signalTime'), t('hoursN', { n: formatNumber((au * LIGHT_MINUTES_PER_AU) / 60, 1) }));
+      rows.push([t('distanceFromSun'), `${formatNumber(au, au < 100 ? 1 : 0)} ${t('au')}`]);
+      rows.push([t('signalTime'), t('hoursN', { n: formatNumber((au * LIGHT_MINUTES_PER_AU) / 60, 1) })]);
       const v = probeSpeed(probe, this.jd);
-      if (Number.isFinite(v)) row(t('speedToSun'), `${formatNumber(v, 1)} km/s`);
+      if (Number.isFinite(v)) rows.push([t('speedToSun'), `${formatNumber(v, 1)} km/s`]);
     }
+    // rebuilt only when a value changes (the clock runs every frame)
+    const text = rows.flat().join('\n');
+    if (text === this.rowsText && dl.childElementCount) return;
+    this.rowsText = text;
+    dl.replaceChildren(...rows.flatMap(([k, v]) => [el('dt', '', k), el('dd', '', v)]));
   }
 
   private render(): void {
@@ -102,11 +113,16 @@ export class ProbeCard {
     this.root.appendChild(tags);
 
     const dl = el('dl');
+    // the values follow the clock: not read out at every change
+    dl.setAttribute('aria-live', 'off');
     this.dl = dl;
+    this.rowsText = '';
     this.fillRows(dl);
     this.root.appendChild(dl);
+    this.dateEl = el('p', 'hint card-date', this.dateText ? t('planetDate', { date: this.dateText }) : '');
+    this.dateEl.setAttribute('aria-live', 'off');
+    this.root.appendChild(this.dateEl);
     if (story) this.root.appendChild(el('p', 'probe-story', t(story.text)));
-    if (this.dateText) this.root.appendChild(el('p', 'hint', t('planetDate', { date: this.dateText })));
 
     const actions = el('div', 'info-actions');
     const fly = el('button', 'btn', t('flyTo'));

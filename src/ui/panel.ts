@@ -73,7 +73,8 @@ export class SettingsPanel {
   private tab: PanelTab = readTab();
   readonly root: HTMLElement;
   private body: HTMLElement;
-  onGoToSun: () => void = () => {};
+  /** One of the three views of the View tab: the Earth, the Sun's neighbourhood, the Galaxy from above. */
+  onGoTo: (where: 'earth' | 'sun' | 'galaxy') => void = () => {};
   onHelp: () => void = () => {};
   onAbout: () => void = () => {};
   onManageAttributes: () => void = () => {};
@@ -293,9 +294,24 @@ export class SettingsPanel {
     view.appendChild(radiusRow);
     view.appendChild(this.checkbox('autoRadius', () => s().autoRadius, (v) => this.store.set({ autoRadius: v })));
     view.appendChild(el('p', 'hint', t('radiusHint')));
-    const sunBtn = el('button', 'btn', `☉ ${t('goToSun')}`);
-    sunBtn.addEventListener('click', () => this.onGoToSun());
-    view.appendChild(sunBtn);
+    view.appendChild(el('h3', '', t('goToSection')));
+    const goRow = el('div', 'go-row');
+    for (const [where, label, hint] of [
+      ['earth', `⊕ ${t('goEarth')}`, t('goEarthHint')],
+      ['sun', `☉ ${t('goSun')}`, t('goSunHint')],
+      ['galaxy', `✺ ${t('goGalaxy')}`, t('goGalaxyHint')],
+    ] as const) {
+      const b = el('button', 'btn', label);
+      b.title = hint;
+      b.addEventListener('click', () => {
+        this.onGoTo(where);
+        // on a phone the panel covers the map: it closes to show the flight
+        if (window.matchMedia?.('(max-width: 700px)').matches) this.toggle(false);
+      });
+      goRow.appendChild(b);
+    }
+    view.appendChild(goRow);
+    view.appendChild(el('p', 'hint', t('goHint')));
 
     // --- Stars: which are shown, how they look
     const stars = page('stars');
@@ -376,6 +392,7 @@ export class SettingsPanel {
     space.appendChild(this.checkbox('probesSetting', () => s().probes, (v) => this.store.set({ probes: v })));
     space.appendChild(this.checkbox('habitableZones', () => s().habitableZones, (v) => this.store.set({ habitableZones: v })));
     space.appendChild(this.checkbox('habitableMarks', () => s().habitableMarks, (v) => this.store.set({ habitableMarks: v })));
+    space.appendChild(this.checkbox('planetHostMarks', () => s().planetHostMarks, (v) => this.store.set({ planetHostMarks: v })));
     space.appendChild(el('p', 'hint', t('habitableHint')));
     space.appendChild(el('h3', '', t('galaxiesSection')));
     space.appendChild(this.checkbox('galaxies', () => s().galaxies, (v) => this.store.set({ galaxies: v })));

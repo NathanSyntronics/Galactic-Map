@@ -40,7 +40,7 @@ import {
 import { boxIntersectsCapsule } from './network/capsule';
 import { ROUTE_STORAGE_KEY, RoutePlanner, parseStoredRoute, type RouteEnd, type RouteResult, type StoredRoute, type Waypoint } from './network/planner';
 import { JumpLines } from './render/links';
-import { DropLines, Marker, MarkerSet, PolarGrid } from './render/overlays';
+import { DropLines, Marker, PolarGrid } from './render/overlays';
 import { RouteLine, fitDistance, routeBounds } from './render/route';
 import { Starfield, apparentMag, computeStyle, spritePx, starLogL } from './render/starfield';
 import {
@@ -58,6 +58,7 @@ import {
   RADIUS_MAX,
   RADIUS_MIN,
   SettingsStore,
+  daysPerSecond,
   distanceForRadius,
   followZoom,
   type Settings,
@@ -72,16 +73,17 @@ import { InfoPanel, displayName, type JumpListing, type StarInfo } from './ui/in
 import { GalaxyCard } from './ui/galaxy-card';
 import { PlanetCard } from './ui/planet-card';
 import { PlanetLayer } from './render/planets';
-import { AU_PER_LY, julianDate, loadPlanets, planetName, type PlanetCatalogue, type PlanetHost } from './data/planets';
+import { AU_PER_LY, PlanetFlag, julianDate, loadPlanets, planetName, type PlanetCatalogue, type PlanetHost } from './data/planets';
 import { GalaxyFlag, galaxyDesignation, galaxyName, galaxyRank, loadGalaxies, type GalaxyCatalogue } from './data/galaxies';
 import { GalaxyLayer, milkyWayOpacity } from './render/galaxies';
 import { Legend } from './ui/legend';
 import { LabelLayer, TopK, labelUnder, labelledStarNear, milkyWayLabelPos, namedCandidateLimit, onScreen, starPriority, type LabelCandidate } from './ui/labels';
 import { SettingsPanel } from './ui/panel';
 import { RouteBox, type RouteNames } from './ui/route-box';
-import { PlanetTimeControl } from './ui/time-control';
+import { PlanetTimeControl, formatClockDate } from './ui/time-control';
 import { ProbeCard } from './ui/probe-card';
 import { ProbeLayer } from './render/probes';
+import { scaleClipSpace } from './render/clip';
 import { loadProbes, probePosition, type ProbeCatalogue } from './data/probes';
 import { SearchBox, SearchIndex, hitOf, type SearchHit, type SearchTuple } from './ui/search';
 
@@ -180,8 +182,6 @@ export class App {
   private readonly grid = new PolarGrid();
   private readonly dropLines = new DropLines();
   private readonly selMarker = new Marker(0xffc861, 30);
-  /** Rings around the stars with a potentially habitable planet (setting habitableMarks). */
-  private readonly habitableMarker = new MarkerSet(0x3fcf7a, 22, 0.85);
   private readonly jumpLines = new JumpLines();
   private readonly planner: RoutePlanner<OctreeNode>;
   private readonly routeLine = new RouteLine();
@@ -314,7 +314,6 @@ export class App {
       this.jumpLines.group,
       this.routeLine.group,
       this.starfield.group,
-      this.habitableMarker.group,
       this.selMarker.points,
     );
 
@@ -350,7 +349,7 @@ export class App {
     this.panel = new SettingsPanel(container, this.store, this.attrs);
     this.panel.onScrimWheel = (e) => this.renderer.domElement.dispatchEvent(new WheelEvent('wheel', e));
     this.panel.onManageAttributes = () => this.showAttributes();
-    this.panel.onGoToSun = () => this.goToSun();
+    this.panel.onGoTo = (where) => (where === 'earth' ? void this.goToEarth() : where === 'galaxy' ? this.goToGalaxy() : this.goToSun());
     this.panel.onHelp = () => this.showHelp();
     this.panel.onAbout = () => this.showAbout();
 
@@ -386,6 +385,8 @@ export class App {
     // the planets' speed, on top while a planetary system is to be seen
     this.timeControl = new PlanetTimeControl(stack);
     this.timeControl.onChange = (speed) => this.store.set({ planetSpeed: speed });
+    this.timeControl.onNow = () => this.setClock(julianDate(Date.now()));
+    this.timeControl.onDate = (jd) => this.setClock(jd);
     this.timeControl.set(this.store.get().planetSpeed);
     this.legend.onClose = () => this.store.set({ legend: false });
     this.planner = new RoutePlanner<OctreeNode>(
@@ -505,7 +506,7 @@ export class App {
     this.loader.onFailed = (node) => this.nodeFailed(node);
     this.lodDirty = true;
     if (this.pendingLink) void this.applyLink(this.pendingLink);
-    if (this.store.get().habitableMarks) void this.ensurePlanets();
+    if (this.store.get().habitableMarks || this.store.get().planetHostMarks) void this.ensurePlanets();
     // a route kept from the last visit
     this.planner.invalidate();
     this.loop();
@@ -822,8 +823,8 @@ export class App {
     // switch the language before anything re-renders
     if (has('lang')) setLang(s.lang);
     this.panel.settingsChanged(changed);
-    if (has('habitableMarks')) {
-      if (s.habitableMarks) void this.ensurePlanets();
+    if (has('habitableMarks', 'planetHostMarks')) {
+      if (s.habitableMarks || s.planetHostMarks) void this.ensurePlanets();
       this.candidatesDirty = true;
     }
     if (has('planetSpeed')) {
@@ -1200,7 +1201,6 @@ export class App {
       this.planetLoad = loadPlanets(this.baseUrl).then(
         (cat) => {
           this.planetLayer.setCatalogue(cat);
-          this.updateHabitableMarks();
           this.candidatesDirty = true;
           this.addPlanetSearch();
           this.addProbeSearch();
@@ -1283,10 +1283,8 @@ export class App {
       this.probeCard.show(null, null);
       return;
     }
-    const speed = this.store.get().planetSpeed;
     const jd = this.planetJd();
-    const date = speed === 0 ? '' : new Date((jd - 2440587.5) * 86_400_000).toLocaleDateString(getLang());
-    this.probeCard.show(cat, i, jd, date);
+    this.probeCard.show(cat, i, jd, this.clockText(jd));
   }
 
   /** Flies to a spacecraft, far enough out to see the Sun and its path too (the direction stays). */
@@ -1330,18 +1328,40 @@ export class App {
     return best;
   }
 
-  /** The date the planets are drawn for (Julian): now, or advancing at the chosen speed. */
+  /**
+   * The date the planets and spacecraft are drawn for (Julian): from the date set (now when the
+   * map opens), advancing at the chosen speed (real time: one second per second).
+   */
   private planetJd(): number {
     const c = this.planetClock;
     const now = performance.now();
     const speed = this.store.get().planetSpeed;
-    const current = c.speed === 0 ? julianDate(Date.now()) : c.jd + ((now - c.ms) / 1000) * c.speed;
+    const current = c.jd + ((now - c.ms) / 1000) * daysPerSecond(c.speed);
     if (speed !== c.speed) {
       c.jd = current;
       c.ms = now;
       c.speed = speed;
     }
     return current;
+  }
+
+  /** Sets the clock to a date (Julian); it runs on from there at the chosen speed. */
+  private setClock(jd: number): void {
+    const c = this.planetClock;
+    c.jd = jd;
+    c.ms = performance.now();
+    c.speed = this.store.get().planetSpeed;
+    this.candidatesDirty = true;
+  }
+
+  /** Whether the clock shows the present (within half a minute). */
+  private clockAtNow(jd: number): boolean {
+    return Math.abs(jd - julianDate(Date.now())) * 86_400 < 30;
+  }
+
+  /** The date drawn as the cards write it (with the time of day while the clock runs slowly). */
+  private clockText(jd: number): string {
+    return formatClockDate(jd, this.store.get().planetSpeed <= 1 / 24);
   }
 
   /** Per frame: loads the planets when the view comes close to the stars, and draws them. */
@@ -1354,57 +1374,48 @@ export class App {
     this.probeLayer.update(this.nav.target, s.radius, this.camera, scale, this.renderer.getPixelRatio(), jd, s.probes);
     if (this.selectedProbe !== null) {
       this.selMarker.show(this.probeLayer.position(this.selectedProbe), this.renderer.getPixelRatio());
-      this.probeCard.update(jd);
+      this.probeCard.update(jd, this.clockText(jd));
     }
-    const marks = this.habitableShown(s);
-    if (marks !== this.habitableMarker.group.visible) {
-      this.habitableMarker.group.visible = marks;
-      this.candidatesDirty = true;
-    }
-    // the speed control while planets can be made out (their orbits as large as for their labels;
+    if (this.selectedPlanet !== null) this.planetCard.setDate(this.clockText(jd));
+    // the clock while planets or spacecraft can be made out (orbits as large as for their labels;
     // it goes when they fade, so that it does not flicker at the edge)
     const drawn = this.planetLayer.drawn;
+    const probes = this.probeLayer.drawn;
     const shown = this.timeShown
-      ? s.planets && drawn.some((d) => d.alpha >= 0.3 && d.orbitPx >= 10)
-      : s.planets && drawn.some((d) => d.alpha >= 0.5 && d.orbitPx >= 16);
+      ? (s.planets && drawn.some((d) => d.alpha >= 0.3 && d.orbitPx >= 10)) || probes.some((d) => d.alpha >= 0.3)
+      : (s.planets && drawn.some((d) => d.alpha >= 0.5 && d.orbitPx >= 16)) || probes.some((d) => d.alpha >= 0.5);
     if (shown !== this.timeShown) {
       this.timeShown = shown;
       this.timeControl.show(shown);
     }
+    this.timeControl.update(jd, this.clockAtNow(jd), s.planetSpeed);
     // the selection marker follows a moving planet
     if (this.selectedPlanet !== null) this.selMarker.show(this.planetLayer.livePosition(this.selectedPlanet), this.renderer.getPixelRatio());
   }
 
-  /** Whether the rings around the stars with a potentially habitable planet are shown now (not at galaxy scales, nor close up). */
-  private habitableShown(s: Settings): boolean {
-    return s.habitableMarks && !!this.planetLayer.catalogue && s.radius >= 0.05 && !starsHidden(s.radius);
-  }
-
-  /** The rings around the stars with a potentially habitable planet, from the planet catalogue. */
-  private updateHabitableMarks(): void {
+  /**
+   * Marked stars (settings habitableMarks, planetHostMarks): their names in green (a potentially
+   * habitable planet) or blue (planets), labelled before most others. Only stars drawn now inside
+   * the visible sphere: marking adds no star that is not on the map anyway.
+   */
+  private markedCandidates(cands: LabelCandidate[]): void {
+    const s = this.store.get();
     const cat = this.planetLayer.catalogue;
-    this.habitableMarker.set(cat ? cat.hosts.filter((h) => h.habitable).map((h) => h.pos) : null, this.renderer.getPixelRatio());
-  }
-
-  /** While they are marked, the stars with a potentially habitable planet are labelled before others. */
-  private habitableCandidates(cands: LabelCandidate[]): void {
-    const cat = this.planetLayer.catalogue;
-    if (!cat || !this.habitableShown(this.store.get())) return;
+    if (!cat || !(s.habitableMarks || s.planetHostMarks) || starsHidden(s.radius)) return;
     const byKey = new Map(cands.map((c) => [c.key, c]));
+    const target = this.nav.target;
     for (const h of cat.hosts) {
-      if (!h.habitable) continue;
-      const c = byKey.get(h.key);
-      if (c) {
-        c.priority = true;
-        continue;
+      const tint = s.habitableMarks && h.habitable ? 'habitable' : s.planetHostMarks ? 'planets' : null;
+      if (!tint || h.pos.distanceTo(target) > s.radius) continue;
+      let c = byKey.get(h.key);
+      if (!c) {
+        // a star on the map without a label candidate yet (e.g. one with a catalogue designation only)
+        const rn = this.starfield.get(h.path);
+        if (!rn || !rn.points.visible || h.index >= rn.data.count || rn.sizes[h.index] <= 0) continue;
+        c = this.candidateOf(rn.data, h.index);
+        cands.push(c);
       }
-      const data = this.loader?.get(h.path);
-      const cand: LabelCandidate =
-        data && h.index < data.count
-          ? this.candidateOf(data, h.index)
-          : { key: h.key, pos: h.pos.clone(), text: this.hostName(h), rank: 0, logL: 0 };
-      cand.priority = true;
-      cands.push(cand);
+      if (!c.sun) c.tint = tint;
     }
   }
 
@@ -1463,9 +1474,7 @@ export class App {
       this.planetCard.show(null, null);
       return;
     }
-    const speed = this.store.get().planetSpeed;
-    const date = speed === 0 ? '' : new Date((this.planetJd() - 2440587.5) * 86_400_000).toLocaleDateString(getLang());
-    this.planetCard.show(cat, i, this.hostName(cat.hosts[cat.planets[i].host]), date);
+    this.planetCard.show(cat, i, this.hostName(cat.hosts[cat.planets[i].host]), this.clockText(this.planetJd()));
   }
 
   /** A host star's name on the map (its archive name while its node is not loaded). */
@@ -1583,7 +1592,7 @@ export class App {
       });
     }
     this.routeCandidates(cands);
-    this.habitableCandidates(cands);
+    this.markedCandidates(cands);
     this.galaxyCandidates(cands);
     this.planetCandidates(cands);
     this.probeCandidates(cands);
@@ -2151,19 +2160,24 @@ export class App {
   };
 
   /**
-   * Phones: while the info card is open, the route box (and legend) would sit under it, so the
-   * bottom-left stack moves to the top of the screen (CSS: .card-open, --card-h).
+   * Phones: while a card (star, planet, spacecraft, galaxy) is open, the clock and the route box
+   * (and legend) would sit under it, so the bottom-left stack moves to the top of the screen
+   * (CSS: .card-open, --card-h).
    */
   private placeAboveCard(): void {
     const phone = window.matchMedia?.('(max-width: 700px)');
-    const card = this.info.root;
+    const cards = [this.info.root, this.planetCard.root, this.probeCard.root, this.galaxyCard.root];
     const place = () => {
-      const open = !!phone?.matches && !card.classList.contains('hidden');
+      const card = cards.find((c) => !c.classList.contains('hidden'));
+      const open = !!phone?.matches && !!card;
       this.container.classList.toggle('card-open', open);
-      if (open) this.container.style.setProperty('--card-h', `${card.offsetHeight}px`);
+      if (card && open) this.container.style.setProperty('--card-h', `${card.offsetHeight}px`);
     };
-    // the card's size changes with its content and when it is shown or hidden
-    if (typeof ResizeObserver !== 'undefined') new ResizeObserver(place).observe(card);
+    // a card's size changes with its content and when it is shown or hidden
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(place);
+      for (const c of cards) ro.observe(c);
+    }
     phone?.addEventListener?.('change', place);
     place();
   }
@@ -2259,11 +2273,36 @@ export class App {
     this.info.updateJumps();
   }
 
+  /** Flies to a point with a visible radius (set at once when it does not follow the zoom). */
+  private goTo(point: Vector3, radius: number, direction?: Vector3): void {
+    if (!this.store.get().autoRadius) this.store.set({ radius });
+    this.nav.flyTo(point, distanceForRadius(radius), 1.2, direction);
+  }
+
+  /** The Sun's neighbourhood: 10 light years around the Sun. */
   private goToSun(): void {
-    const s = this.store.get();
-    // the default framing of the sphere (which the radius keeps by itself while it follows the zoom)
-    const d = s.autoRadius ? this.nav.distance : distanceForRadius(s.radius);
-    this.nav.flyTo(new Vector3(0, 0, 0), MathUtils.clamp(d, 5, 150_000));
+    this.goTo(new Vector3(0, 0, 0), 10);
+  }
+
+  /** The Milky Way from above (from the galactic north), 100,000 light years around its centre. */
+  private goToGalaxy(): void {
+    // the camera a little to the Sun's side: the Sun lies below the centre on the screen
+    const centre = this.galaxyLayer.galacticCentre.clone();
+    const towardsSun = centre.clone().negate().setY(0).normalize();
+    this.goTo(centre, 100_000, new Vector3(0, 1, 0).addScaledVector(towardsSun, 0.25));
+  }
+
+  /** The Earth at the date drawn, 2 AU around it (where it will be when the flight ends). */
+  private async goToEarth(): Promise<void> {
+    const cat = await this.ensurePlanets();
+    const i = cat ? cat.planets.findIndex((p) => p.flags & PlanetFlag.SOLAR_SYSTEM && p.name === 'Earth') : -1;
+    if (!cat || i < 0) return;
+    const jd = this.planetJd() + 1.2 * daysPerSecond(this.store.get().planetSpeed);
+    const pos = this.planetLayer.position(i, jd);
+    // from above the Earth's orbit (its orbits as circles), a little outwards: the Sun beyond the Earth
+    const earth = cat.planets[i];
+    const north = new Vector3().crossVectors(earth.P, earth.Q).normalize();
+    this.goTo(pos, 2 / AU_PER_LY, north.addScaledVector(pos.clone().normalize(), 0.4));
   }
 
   /** Radius follows zoom: the radius tracks the camera distance in steps of about 1 %. */
@@ -2594,6 +2633,7 @@ export class App {
     const ext = this.routeLine.extent;
     if (ext) this.camera.far = Math.max(this.camera.far, this.camera.position.distanceTo(ext.centre) + ext.radius + 100);
     this.camera.updateProjectionMatrix();
+    scaleClipSpace(this.camera, dist);
     // labels and picking need this frame's camera matrix
     this.camera.updateMatrixWorld();
 

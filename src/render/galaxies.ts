@@ -570,6 +570,11 @@ export class GalaxyLayer {
   }
 
   /** Opacity of the Milky Way model in the last frame (0: not drawn). */
+  /** The Galactic Centre (world coordinates, ly). */
+  get galacticCentre(): Vector3 {
+    return this.mwCentre;
+  }
+
   get milkyWayShown(): number {
     return this.milkyWay.visible ? (this.milkyWay.material.uniforms.uOpacity.value as number) : 0;
   }

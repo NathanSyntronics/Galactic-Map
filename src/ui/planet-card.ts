@@ -46,6 +46,7 @@ export class PlanetCard {
   private index: number | null = null;
   private hostName = '';
   private dateText = '';
+  private dateEl: HTMLElement | null = null;
   onClose: () => void = () => {};
   onFlyTo: (i: number) => void = () => {};
 
@@ -70,6 +71,13 @@ export class PlanetCard {
 
   rerender(): void {
     this.render();
+  }
+
+  /** The date the positions are drawn for, as the clock runs (only the line changes). */
+  setDate(date: string): void {
+    if (date === this.dateText) return;
+    this.dateText = date;
+    if (this.dateEl) this.dateEl.textContent = date ? t('planetDate', { date }) : '';
   }
 
   private render(): void {
@@ -136,7 +144,9 @@ export class PlanetCard {
       if (assumed.length) note.textContent += ` ${t('orbitNoteAssumed', { what: assumed.join(', ') })}`;
       this.root.appendChild(note);
     }
-    if (this.dateText) this.root.appendChild(el('p', 'hint', t('planetDate', { date: this.dateText })));
+    this.dateEl = el('p', 'hint card-date', this.dateText ? t('planetDate', { date: this.dateText }) : '');
+    this.dateEl.setAttribute('aria-live', 'off');
+    this.root.appendChild(this.dateEl);
 
     const actions = el('div', 'info-actions');
     const fly = el('button', 'btn', t('flyTo'));

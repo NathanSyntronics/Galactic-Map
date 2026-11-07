@@ -2,6 +2,7 @@ import { BufferAttribute, BufferGeometry, Color, Group, Points, ShaderMaterial, 
 import { Line2 } from 'three/addons/lines/Line2.js';
 import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
+import { acceptScaledProjection } from './clip';
 
 /** Colour of the route: a bright magenta, apart from the network palettes (turbo, teal, star colours), the blue grid and the amber selection. */
 export const ROUTE_RGB: [number, number, number] = [255, 77, 214];
@@ -94,6 +95,8 @@ export class RouteLine {
     const common = { transparent: true, depthTest: false, depthWrite: false, worldUnits: false };
     this.lineMaterial = new LineMaterial({ ...common, color: new Color(...ROUTE_RGB.map((v) => v / 255)), linewidth: ROUTE_WIDTH });
     this.casingMaterial = new LineMaterial({ ...common, color: 0x0a0312, linewidth: CASING_WIDTH, opacity: 0.6 });
+    acceptScaledProjection(this.lineMaterial);
+    acceptScaledProjection(this.casingMaterial);
     this.markerMaterial = new ShaderMaterial({
       vertexShader: markerVertex,
       fragmentShader: markerFragment,

@@ -27,6 +27,7 @@ Distances on 1 January 2026: Voyager 1 169 AU, Voyager 2 142 AU, Pioneer 10 140 
   least 12 px on screen (fading in to 40 px). Their labels come first (*Spacecraft*, settings,
   *Space*).
 * A click picks a probe before a planet or a star; its card: launch, distance from the Sun, the
-  time a radio signal takes, its speed relative to the Sun, a short history and the NASA mission
-  page. *Centre view here* flies to it far enough out to see the Sun too.
+  time a radio signal takes, its speed relative to the Sun, the date drawn (these follow the
+  planets' clock, docs/PLANETS.md), a short history and the NASA mission page. *Centre view here*
+  flies to it far enough out to see the Sun too. While a probe is drawn, the clock is on the map.
 * The search knows them ("Voyager 1"), and shared links carry them (`k=voyager1`).

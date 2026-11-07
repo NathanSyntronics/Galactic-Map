@@ -2,6 +2,21 @@
 
 Every round of changes that goes live raises the version by 0.01 (README, *Versions*).
 
+## 1.04 (2026-11-07)
+
+* Fixed: close to planets (below about a hundred million kilometres) some phone graphics chips drew
+  the planets, orbits and grid in place while their labels moved on. The picture now reaches the
+  graphics chip in units of the camera distance, which those chips handle.
+* The clock of the planets and spacecraft: its date is shown on the map (and on the planet and
+  spacecraft cards, which now follow it); real time runs one second per second from any date;
+  *Now* goes back to the present date (the speed stays), and a calendar button sets any date.
+* Stars with potentially habitable planets: their names in green instead of the rings, only for
+  stars that are on the map anyway; optionally the names of all stars with planets in blue.
+* The habitable zone stands out more: lines along its edges, its outer band brighter.
+* View tab: *Earth* (2 AU around it), *Sun* (10 light years) and *Galaxy* (the Milky Way from above)
+  instead of *Back to the Sun*.
+* Phones: the clock and the route box move above the planet, spacecraft and galaxy cards too.
+
 ## 1.03 (2026-11-07)
 
 * Habitable zones: around every planet host whose temperature and luminosity are known, a green

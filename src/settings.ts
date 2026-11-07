@@ -36,8 +36,10 @@ export interface Settings {
   probes: boolean;
   /** The habitable zones of the planetary systems drawn. */
   habitableZones: boolean;
-  /** Rings around the stars with a potentially habitable planet, at every scale. */
+  /** The names of the stars with a potentially habitable planet in green (stars in view). */
   habitableMarks: boolean;
+  /** The names of all stars with known planets in blue (stars in view). */
+  planetHostMarks: boolean;
   quality: Quality;
   /** Attribute that sets the star colours ('' natural temperature colour). */
   colorBy: string;
@@ -88,6 +90,7 @@ export const DEFAULT_SETTINGS: Settings = {
   probes: true,
   habitableZones: true,
   habitableMarks: false,
+  planetHostMarks: false,
   quality: 'medium',
   colorBy: '',
   sizeBy: '',
@@ -112,6 +115,11 @@ export const DEFAULT_SETTINGS: Settings = {
  */
 export const PLANET_SPEEDS: readonly number[] = [0, 1 / 24, 1, 7, 30, 365, 3652.5];
 export const PLANET_SPEED_KEYS = ['speedReal', 'speedHour', 'speedDay', 'speedWeek', 'speedMonth', 'speedYear', 'speedDecade'] as const;
+
+/** Days per second of a planet speed: 0 is real time, one second per second (from any date). */
+export function daysPerSecond(speed: number): number {
+  return speed === 0 ? 1 / 86_400 : speed;
+}
 
 /** The stop of a planet speed (the nearest one for a value that is none). */
 export function planetSpeedStop(speed: number): number {
