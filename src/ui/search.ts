@@ -272,6 +272,8 @@ export class SearchBox {
   private mode: 'none' | 'results' | 'recent' = 'none';
   private active = 0;
   private recent: RecentSearch[] = readRecent();
+  /** Canvas for measuring the placeholder. */
+  private static measure: HTMLCanvasElement | undefined;
   /** A recent search picked before the index was loaded: carried out once it is (unless cancelled). */
   private pending: RecentSearch | null = null;
   private pendingToken = 0;
@@ -294,6 +296,9 @@ export class SearchBox {
     this.root.append(this.input, this.list);
     parent.appendChild(this.root);
     this.updateTexts();
+    // the field's width is known once it is laid out, and changes with the window
+    requestAnimationFrame(() => this.fitPlaceholder());
+    window.addEventListener('resize', () => this.fitPlaceholder());
 
     this.input.addEventListener('focus', () => {
       this.cancelPending();
@@ -339,10 +344,25 @@ export class SearchBox {
   }
 
   updateTexts(): void {
-    this.input.placeholder = t('search');
+    this.fitPlaceholder();
     this.input.setAttribute('aria-label', t('search'));
     if (this.mode === 'recent') this.showRecent(false);
     else if (this.mode !== 'none') this.renderList();
+  }
+
+  /** The placeholder: "Search stars, planets and galaxies…", or a shorter one where the field is narrow (phones). */
+  fitPlaceholder(): void {
+    const long = t('search');
+    const input = this.input;
+    const cs = getComputedStyle(input);
+    const room = input.clientWidth - parseFloat(cs.paddingLeft || '0') - parseFloat(cs.paddingRight || '0') - 4;
+    const ctx = room > 0 ? (SearchBox.measure ??= document.createElement('canvas')).getContext('2d') : null;
+    if (!ctx) {
+      input.placeholder = long;
+      return;
+    }
+    ctx.font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+    input.placeholder = ctx.measureText(long).width <= room ? long : t('searchShort');
   }
 
   focus(): void {

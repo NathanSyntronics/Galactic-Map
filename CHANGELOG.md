@@ -2,6 +2,17 @@
 
 Every round of changes that goes live raises the version by 0.01 (README, *Versions*).
 
+## 1.02 (2026-11-07)
+
+* The search field says what it finds: stars, planets and galaxies (shorter on narrow screens).
+* The last five searches instead of three.
+* Stars four times larger by default.
+* Settings: a new tab *Info* with the version, the controls, *About & sources*, the language and
+  the reset; the data layers and the jump network together under *Layers*; the level of detail
+  under *Stars*.
+* About & sources: the text as whole sentences; star colours and sizes follow temperature and
+  luminosity by default, and can follow other properties.
+
 ## 1.01 (2026-11-07)
 
 * Shared links: the address holds the view, the selected star, planet or galaxy and the route;

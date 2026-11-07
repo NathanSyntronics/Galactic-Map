@@ -79,10 +79,10 @@ Hold Shift for faster keyboard movement. A pinch only zooms: the view centre sta
 Which of the two a gesture is, is decided after the fingers have moved 10 px: a pinch changes the
 fingers' distance at least about as much as it moves their midpoint.
 
-The search finds stars and galaxies by name or catalogue designation (exact names first, then
+The search finds stars, planets and galaxies by name or catalogue designation (exact names first, then
 names that begin with what was typed; a name followed only by a generic word such as *Galaxy*,
 *-galaxie* or *Dwarf* counts as exact: "Andromeda" finds the Andromeda Galaxy before Andromeda I); while the field is empty it lists the
-last three stars picked from the search (newest first, kept in the browser). One picked before the
+last five stars picked from the search (newest first, kept in the browser). One picked before the
 star catalogue has loaded says *Loading…* and is carried out when it arrives, unless you type or
 pick something else first; if the catalogue cannot be loaded, the list says so and the next click
 into the field tries again. Any press beside the open settings panel (a click, a tap, even one that
@@ -103,20 +103,20 @@ start with fewer stars and labels, and those defaults are never stored, so the s
 wide window gets the normal ones. Each tab writes only the settings it changed, so zooming in an
 older tab keeps what you set in another.
 
-The settings panel (☰) has five tabs (the last one open is remembered in the browser; help,
-about, reset and the version are under each):
+The settings panel (☰) has five tabs (the last one open is remembered in the browser):
 * **View:** the visible radius (1e-7 ly, a hundredth of an AU, to 2 billion ly), and whether it
   follows the zoom (on by default: radius = camera distance / 2.2, the framing of the start view;
   the radius slider then moves the camera; switched off, the radius stays where it is); the labels;
-  the galactic grid and the height lines; the level of detail (how many stars may be loaded at
-  once; it matters only for view radii of a few hundred light years and more); the language.
+  the galactic grid and the height lines.
 * **Stars:** brown dwarfs (off by default) and white dwarfs; a maximum distance uncertainty; star
-  size (0.2× to 12×), brightness and colour saturation.
+  size (0.2× to 12×, 4× by default), brightness and colour saturation; the level of detail (how
+  many stars may be loaded at once; it matters only for view radii of a few hundred light years and
+  more).
 * **Space:** the planets (on) and how fast they move: a slider from real time over an hour, a day,
   a week, a month (the default) and a year to ten years per second; the galaxies and the Milky Way
   model (both on).
-* **Data:** the data layers (below).
-* **Jumps:** the jump network (below).
+* **Layers:** the data layers and the jump network (below).
+* **Info:** the version, the controls, *About & sources*, the language and resetting the settings.
 
 ### Shared links
 
@@ -140,7 +140,7 @@ stellar diameters would be invisibly small.
 
 ### Data layers and your own attributes
 
-Under *Data layers* in the settings, the star colours and sizes can follow any attribute:
+Under *Layers* in the settings, the star colours and sizes can follow any attribute:
 * **catalogue data**: known exoplanets (NASA Exoplanet Archive), spectral class, temperature,
   luminosity, absolute magnitude, distance from the Sun, distance uncertainty;
 * **your own attributes**.
@@ -445,7 +445,7 @@ requests), otherwise from `data/` next to it.
 
 ### Versions
 
-The version is shown at the bottom of the settings panel and in *About & sources*: 1.00 is the
+The version is shown under *Info* in the settings panel and in *About & sources*: 1.00 is the
 first public version, and every round of changes that goes live raises it by 0.01 (1.01, 1.02,
 ...), with an entry in [`CHANGELOG.md`](CHANGELOG.md). package.json holds it in the semver form npm
 needs, the minor number counting the steps (1.0.0 is 1.00, 1.1.0 is 1.01; `src/version.ts`):

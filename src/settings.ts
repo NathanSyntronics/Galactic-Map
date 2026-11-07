@@ -70,7 +70,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showBrownDwarfs: false,
   showWhiteDwarfs: true,
   maxDistErr: 20,
-  starSize: 1,
+  starSize: 4,
   brightness: 1,
   saturation: 1.6,
   grid: true,

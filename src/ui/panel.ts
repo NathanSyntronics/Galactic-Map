@@ -43,14 +43,16 @@ const sliderToRadius = (v: number) => {
 };
 
 /** The tabs of the settings panel. */
-export type PanelTab = 'view' | 'stars' | 'space' | 'data' | 'jumps';
-const PANEL_TABS: readonly PanelTab[] = ['view', 'stars', 'space', 'data', 'jumps'];
+export type PanelTab = 'view' | 'stars' | 'space' | 'layers' | 'info';
+const PANEL_TABS: readonly PanelTab[] = ['view', 'stars', 'space', 'layers', 'info'];
 const TAB_KEY = 'galactic-map:panel-tab';
 
 /** The tab last open (this browser), or the first. */
 function readTab(): PanelTab {
   try {
     const v = localStorage.getItem(TAB_KEY);
+    // the data and jump tabs of version 1.01 are one now
+    if (v === 'data' || v === 'jumps') return 'layers';
     return PANEL_TABS.includes(v as PanelTab) ? (v as PanelTab) : 'view';
   } catch {
     return 'view';
@@ -223,13 +225,13 @@ export class SettingsPanel {
     header.appendChild(close);
     b.appendChild(header);
 
-    // tabs: one page at a time; the footer (help, about, reset, version) under each
+    // tabs: one page at a time
     const TABS: [PanelTab, MessageKey][] = [
       ['view', 'tabView'],
       ['stars', 'tabStars'],
       ['space', 'tabSpace'],
-      ['data', 'tabData'],
-      ['jumps', 'tabJumps'],
+      ['layers', 'tabLayers'],
+      ['info', 'tabInfo'],
     ];
     const bar = el('div', 'panel-tabs');
     bar.setAttribute('role', 'tablist');
@@ -312,16 +314,13 @@ export class SettingsPanel {
       ),
     );
 
-    // --- Data layers
-    const data = page('data');
-    data.appendChild(el('h3', '', t('dataLayers')));
-    data.appendChild(this.layers);
+    // --- Layers over the map: data layers and the jump network
+    const layers = page('layers');
+    layers.appendChild(el('h3', '', t('dataLayers')));
+    layers.appendChild(this.layers);
     this.renderLayers();
-
-    // --- Jump network
-    const jumps = page('jumps');
-    jumps.appendChild(el('h3', '', t('jumpSection')));
-    jumps.appendChild(this.jumpBox);
+    layers.appendChild(el('h3', '', t('jumpSection')));
+    layers.appendChild(this.jumpBox);
     this.renderJumps();
 
     // --- Labels (view)
@@ -377,9 +376,9 @@ export class SettingsPanel {
     space.appendChild(el('h3', '', t('galaxiesSection')));
     space.appendChild(this.checkbox('galaxies', () => s().galaxies, (v) => this.store.set({ galaxies: v })));
     space.appendChild(this.checkbox('milkyWay', () => s().milkyWay, (v) => this.store.set({ milkyWay: v })));
-    // --- Detail and language (view)
-    view.appendChild(el('h3', '', t('general')));
-    view.appendChild(
+    // --- Detail (stars: how many may be loaded)
+    stars.appendChild(el('h3', '', t('detailSection')));
+    stars.appendChild(
       this.select<Quality>(
         'quality',
         [
@@ -392,8 +391,20 @@ export class SettingsPanel {
         (v) => this.store.set({ quality: v }),
       ),
     );
-    view.appendChild(el('p', 'hint', t('qualityHint')));
-    view.appendChild(
+    stars.appendChild(el('p', 'hint', t('qualityHint')));
+    // --- Info: the version, the controls, about and sources, reset
+    const info = page('info');
+    info.appendChild(el('h3', '', t('appTitle')));
+    info.appendChild(el('p', 'panel-version', t('versionN', { v: VERSION })));
+    const infoButtons = el('div', 'panel-footer');
+    const help = el('button', 'btn', t('help'));
+    help.addEventListener('click', () => this.onHelp());
+    const about = el('button', 'btn', t('about'));
+    about.addEventListener('click', () => this.onAbout());
+    infoButtons.append(help, about);
+    info.appendChild(infoButtons);
+    info.appendChild(el('h3', '', t('settings')));
+    info.appendChild(
       this.select<'en' | 'de'>(
         'language',
         [
@@ -405,20 +416,12 @@ export class SettingsPanel {
         true,
       ),
     );
+    const reset = el('button', 'btn subtle', t('resetSettings'));
+    reset.addEventListener('click', () => this.store.reset());
+    info.appendChild(reset);
 
     for (const [tab] of TABS) b.appendChild(pages.get(tab)!);
     show(this.tab);
-
-    const footer = el('div', 'panel-footer');
-    const help = el('button', 'btn', t('help'));
-    help.addEventListener('click', () => this.onHelp());
-    const about = el('button', 'btn', t('about'));
-    about.addEventListener('click', () => this.onAbout());
-    const reset = el('button', 'btn subtle', t('resetSettings'));
-    reset.addEventListener('click', () => this.store.reset());
-    footer.append(help, about, reset);
-    b.appendChild(footer);
-    b.appendChild(el('p', 'panel-version', t('versionN', { v: VERSION })));
     if (focusIndex >= 0) this.focusables()[focusIndex]?.focus();
   }
 

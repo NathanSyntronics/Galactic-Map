@@ -34,7 +34,8 @@ const en = {
   qualityUltra: 'Very high',
   resetSettings: 'Reset settings',
   goToSun: 'Back to the Sun',
-  search: 'Search stars and galaxies…',
+  search: 'Search stars, planets and galaxies…',
+  searchShort: 'Stars, planets, galaxies…',
   noResults: 'No matches',
   recentSearches: 'Recent',
   searchUnavailable: 'The star catalogue could not be loaded. Try again later.',
@@ -175,19 +176,15 @@ const en = {
 <p>The grid lies parallel to the galactic plane. 0° points towards the Galactic Centre, 90° in the direction of Galactic rotation.</p>
 <p>The jump network links stars up to the jump range apart (9 ly by default); brighter stars get more links. A star's info card lists its links; click one to go there.</p>
 <p>Routes: “Route from here” and “Route to here” on a star’s info card plan a route through the jump network, also between distant stars (the Sun and Betelgeuse, say). The route box lists the waypoints; zoomed out, only the route is drawn.</p>
-<p>The search knows the stars and the galaxies. The empty search field lists the last three you picked from the search. A press anywhere beside the open settings only closes them (it selects no star); a click beside a dialog closes the dialog.</p>
+<p>The search knows the stars, the planets and the galaxies. The empty search field lists the last five you picked from the search. A press anywhere beside the open settings only closes them (it selects no star); a click beside a dialog closes the dialog.</p>
 <p>A click on a star's name selects that star; where many stars crowd together, labelled stars are preferred.</p>
 <p>Planets: zoomed into a planetary system, a slider at the bottom sets how fast the planets move, from real time to ten years per second (also under Space in the settings).</p>
 <p>Sharing: the share button at the top (beside the search) sends or copies a link to what is on screen: the view, the selected star, planet or galaxy, and the route. The address in the browser always holds that link too.</p>`,
   aboutText: `
-<p><b>A map, not a photograph.</b> The Galactic Map shows where the stars, planets and galaxies around us really are, as precisely as today's measurements allow. But it is deliberately not a true-to-life picture: like a road map that draws towns as dots and roads as broad lines, it abstracts so that something can be seen.</p>
-<ul>
-<li><b>Sizes:</b> stars, planets and galaxies are drawn far larger than they are compared with the distances between them. At its true size even the Sun, seen from one light year away, would be smaller than a thousandth of a pixel.</li>
-<li><b>Colours and brightness:</b> a star's colour follows its temperature and its symbol grows with its luminosity, both exaggerated so that the differences show.</li>
-<li><b>Planetary orbits:</b> where an orbit has not been measured completely (how it is tilted in space, where the planet is on it), the map fills in plausible values; the planet's card says what was assumed.</li>
-<li><b>The Milky Way:</b> a stylised model with a bar and spiral arms. Its true shape is known only roughly, because we sit inside it.</li>
-<li><b>Lines:</b> the jump network, routes, the grid and the drop lines are aids of the map, not real objects.</li>
-</ul>
+<p>The Galactic Map is a map, not a photograph. It shows where the stars, planets and galaxies around us really are, as precisely as today's measurements allow. Like any map, though, it simplifies so that something can be seen: just as a road map draws towns as dots and roads as broad lines, much here is deliberately not drawn true to life.</p>
+<p>Stars, planets and galaxies are drawn far larger than they are compared with the distances between them. At its true size even the Sun, seen from one light year away, would be smaller than a thousandth of a pixel.</p>
+<p>By default a star's colour follows its temperature and the size of its symbol its luminosity. Both are exaggerated so that the differences show; under Layers in the settings, colour and size can follow other properties instead.</p>
+<p>Where a planet's orbit has not been measured completely, for instance how it is tilted in space or where the planet is on it, the map fills in plausible values, and the planet's card says what was assumed. The Milky Way is a stylised model with a bar and spiral arms, because its true shape is known only roughly: we sit inside it. The jump network, routes, the grid and the drop lines are aids of the map, not real objects.</p>
 <p>The positions come from measured parallaxes and sky coordinates, converted into a galactic coordinate system with the Sun at its origin (X towards the Galactic Centre, Z towards the North Galactic Pole). Distances carry measurement errors: up to about 10 % for the most distant stars of the map, often 20 % and more for galaxies.</p>`,
   dataLayers: 'Data layers',
   colorBy: 'Colour by',
@@ -328,14 +325,14 @@ const en = {
   tabView: 'View',
   tabStars: 'Stars',
   tabSpace: 'Space',
-  tabData: 'Data',
-  tabJumps: 'Jumps',
+  tabLayers: 'Layers',
+  tabInfo: 'Info',
+  detailSection: 'Level of detail',
   viewRadius: 'Visible region',
   starsShown: 'Which stars',
   starsLook: 'Appearance',
   gridSection: 'Grid',
   galaxiesSection: 'Galaxies',
-  general: 'Detail and language',
   routeFlyby: '▶ Fly the route',
   routeFlybyStop: '■ Stop',
   routeFlybyStep: 'Speed of the flyby',
@@ -402,7 +399,8 @@ const de: Record<MessageKey, string> = {
   qualityUltra: 'Sehr hoch',
   resetSettings: 'Einstellungen zurücksetzen',
   goToSun: 'Zurück zur Sonne',
-  search: 'Sterne und Galaxien suchen…',
+  search: 'Sterne, Planeten und Galaxien suchen …',
+  searchShort: 'Sterne, Planeten, Galaxien …',
   noResults: 'Keine Treffer',
   recentSearches: 'Zuletzt gesucht',
   searchUnavailable: 'Der Sternkatalog konnte nicht geladen werden. Bitte später erneut versuchen.',
@@ -543,19 +541,15 @@ const de: Record<MessageKey, string> = {
 <p>Das Gitter liegt parallel zur galaktischen Ebene. 0° zeigt zum Galaktischen Zentrum, 90° in Richtung der galaktischen Rotation.</p>
 <p>Das Sprungnetz verbindet Sterne bis zur Sprungweite (standardmäßig 9 Lj); hellere Sterne bekommen mehr Verbindungen. Die Infokarte eines Sterns listet seine Verbindungen auf; ein Klick darauf führt dorthin.</p>
 <p>Routen: „Route von hier“ und „Route hierher“ in der Infokarte eines Sterns planen eine Route durch das Sprungnetz, auch zwischen weit entfernten Sternen (etwa der Sonne und Beteigeuze). Das Routenfeld listet die Wegpunkte; herausgezoomt wird nur die Route gezeichnet.</p>
-<p>Die Suche kennt Sterne und Galaxien. Das leere Suchfeld zeigt die drei zuletzt über die Suche gewählten. Ein Druck irgendwo neben die offenen Einstellungen schließt nur diese (es wird kein Stern gewählt); ein Klick neben einen Dialog schließt den Dialog.</p>
+<p>Die Suche kennt Sterne, Planeten und Galaxien. Das leere Suchfeld zeigt die fünf zuletzt über die Suche gewählten. Ein Druck irgendwo neben die offenen Einstellungen schließt nur diese (es wird kein Stern gewählt); ein Klick neben einen Dialog schließt den Dialog.</p>
 <p>Ein Klick auf den Namen eines Sterns wählt diesen Stern; wo sich viele Sterne drängen, haben beschriftete Sterne Vorrang.</p>
 <p>Planeten: Hineingezoomt in ein Planetensystem stellt ein Regler unten ein, wie schnell sich die Planeten bewegen, von Echtzeit bis zehn Jahre pro Sekunde (auch unter „Weltall“ in den Einstellungen).</p>
 <p>Teilen: Der Teilen-Knopf oben (neben der Suche) verschickt oder kopiert einen Link zu dem, was zu sehen ist: Ansicht, ausgewählter Stern, Planet oder Galaxie und Route. Auch die Adresse im Browser enthält immer diesen Link.</p>`,
   aboutText: `
-<p><b>Eine Karte, kein Foto.</b> Die Galaktische Karte zeigt, wo die Sterne, Planeten und Galaxien unserer Umgebung tatsächlich stehen, so genau, wie es die heutigen Messungen erlauben. Sie ist aber bewusst keine naturgetreue Darstellung: Wie eine Landkarte Städte als Punkte und Straßen als breite Linien zeichnet, abstrahiert sie, damit man etwas erkennen kann.</p>
-<ul>
-<li><b>Größen:</b> Sterne, Planeten und Galaxien sind viel größer gezeichnet, als sie im Verhältnis zu ihren Abständen sind. In wahrer Größe wäre selbst die Sonne aus einem Lichtjahr Entfernung kleiner als ein Tausendstel Bildpunkt.</li>
-<li><b>Farben und Helligkeit:</b> Die Farbe eines Sterns folgt seiner Temperatur, sein Symbol wächst mit seiner Leuchtkraft, beides verstärkt, damit die Unterschiede sichtbar werden.</li>
-<li><b>Planetenbahnen:</b> Wo eine Bahn nicht vollständig vermessen ist (wie sie im Raum geneigt ist, wo der Planet auf ihr steht), ergänzt die Karte plausible Werte; die Infokarte des Planeten sagt, was angenommen ist.</li>
-<li><b>Die Milchstraße:</b> ein stilisiertes Modell mit Balken und Spiralarmen. Ihre wahre Form kennen wir nur ungefähr, weil wir mittendrin sitzen.</li>
-<li><b>Linien:</b> Sprungnetz, Routen, Gitter und Höhenlinien sind Hilfsmittel der Karte, keine echten Objekte.</li>
-</ul>
+<p>Die Galaktische Karte ist eine Karte, kein Foto. Sie zeigt, wo die Sterne, Planeten und Galaxien unserer Umgebung tatsächlich stehen, so genau, wie es die heutigen Messungen erlauben. Wie jede Karte vereinfacht sie aber, damit man etwas erkennen kann: So wie eine Straßenkarte Städte als Punkte und Straßen als breite Linien zeichnet, ist hier vieles bewusst nicht naturgetreu dargestellt.</p>
+<p>Sterne, Planeten und Galaxien sind viel größer gezeichnet, als sie im Verhältnis zu ihren Abständen sind. In wahrer Größe wäre selbst die Sonne aus einem Lichtjahr Entfernung kleiner als ein Tausendstel Bildpunkt.</p>
+<p>In der Voreinstellung richtet sich die Farbe eines Sterns nach seiner Temperatur und die Größe seines Symbols nach seiner Leuchtkraft. Beides ist verstärkt, damit die Unterschiede sichtbar werden; unter „Ebenen“ in den Einstellungen können Farbe und Größe auch anderen Eigenschaften folgen.</p>
+<p>Wo die Bahn eines Planeten nicht vollständig vermessen ist, etwa wie sie im Raum geneigt ist oder wo der Planet gerade auf ihr steht, ergänzt die Karte plausible Werte, und die Infokarte des Planeten sagt, was angenommen ist. Die Milchstraße ist ein stilisiertes Modell mit Balken und Spiralarmen, denn ihre wahre Form kennen wir nur ungefähr: Wir sitzen mittendrin. Sprungnetz, Routen, Gitter und Höhenlinien sind Hilfsmittel der Karte, keine echten Objekte.</p>
 <p>Die Positionen stammen aus gemessenen Parallaxen und Himmelskoordinaten, umgerechnet in ein galaktisches Koordinatensystem mit der Sonne im Ursprung (X zum Galaktischen Zentrum, Z zum galaktischen Nordpol). Entfernungen haben Messfehler: bis etwa 10 % bei den fernsten Sternen der Karte, bei Galaxien oft 20 % und mehr.</p>`,
   dataLayers: 'Datenebenen',
   colorBy: 'Farbe nach',
@@ -696,14 +690,14 @@ const de: Record<MessageKey, string> = {
   tabView: 'Ansicht',
   tabStars: 'Sterne',
   tabSpace: 'Weltall',
-  tabData: 'Daten',
-  tabJumps: 'Sprünge',
+  tabLayers: 'Ebenen',
+  tabInfo: 'Info',
+  detailSection: 'Detailgrad',
   viewRadius: 'Sichtbereich',
   starsShown: 'Welche Sterne',
   starsLook: 'Darstellung',
   gridSection: 'Gitter',
   galaxiesSection: 'Galaxien',
-  general: 'Detailgrad und Sprache',
   routeFlyby: '▶ Route abfliegen',
   routeFlybyStop: '■ Stopp',
   routeFlybyStep: 'Tempo des Flugs',

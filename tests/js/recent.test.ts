@@ -8,11 +8,14 @@ const sun: RecentSearch = { designation: 'Sun', nameEn: 'Sun', nameDe: 'Sonne' }
 const arcturus: RecentSearch = { designation: 'HR 5340', nameEn: 'Arcturus', nameDe: 'Arktur' };
 
 describe('recent searches', () => {
-  it('keeps the last three, newest first', () => {
+  it('keeps the last five, newest first', () => {
     let list: RecentSearch[] = [];
     for (const e of [vega, sirius, sun, arcturus]) list = addRecent(list, e);
-    expect(RECENT_MAX).toBe(3);
-    expect(list.map((e) => e.nameEn)).toEqual(['Arcturus', 'Sun', 'Sirius A']);
+    expect(RECENT_MAX).toBe(5);
+    expect(list.map((e) => e.nameEn)).toEqual(['Arcturus', 'Sun', 'Sirius A', 'Vega']);
+    const six = [1, 2, 3, 4, 5, 6].map((k) => ({ ...vega, designation: `X ${k}`, nameEn: `Star ${k}` }));
+    for (const e of six) list = addRecent(list, e);
+    expect(list.map((e) => e.nameEn)).toEqual(['Star 6', 'Star 5', 'Star 4', 'Star 3', 'Star 2']);
   });
 
   it('moves a star picked again to the front instead of listing it twice', () => {
@@ -37,7 +40,8 @@ describe('recent searches', () => {
       sun,
       arcturus,
     ]);
-    expect(parseRecent(raw)).toEqual([vega, sirius, sun]);
+    expect(parseRecent(raw)).toEqual([vega, sirius, sun, arcturus]);
+    expect(parseRecent(raw, 3)).toEqual([vega, sirius, sun]);
     expect(parseRecent(JSON.stringify([vega, sun]))).toEqual([vega, sun]);
   });
 

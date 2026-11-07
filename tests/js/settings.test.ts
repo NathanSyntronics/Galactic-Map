@@ -122,12 +122,13 @@ describe('stored settings', () => {
 });
 
 describe('star size slider', () => {
-  it('spans 0.2x to 12x logarithmically with the default near 40 %', () => {
+  it('spans 0.2x to 12x logarithmically with the default 4x at about 73 %', () => {
     expect(STAR_SIZE_MIN).toBe(0.2);
     expect(STAR_SIZE_MAX).toBe(12);
     expect(sliderToStarSize(0)).toBe(0.2);
     expect(sliderToStarSize(1)).toBe(12);
-    expect(starSizeToSlider(DEFAULT_SETTINGS.starSize)).toBeCloseTo(Math.log(5) / Math.log(60), 6);
+    expect(DEFAULT_SETTINGS.starSize).toBe(4);
+    expect(starSizeToSlider(DEFAULT_SETTINGS.starSize)).toBeCloseTo(Math.log(20) / Math.log(60), 6);
     // the geometric middle of the range is in the middle of the slider
     expect(sliderToStarSize(0.5)).toBeCloseTo(Math.sqrt(0.2 * 12), 2);
   });

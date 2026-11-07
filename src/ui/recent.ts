@@ -8,7 +8,7 @@ export interface RecentSearch {
 }
 
 /** How many recent searches are kept and shown. */
-export const RECENT_MAX = 3;
+export const RECENT_MAX = 5;
 const STORAGE_KEY = 'galactic-map:recent-searches:v1';
 
 /** The list with `entry` in front (newest first), without duplicates, at most `max` long. */
