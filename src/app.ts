@@ -2089,32 +2089,14 @@ export class App {
   private showAbout(): void {
     const body = el('div', 'dialog-body');
     body.innerHTML = t('aboutText');
-    const ul = el('ul', 'sources');
-    for (const src of this.manifest?.sources ?? []) {
-      const li = el('li');
-      const name = el('b', '', src.title);
-      li.appendChild(name);
-      if (src.used !== undefined) li.appendChild(document.createTextNode(` — ${formatNumber(src.used)}`));
-      if (src.citation) li.appendChild(el('div', 'cite', src.citation));
-      if (src.license) li.appendChild(el('div', 'cite', src.license));
-      if (src.url && /^https?:\/\//.test(src.url)) {
-        const a = el('a', '', src.url);
-        a.href = src.url;
-        a.target = '_blank';
-        a.rel = 'noopener';
-        li.appendChild(a);
-      }
-      ul.appendChild(li);
-    }
-    body.appendChild(ul);
-    const gal = this.galaxyLayer.catalogue;
-    if (gal) {
-      body.appendChild(el('p', '', t('galaxySources')));
-      const gl = el('ul', 'sources');
-      for (const src of gal.sources) {
+    const list = (sources: { title: string; citation?: string; license?: string; url?: string; used?: number }[]) => {
+      const ul = el('ul', 'sources');
+      for (const src of sources) {
         const li = el('li');
         li.appendChild(el('b', '', src.title));
+        if (src.used !== undefined) li.appendChild(document.createTextNode(` — ${formatNumber(src.used)}`));
         if (src.citation) li.appendChild(el('div', 'cite', src.citation));
+        if (src.license) li.appendChild(el('div', 'cite', src.license));
         if (src.url && /^https?:\/\//.test(src.url)) {
           const a = el('a', '', src.url);
           a.href = src.url;
@@ -2122,15 +2104,27 @@ export class App {
           a.rel = 'noopener';
           li.appendChild(a);
         }
-        gl.appendChild(li);
+        ul.appendChild(li);
       }
-      body.appendChild(gl);
-    }
-    if (this.manifest) {
-      body.appendChild(
-        el('p', 'cite', `${t('versionN', { v: VERSION })} · ${formatNumber(this.manifest.starCount)} ${t('stars')} · ${this.manifest.generated}`),
-      );
-    }
+      return ul;
+    };
+    // the planets and galaxies have their own files, loaded here if the view has not needed them yet
+    const section = (title: MessageKey, sources: Promise<{ title: string }[] | null> | { title: string }[]) => {
+      body.appendChild(el('h3', '', t(title)));
+      if (Array.isArray(sources)) {
+        body.appendChild(list(sources));
+        return;
+      }
+      const wait = el('p', 'hint', t('sourcesLoading'));
+      body.appendChild(wait);
+      void sources.then((s) => wait.replaceWith(s ? list(s) : el('p', 'hint', t('sourcesUnavailable'))));
+    };
+    section('sourcesStars', this.manifest?.sources ?? []);
+    section('sourcesPlanets', this.ensurePlanets().then((c) => c?.sources ?? null));
+    section('sourcesGalaxies', this.ensureGalaxies().then((c) => c?.sources ?? null));
+    const foot = el('p', 'cite', t('versionN', { v: VERSION }));
+    if (this.manifest) foot.textContent += ` · ${formatNumber(this.manifest.starCount)} ${t('stars')} · ${this.manifest.generated}`;
+    body.appendChild(foot);
     this.openDialog(t('about'), body);
   }
 

@@ -137,7 +137,11 @@ const en = {
   milkyWayModelSource: 'model (stylised: bar, four arms and the Local Arm)',
   lyMillion: '{n} million ly',
   lyBillion: '{n} billion ly',
-  galaxySources: 'Galaxies:',
+  sourcesStars: 'Data sources: stars',
+  sourcesPlanets: 'Data sources: planets',
+  sourcesGalaxies: 'Data sources: galaxies',
+  sourcesLoading: 'loading…',
+  sourcesUnavailable: 'not available',
   unknown: 'unknown',
   stats: '{loaded} stars loaded · {visible} in view',
   statsGalaxies: '{n} galaxies in view',
@@ -174,8 +178,15 @@ const en = {
 <p>The search knows the stars and the galaxies. The empty search field lists the last three you picked from the search. A press anywhere beside the open settings only closes them (it selects no star); a click beside a dialog closes the dialog.</p>
 <p>A click on a star's name selects that star; where many stars crowd together, labelled stars are preferred.</p>`,
   aboutText: `
-<p>Positions are computed from measured trigonometric parallaxes and sky coordinates and converted into a heliocentric galactic coordinate system (X towards the Galactic Centre, Z towards the North Galactic Pole). Stars are drawn with symbolic sizes; true stellar diameters would be invisibly small.</p>
-<p>Data sources:</p>`,
+<p><b>A map, not a photograph.</b> The Galactic Map shows where the stars, planets and galaxies around us really are, as precisely as today's measurements allow. But it is deliberately not a true-to-life picture: like a road map that draws towns as dots and roads as broad lines, it abstracts so that something can be seen.</p>
+<ul>
+<li><b>Sizes:</b> stars, planets and galaxies are drawn far larger than they are compared with the distances between them. At its true size even the Sun, seen from one light year away, would be smaller than a thousandth of a pixel.</li>
+<li><b>Colours and brightness:</b> a star's colour follows its temperature and its symbol grows with its luminosity, both exaggerated so that the differences show.</li>
+<li><b>Planetary orbits:</b> where an orbit has not been measured completely (how it is tilted in space, where the planet is on it), the map fills in plausible values; the planet's card says what was assumed.</li>
+<li><b>The Milky Way:</b> a stylised model with a bar and spiral arms. Its true shape is known only roughly, because we sit inside it.</li>
+<li><b>Lines:</b> the jump network, routes, the grid and the drop lines are aids of the map, not real objects.</li>
+</ul>
+<p>The positions come from measured parallaxes and sky coordinates, converted into a galactic coordinate system with the Sun at its origin (X towards the Galactic Centre, Z towards the North Galactic Pole). Distances carry measurement errors: up to about 10 % for the most distant stars of the map, often 20 % and more for galaxies.</p>`,
   dataLayers: 'Data layers',
   colorBy: 'Colour by',
   colorTemperature: 'Temperature (natural colour)',
@@ -309,6 +320,17 @@ const en = {
   routeModeDistance: 'Shortest distance',
   routeShowAll: 'Show whole route',
   versionN: 'Version {v}',
+  tabView: 'View',
+  tabStars: 'Stars',
+  tabSpace: 'Space',
+  tabData: 'Data',
+  tabJumps: 'Jumps',
+  viewRadius: 'Visible region',
+  starsShown: 'Which stars',
+  starsLook: 'Appearance',
+  gridSection: 'Grid',
+  galaxiesSection: 'Galaxies',
+  general: 'Detail and language',
   routeFlyby: '▶ Fly the route',
   routeFlybyStop: '■ Stop',
   routeFlybyStep: 'Speed of the flyby',
@@ -478,7 +500,11 @@ const de: Record<MessageKey, string> = {
   milkyWayModelSource: 'Modell (stilisiert: Balken, vier Arme und der Orion-Arm)',
   lyMillion: '{n} Mio. Lj',
   lyBillion: '{n} Mrd. Lj',
-  galaxySources: 'Galaxien:',
+  sourcesStars: 'Datenquellen: Sterne',
+  sourcesPlanets: 'Datenquellen: Planeten',
+  sourcesGalaxies: 'Datenquellen: Galaxien',
+  sourcesLoading: 'wird geladen …',
+  sourcesUnavailable: 'nicht verfügbar',
   unknown: 'unbekannt',
   stats: '{loaded} Sterne geladen · {visible} sichtbar',
   statsGalaxies: '{n} Galaxien sichtbar',
@@ -515,8 +541,15 @@ const de: Record<MessageKey, string> = {
 <p>Die Suche kennt Sterne und Galaxien. Das leere Suchfeld zeigt die drei zuletzt über die Suche gewählten. Ein Druck irgendwo neben die offenen Einstellungen schließt nur diese (es wird kein Stern gewählt); ein Klick neben einen Dialog schließt den Dialog.</p>
 <p>Ein Klick auf den Namen eines Sterns wählt diesen Stern; wo sich viele Sterne drängen, haben beschriftete Sterne Vorrang.</p>`,
   aboutText: `
-<p>Die Positionen werden aus gemessenen trigonometrischen Parallaxen und Himmelskoordinaten berechnet und in ein heliozentrisches galaktisches Koordinatensystem umgerechnet (X zum Galaktischen Zentrum, Z zum galaktischen Nordpol). Die Sterngrößen sind symbolisch; echte Sterndurchmesser wären unsichtbar klein.</p>
-<p>Datenquellen:</p>`,
+<p><b>Eine Karte, kein Foto.</b> Die Galaktische Karte zeigt, wo die Sterne, Planeten und Galaxien unserer Umgebung tatsächlich stehen, so genau, wie es die heutigen Messungen erlauben. Sie ist aber bewusst keine naturgetreue Darstellung: Wie eine Landkarte Städte als Punkte und Straßen als breite Linien zeichnet, abstrahiert sie, damit man etwas erkennen kann.</p>
+<ul>
+<li><b>Größen:</b> Sterne, Planeten und Galaxien sind viel größer gezeichnet, als sie im Verhältnis zu ihren Abständen sind. In wahrer Größe wäre selbst die Sonne aus einem Lichtjahr Entfernung kleiner als ein Tausendstel Bildpunkt.</li>
+<li><b>Farben und Helligkeit:</b> Die Farbe eines Sterns folgt seiner Temperatur, sein Symbol wächst mit seiner Leuchtkraft, beides verstärkt, damit die Unterschiede sichtbar werden.</li>
+<li><b>Planetenbahnen:</b> Wo eine Bahn nicht vollständig vermessen ist (wie sie im Raum geneigt ist, wo der Planet auf ihr steht), ergänzt die Karte plausible Werte; die Infokarte des Planeten sagt, was angenommen ist.</li>
+<li><b>Die Milchstraße:</b> ein stilisiertes Modell mit Balken und Spiralarmen. Ihre wahre Form kennen wir nur ungefähr, weil wir mittendrin sitzen.</li>
+<li><b>Linien:</b> Sprungnetz, Routen, Gitter und Höhenlinien sind Hilfsmittel der Karte, keine echten Objekte.</li>
+</ul>
+<p>Die Positionen stammen aus gemessenen Parallaxen und Himmelskoordinaten, umgerechnet in ein galaktisches Koordinatensystem mit der Sonne im Ursprung (X zum Galaktischen Zentrum, Z zum galaktischen Nordpol). Entfernungen haben Messfehler: bis etwa 10 % bei den fernsten Sternen der Karte, bei Galaxien oft 20 % und mehr.</p>`,
   dataLayers: 'Datenebenen',
   colorBy: 'Farbe nach',
   colorTemperature: 'Temperatur (natürliche Farbe)',
@@ -650,6 +683,17 @@ const de: Record<MessageKey, string> = {
   routeModeDistance: 'Kürzeste Strecke',
   routeShowAll: 'Ganze Route zeigen',
   versionN: 'Version {v}',
+  tabView: 'Ansicht',
+  tabStars: 'Sterne',
+  tabSpace: 'Weltall',
+  tabData: 'Daten',
+  tabJumps: 'Sprünge',
+  viewRadius: 'Sichtbereich',
+  starsShown: 'Welche Sterne',
+  starsLook: 'Darstellung',
+  gridSection: 'Gitter',
+  galaxiesSection: 'Galaxien',
+  general: 'Detailgrad und Sprache',
   routeFlyby: '▶ Route abfliegen',
   routeFlybyStop: '■ Stopp',
   routeFlybyStep: 'Tempo des Flugs',

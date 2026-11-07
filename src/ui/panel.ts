@@ -42,8 +42,33 @@ const sliderToRadius = (v: number) => {
   return Math.round(r / p) * p;
 };
 
-/** Settings side panel. Rebuilt on language change. */
+/** The tabs of the settings panel. */
+export type PanelTab = 'view' | 'stars' | 'space' | 'data' | 'jumps';
+const PANEL_TABS: readonly PanelTab[] = ['view', 'stars', 'space', 'data', 'jumps'];
+const TAB_KEY = 'galactic-map:panel-tab';
+
+/** The tab last open (this browser), or the first. */
+function readTab(): PanelTab {
+  try {
+    const v = localStorage.getItem(TAB_KEY);
+    return PANEL_TABS.includes(v as PanelTab) ? (v as PanelTab) : 'view';
+  } catch {
+    return 'view';
+  }
+}
+
+function writeTab(tab: PanelTab): void {
+  try {
+    localStorage.setItem(TAB_KEY, tab);
+  } catch {
+    // storage unavailable: the panel opens on the first tab next time
+  }
+}
+
+/** Settings side panel with tabs. Rebuilt on language change. */
 export class SettingsPanel {
+  /** The tab shown. */
+  private tab: PanelTab = readTab();
   readonly root: HTMLElement;
   private body: HTMLElement;
   onGoToSun: () => void = () => {};
@@ -198,8 +223,61 @@ export class SettingsPanel {
     header.appendChild(close);
     b.appendChild(header);
 
-    // --- View
-    b.appendChild(el('h3', '', t('view')));
+    // tabs: one page at a time; the footer (help, about, reset, version) under each
+    const TABS: [PanelTab, MessageKey][] = [
+      ['view', 'tabView'],
+      ['stars', 'tabStars'],
+      ['space', 'tabSpace'],
+      ['data', 'tabData'],
+      ['jumps', 'tabJumps'],
+    ];
+    const bar = el('div', 'panel-tabs');
+    bar.setAttribute('role', 'tablist');
+    b.appendChild(bar);
+    const pages = new Map<PanelTab, HTMLElement>();
+    const buttons = new Map<PanelTab, HTMLButtonElement>();
+    const show = (tab: PanelTab, focus = false) => {
+      this.tab = tab;
+      writeTab(tab);
+      for (const [k, p] of pages) p.hidden = k !== tab;
+      for (const [k, btn] of buttons) {
+        btn.setAttribute('aria-selected', String(k === tab));
+        btn.tabIndex = k === tab ? 0 : -1;
+        btn.classList.toggle('active', k === tab);
+      }
+      if (focus) buttons.get(tab)?.focus();
+      this.root.scrollTop = 0;
+    };
+    for (const [tab, key] of TABS) {
+      const btn = el('button', 'panel-tab', t(key));
+      btn.type = 'button';
+      btn.id = `panel-tab-${tab}`;
+      btn.setAttribute('role', 'tab');
+      btn.setAttribute('aria-controls', `panel-page-${tab}`);
+      btn.addEventListener('click', () => show(tab));
+      // arrow keys move between the tabs
+      btn.addEventListener('keydown', (e) => {
+        const k = TABS.findIndex(([x]) => x === tab);
+        const next = e.key === 'ArrowRight' ? k + 1 : e.key === 'ArrowLeft' ? k - 1 : -2;
+        if (next === -2) return;
+        e.preventDefault();
+        show(TABS[(next + TABS.length) % TABS.length][0], true);
+      });
+      buttons.set(tab, btn);
+      bar.appendChild(btn);
+    }
+    const page = (tab: PanelTab) => {
+      const p = el('div', 'panel-page');
+      p.id = `panel-page-${tab}`;
+      p.setAttribute('role', 'tabpanel');
+      p.setAttribute('aria-labelledby', `panel-tab-${tab}`);
+      pages.set(tab, p);
+      return p;
+    };
+
+    // --- View: the visible sphere, labels, grid, detail, language
+    const view = page('view');
+    view.appendChild(el('h3', '', t('viewRadius')));
     const radiusRow = this.slider(
       'radius',
       0,
@@ -210,18 +288,19 @@ export class SettingsPanel {
       // close to a star in AU or kilometres
       () => (s().radius < 0.05 ? formatLy(s().radius) : `${formatNumber(s().radius, s().radius < 10 ? 1 : 0)} ${t('ly')}`),
     );
-    b.appendChild(radiusRow);
-    b.appendChild(this.checkbox('autoRadius', () => s().autoRadius, (v) => this.store.set({ autoRadius: v })));
-    b.appendChild(el('p', 'hint', t('radiusHint')));
+    view.appendChild(radiusRow);
+    view.appendChild(this.checkbox('autoRadius', () => s().autoRadius, (v) => this.store.set({ autoRadius: v })));
+    view.appendChild(el('p', 'hint', t('radiusHint')));
     const sunBtn = el('button', 'btn', `☉ ${t('goToSun')}`);
     sunBtn.addEventListener('click', () => this.onGoToSun());
-    b.appendChild(sunBtn);
+    view.appendChild(sunBtn);
 
-    // --- Stars
-    b.appendChild(el('h3', '', t('stars')));
-    b.appendChild(this.checkbox('brownDwarfs', () => s().showBrownDwarfs, (v) => this.store.set({ showBrownDwarfs: v })));
-    b.appendChild(this.checkbox('whiteDwarfs', () => s().showWhiteDwarfs, (v) => this.store.set({ showWhiteDwarfs: v })));
-    b.appendChild(
+    // --- Stars: which are shown, how they look
+    const stars = page('stars');
+    stars.appendChild(el('h3', '', t('starsShown')));
+    stars.appendChild(this.checkbox('brownDwarfs', () => s().showBrownDwarfs, (v) => this.store.set({ showBrownDwarfs: v })));
+    stars.appendChild(this.checkbox('whiteDwarfs', () => s().showWhiteDwarfs, (v) => this.store.set({ showWhiteDwarfs: v })));
+    stars.appendChild(
       this.slider(
         'maxDistErr',
         1,
@@ -234,28 +313,30 @@ export class SettingsPanel {
     );
 
     // --- Data layers
-    b.appendChild(el('h3', '', t('dataLayers')));
-    b.appendChild(this.layers);
+    const data = page('data');
+    data.appendChild(el('h3', '', t('dataLayers')));
+    data.appendChild(this.layers);
     this.renderLayers();
 
     // --- Jump network
-    b.appendChild(el('h3', '', t('jumpSection')));
-    b.appendChild(this.jumpBox);
+    const jumps = page('jumps');
+    jumps.appendChild(el('h3', '', t('jumpSection')));
+    jumps.appendChild(this.jumpBox);
     this.renderJumps();
 
-    // --- Labels
-    b.appendChild(el('h3', '', t('labelsSection')));
-    b.appendChild(this.checkbox('labels', () => s().labels, (v) => this.store.set({ labels: v })));
-    b.appendChild(
+    // --- Labels (view)
+    view.appendChild(el('h3', '', t('labelsSection')));
+    view.appendChild(this.checkbox('labels', () => s().labels, (v) => this.store.set({ labels: v })));
+    view.appendChild(
       this.slider('labelCount', 5, 300, 1, () => s().labelCount, (v) => this.store.set({ labelCount: v }), () => String(s().labelCount)),
     );
-    b.appendChild(
+    view.appendChild(
       this.checkbox('labelDesignations', () => s().labelDesignations, (v) => this.store.set({ labelDesignations: v })),
     );
 
-    // --- Display
-    b.appendChild(el('h3', '', t('display')));
-    b.appendChild(
+    // --- Star appearance
+    stars.appendChild(el('h3', '', t('starsLook')));
+    stars.appendChild(
       // logarithmic, so that small sizes stay as easy to set as large ones
       this.slider(
         'starSize',
@@ -267,18 +348,21 @@ export class SettingsPanel {
         () => starSizeText(s().starSize),
       ),
     );
-    b.appendChild(
+    stars.appendChild(
       this.slider('brightness', 0.2, 3, 0.05, () => s().brightness, (v) => this.store.set({ brightness: v }), () => `${formatNumber(s().brightness, 2)}×`),
     );
-    b.appendChild(
+    stars.appendChild(
       this.slider('saturation', 0, 3, 0.05, () => s().saturation, (v) => this.store.set({ saturation: v }), () => `${formatNumber(s().saturation, 2)}×`),
     );
-    b.appendChild(this.checkbox('grid', () => s().grid, (v) => this.store.set({ grid: v })));
-    b.appendChild(this.checkbox('dropLines', () => s().dropLines, (v) => this.store.set({ dropLines: v })));
-    b.appendChild(this.checkbox('galaxies', () => s().galaxies, (v) => this.store.set({ galaxies: v })));
-    b.appendChild(this.checkbox('milkyWay', () => s().milkyWay, (v) => this.store.set({ milkyWay: v })));
-    b.appendChild(this.checkbox('planets', () => s().planets, (v) => this.store.set({ planets: v })));
-    b.appendChild(
+    // --- Grid (view)
+    view.appendChild(el('h3', '', t('gridSection')));
+    view.appendChild(this.checkbox('grid', () => s().grid, (v) => this.store.set({ grid: v })));
+    view.appendChild(this.checkbox('dropLines', () => s().dropLines, (v) => this.store.set({ dropLines: v })));
+    // --- Space: planets, galaxies, the Milky Way
+    const space = page('space');
+    space.appendChild(el('h3', '', t('planets')));
+    space.appendChild(this.checkbox('planets', () => s().planets, (v) => this.store.set({ planets: v })));
+    space.appendChild(
       // stops from real time to ten years per second (also on the map, close to a planetary system)
       this.slider(
         'planetSpeed',
@@ -290,7 +374,12 @@ export class SettingsPanel {
         () => t(PLANET_SPEED_KEYS[planetSpeedStop(s().planetSpeed)]),
       ),
     );
-    b.appendChild(
+    space.appendChild(el('h3', '', t('galaxiesSection')));
+    space.appendChild(this.checkbox('galaxies', () => s().galaxies, (v) => this.store.set({ galaxies: v })));
+    space.appendChild(this.checkbox('milkyWay', () => s().milkyWay, (v) => this.store.set({ milkyWay: v })));
+    // --- Detail and language (view)
+    view.appendChild(el('h3', '', t('general')));
+    view.appendChild(
       this.select<Quality>(
         'quality',
         [
@@ -303,8 +392,8 @@ export class SettingsPanel {
         (v) => this.store.set({ quality: v }),
       ),
     );
-    b.appendChild(el('p', 'hint', t('qualityHint')));
-    b.appendChild(
+    view.appendChild(el('p', 'hint', t('qualityHint')));
+    view.appendChild(
       this.select<'en' | 'de'>(
         'language',
         [
@@ -316,6 +405,9 @@ export class SettingsPanel {
         true,
       ),
     );
+
+    for (const [tab] of TABS) b.appendChild(pages.get(tab)!);
+    show(this.tab);
 
     const footer = el('div', 'panel-footer');
     const help = el('button', 'btn', t('help'));

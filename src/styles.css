@@ -269,6 +269,46 @@ select {
   margin: 4px 0;
 }
 
+/* tabs of the settings panel; the bar stays at the top while a page scrolls */
+.panel-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  gap: 2px;
+  margin: 10px -16px 0;
+  padding: 0 12px;
+  background: var(--surface-strong);
+  border-bottom: 1px solid var(--border);
+}
+
+.panel-tab {
+  flex: 1 1 auto;
+  min-height: 40px;
+  padding: 8px 4px 7px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.panel-tab:hover {
+  color: var(--text);
+}
+
+.panel-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.panel-page > h3:first-child {
+  margin-top: 16px;
+}
+
 .panel h3 {
   font-size: 12px;
   text-transform: uppercase;
