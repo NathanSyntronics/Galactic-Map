@@ -426,6 +426,17 @@ cd pipeline
 The app reads the star data from `VITE_DATA_URL` when it is set (e.g. object storage with range
 requests), otherwise from `data/` next to it.
 
+### Versions
+
+The version is shown at the bottom of the settings panel and in *About & sources*: 1.00 is the
+first public version, and every round of changes that goes live raises it by 0.01 (1.01, 1.02,
+...), with an entry in [`CHANGELOG.md`](CHANGELOG.md). package.json holds it in the semver form npm
+needs, the minor number counting the steps (1.0.0 is 1.00, 1.1.0 is 1.01; `src/version.ts`):
+
+```bash
+npm version minor --no-git-tag-version   # 1.00 -> 1.01
+```
+
 ### Deployment
 
 `.github/workflows/pages.yml` builds the star data and the app and deploys them to

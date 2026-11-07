@@ -22,6 +22,7 @@ import {
   type SubManifest,
 } from './data/octree';
 import { formatLy, formatNumber, getLang, jumpStatsText, localName, setLang, t, type MessageKey } from './i18n';
+import { VERSION } from './version';
 import {
   MAX_PAIRS,
   MAX_PLACES,
@@ -2103,7 +2104,7 @@ export class App {
     }
     if (this.manifest) {
       body.appendChild(
-        el('p', 'cite', `${formatNumber(this.manifest.starCount)} ${t('stars')} · ${this.manifest.generated}`),
+        el('p', 'cite', `${t('versionN', { v: VERSION })} · ${formatNumber(this.manifest.starCount)} ${t('stars')} · ${this.manifest.generated}`),
       );
     }
     this.openDialog(t('about'), body);

@@ -1,6 +1,7 @@
 import { attrName, type AttributeStore, type PaletteId } from '../data/attributes';
 import { parseNumber } from '../data/csv';
 import { formatLy, getLang, t, formatNumber, numberText, type MessageKey } from '../i18n';
+import { VERSION } from '../version';
 import {
   BUILTIN_ATTRIBUTES,
   COLOR_TEMPERATURE,
@@ -323,6 +324,7 @@ export class SettingsPanel {
     reset.addEventListener('click', () => this.store.reset());
     footer.append(help, about, reset);
     b.appendChild(footer);
+    b.appendChild(el('p', 'panel-version', t('versionN', { v: VERSION })));
     if (focusIndex >= 0) this.focusables()[focusIndex]?.focus();
   }
 
