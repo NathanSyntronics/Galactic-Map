@@ -106,5 +106,9 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      # GitHub's side of a deployment (syncing ~110 MB of files) can take longer than the
+      # default 10 minutes when Pages is slow
       - id: deployment
         uses: actions/deploy-pages@v4
+        with:
+          timeout: 1800000
