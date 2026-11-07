@@ -103,20 +103,37 @@ start with fewer stars and labels, and those defaults are never stored, so the s
 wide window gets the normal ones. Each tab writes only the settings it changed, so zooming in an
 older tab keeps what you set in another.
 
-The settings panel (☰) controls:
-* the visible radius (1e-7 ly, a hundredth of an AU, to 2 billion ly), and whether it follows the zoom (on by default:
-  radius = camera distance / 2.2, the framing of the start view; the radius slider then moves the
-  camera; switched off, the radius stays where it is);
-* brown dwarfs (off by default) and white dwarfs;
-* a maximum distance uncertainty;
-* labels, star size (0.2× to 12×), brightness and colour saturation;
-* the galactic grid and the height lines;
-* the galaxies and the Milky Way model (both on);
-* the planets (on) and how fast they move (real time by default, or a day, month or year per second);
-* the level of detail (how many stars may be loaded at once; it matters only for view radii of a few hundred light years and more);
-* the data layers (below);
-* the jump network (below);
-* the language.
+The settings panel (☰) has five tabs (the last one open is remembered in the browser; help,
+about, reset and the version are under each):
+* **View:** the visible radius (1e-7 ly, a hundredth of an AU, to 2 billion ly), and whether it
+  follows the zoom (on by default: radius = camera distance / 2.2, the framing of the start view;
+  the radius slider then moves the camera; switched off, the radius stays where it is); the labels;
+  the galactic grid and the height lines; the level of detail (how many stars may be loaded at
+  once; it matters only for view radii of a few hundred light years and more); the language.
+* **Stars:** brown dwarfs (off by default) and white dwarfs; a maximum distance uncertainty; star
+  size (0.2× to 12×), brightness and colour saturation.
+* **Space:** the planets (on) and how fast they move: a slider from real time over an hour, a day,
+  a week, a month (the default) and a year to ten years per second; the galaxies and the Milky Way
+  model (both on).
+* **Data:** the data layers (below).
+* **Jumps:** the jump network (below).
+
+### Shared links
+
+The address in the browser always holds the view (centre, camera, radius), the selected star,
+planet or galaxy and the route, so it can be bookmarked or sent; the share button at the top
+(beside the search) sends it with the device's share sheet on phones and tablets, and copies it
+elsewhere. Opening such a link restores all of it:
+
+* `c`, `o`, `r`: view centre and camera offset (galactic ly), visible radius;
+* `s` and `sk`: a star by its designation and its node and index; `p`: a planet by name; `g` and
+  `gi`: a galaxy by designation and index;
+* `rf`/`rt` with `rfk`/`rtk` and `rfp`/`rtp`: the route's start and destination (designation,
+  node and index, galactic position), `rm=d` for the shortest distance.
+
+Node and index find a star at once; when they no longer hold that star (the star data has been
+rebuilt since), it is found by its designation (and a route end near its position), so links stay
+valid across data updates (`src/data/link.ts`).
 
 Star colours follow the effective temperature. Symbol sizes follow the luminosity; true
 stellar diameters would be invisibly small.

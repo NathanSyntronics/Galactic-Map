@@ -119,8 +119,12 @@ from A in 2016 (ORB6, Akeson 2021).
   Earth radii^0.33 (Jupiter 3.1 %), at least its true size, at most a third of its periapsis.
 * **Colours:** the Solar System's planets their own; the others by kind (rocky below 1.6 R⊕, mini-
   Neptune below 4, ice giant below 8, gas giant), hot ones (Teq above 1,300 K) red-orange.
-* **Time:** *Planet motion* in the settings: real time (the positions of now, default), or one
-  day, month or year per second from the moment it is chosen.
+* **Time:** *Planet motion* (settings, *Space*): a slider with the stops real time (the positions
+  of now), an hour, a day, a week, a month (the default) and a year and ten years per second,
+  running from the moment it is chosen. The same slider appears on the map (on top of the
+  bottom-left stack) while planets can be made out: when a planet's orbit is at least 16 px on
+  screen and its symbol has faded in (it goes again below 10 px), since close-in planets race at a
+  month per second and outer ones hardly move.
 
 ### Labels, picking, card, search
 

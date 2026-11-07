@@ -8,6 +8,7 @@ import { Flag, designationOf, type NodeData } from './data/format';
 import { decodeCsv } from './data/csv';
 import { NO_LOOKUP, csvNeedsLookup, exportCsv, importCsvAsync, type ImportReport, type StarResolver } from './data/importer';
 import { galacticToWorld, worldToGalactic } from './data/galactic';
+import { hasLinkState, linkParams, readLink, type LinkEnd, type LinkStar, type LinkState } from './data/link';
 import {
   HttpError,
   NodeLoader,
@@ -79,7 +80,7 @@ import { LabelLayer, TopK, labelUnder, labelledStarNear, milkyWayLabelPos, named
 import { SettingsPanel } from './ui/panel';
 import { RouteBox, type RouteNames } from './ui/route-box';
 import { PlanetTimeControl } from './ui/time-control';
-import { SearchBox, SearchIndex, type SearchHit, type SearchTuple } from './ui/search';
+import { SearchBox, SearchIndex, hitOf, type SearchHit, type SearchTuple } from './ui/search';
 
 interface DownloadsApi {
   save(request: { filename: string; data: string }): Promise<unknown>;
@@ -222,6 +223,7 @@ export class App {
   private loadingKey: MessageKey = 'loading';
   private readonly menuBtn: HTMLButtonElement;
   private readonly helpBtn: HTMLButtonElement;
+  private readonly shareBtn: HTMLButtonElement;
   private readonly dialog: HTMLDialogElement;
   private readonly baseUrl: string;
 
@@ -231,7 +233,12 @@ export class App {
   /** The search index load (true: loaded); reset after a failure, so the next use tries again. */
   private searchLoaded: Promise<boolean> | null = null;
   private selected: StarInfo | null = null;
-  private pendingSelect: SearchHit | null = null;
+  /** A star to select once its node arrives (from the search, or a shared link: checked by designation). */
+  private pendingSelect: (SearchHit & { link?: boolean }) | null = null;
+  /** A shared link's selection and route, until the star data is there to apply them. */
+  private pendingLink: LinkState | null = null;
+  /** While a shared link is being applied, the address keeps it (the hash is not rewritten). */
+  private linkApplying = false;
   /** The planet speed control is shown. */
   private timeShown = false;
 
@@ -311,6 +318,15 @@ export class App {
     top.append(menuBtn, title);
     container.appendChild(top);
     this.search = new SearchBox(top, this.searchIndex);
+    // a link to what is on screen: view, selection, route
+    const shareBtn = el('button', 'icon-btn share-btn');
+    shareBtn.innerHTML =
+      '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></svg>';
+    shareBtn.setAttribute('aria-label', t('shareLink'));
+    shareBtn.title = t('shareLink');
+    shareBtn.addEventListener('click', () => void this.share());
+    this.shareBtn = shareBtn;
+    top.appendChild(shareBtn);
     const helpBtn = el('button', 'icon-btn help-btn', '?');
     helpBtn.setAttribute('aria-label', t('help'));
     helpBtn.addEventListener('click', () => this.showHelp());
@@ -471,6 +487,7 @@ export class App {
     };
     this.loader.onFailed = (node) => this.nodeFailed(node);
     this.lodDirty = true;
+    if (this.pendingLink) void this.applyLink(this.pendingLink);
     // a route kept from the last visit
     this.planner.invalidate();
     this.loop();
@@ -664,11 +681,56 @@ export class App {
   }
 
   /** A short message at the bottom of the screen. */
-  private toast(text: string): void {
+  private toast(text: string, ms = 9000): void {
     const box = el('div', 'toast', text);
     box.setAttribute('role', 'alert');
     this.container.appendChild(box);
-    setTimeout(() => box.remove(), 9000);
+    setTimeout(() => box.remove(), ms);
+  }
+
+  /**
+   * Shares a link to what is on screen: the system's share sheet on touch devices, else the link
+   * is copied (or, where the clipboard is not available, shown to copy by hand).
+   */
+  private async share(): Promise<void> {
+    this.writeHash();
+    const url = location.href;
+    const title = this.shareTitle();
+    if (typeof navigator.share === 'function' && window.matchMedia?.('(pointer: coarse)').matches) {
+      try {
+        await navigator.share({ title, url });
+        return;
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      this.toast(t('linkCopied'), 2500);
+    } catch {
+      const body = el('div', 'dialog-body');
+      body.appendChild(el('p', '', t('linkCopyHint')));
+      const input = el('input', 'link-field');
+      input.readOnly = true;
+      input.value = url;
+      body.appendChild(input);
+      this.openDialog(t('shareLink'), body);
+      input.focus();
+      input.select();
+    }
+  }
+
+  /** What a shared link shows: the selection, else the route, else the map. */
+  private shareTitle(): string {
+    const app = t('appTitle');
+    if (this.selected) return `${displayName(this.selected)} · ${app}`;
+    const pc = this.planetLayer.catalogue;
+    if (this.selectedPlanet !== null && pc) return `${planetName(pc.planets[this.selectedPlanet], getLang())} · ${app}`;
+    const gc = this.galaxyLayer.catalogue;
+    if (this.selectedGalaxy !== null && gc) return `${galaxyName(gc, this.selectedGalaxy, getLang())} · ${app}`;
+    const p = this.planner;
+    if (p.from && p.to) return `${this.routeNames.end(p.from)} → ${this.routeNames.end(p.to)} · ${app}`;
+    return app;
   }
 
   /** Loads the manifest, retrying transient failures a few times. */
@@ -807,6 +869,8 @@ export class App {
     if (title) title.textContent = t('appTitle');
     this.menuBtn.setAttribute('aria-label', t('settings'));
     this.helpBtn.setAttribute('aria-label', t('help'));
+    this.shareBtn.setAttribute('aria-label', t('shareLink'));
+    this.shareBtn.title = t('shareLink');
     this.loadingEl.textContent = t(this.loadingKey);
     document.title = t('appTitle');
     this.updateStatus();
@@ -833,6 +897,13 @@ export class App {
     }
     if (this.pendingSelect && this.pendingSelect.path === node.path) {
       const pending = this.pendingSelect;
+      // a shared link's star: in a rebuilt star data its node and index may hold another one
+      if (pending.link && (pending.index >= data.count || designationOf(data, pending.index) !== pending.designation)) {
+        this.pendingSelect = null;
+        void this.selectByDesignation(pending.designation ?? '');
+        this.planner.nodeArrived();
+        return;
+      }
       const info = this.starInfo(data, pending.index);
       this.select(info);
       // the flight went to the search index's rounded position: on to the exact one, unless the
@@ -1068,6 +1139,7 @@ export class App {
     this.selMarker.show(pos, this.renderer.getPixelRatio());
     this.galaxyCard.show(cat, i, this.nav.target);
     this.candidatesDirty = true;
+    this.scheduleHash();
   }
 
   /**
@@ -1205,6 +1277,7 @@ export class App {
     this.labels.selectedKey = `p:${i}`;
     this.showPlanetCard();
     this.candidatesDirty = true;
+    this.scheduleHash();
   }
 
   private showPlanetCard(): void {
@@ -1642,6 +1715,7 @@ export class App {
     this.info.show(info, this.nav.target);
     this.highlightJumps();
     this.candidatesDirty = true;
+    this.scheduleHash();
   }
 
   // ------------------------------------------------------------------ jump network
@@ -1915,6 +1989,7 @@ export class App {
     }
     // start and destination labels
     this.candidatesDirty = true;
+    this.scheduleHash();
     this.routeBox.update({ from: p.from, to: p.to, mode: p.mode, status: p.status, route: p.route }, this.routeNames);
   }
 
@@ -2132,20 +2207,131 @@ export class App {
 
   private scheduleHash(): void {
     window.clearTimeout(this.hashTimer);
-    this.hashTimer = window.setTimeout(() => {
-      const [tx, ty, tz] = worldToGalactic(this.nav.target);
-      const off = this.camera.position.clone().sub(this.nav.target);
-      const [ox, oy, oz] = worldToGalactic(off);
-      // the centre to a billionth of a light year (planetary orbits), the rest to a few digits
-      const c = (x: number) => Number(x.toPrecision(13));
-      const f = (x: number) => Number(x.toPrecision(6));
-      const hash = `#c=${c(tx)},${c(ty)},${c(tz)}&o=${f(ox)},${f(oy)},${f(oz)}&r=${f(this.store.get().radius)}`;
-      try {
-        if (location.hash !== hash) history.replaceState(null, '', hash);
-      } catch {
-        // some embedding contexts do not allow history changes
+    this.hashTimer = window.setTimeout(() => this.writeHash(), 400);
+  }
+
+  /** The address: the view, the selection and the route (a link to share; README "Shared links"). */
+  private writeHash(): void {
+    window.clearTimeout(this.hashTimer);
+    if (this.linkApplying) return;
+    const [tx, ty, tz] = worldToGalactic(this.nav.target);
+    const off = this.camera.position.clone().sub(this.nav.target);
+    const [ox, oy, oz] = worldToGalactic(off);
+    // the centre to a billionth of a light year (planetary orbits), the rest to a few digits
+    const c = (x: number) => Number(x.toPrecision(13));
+    const f = (x: number) => Number(x.toPrecision(6));
+    const hash = `#c=${c(tx)},${c(ty)},${c(tz)}&o=${f(ox)},${f(oy)},${f(oz)}&r=${f(this.store.get().radius)}${linkParams(this.linkState())}`;
+    try {
+      if (location.hash !== hash) history.replaceState(null, '', hash);
+    } catch {
+      // some embedding contexts do not allow history changes
+    }
+  }
+
+  /** The selection and the route as a link carries them. */
+  private linkState(): LinkState {
+    const out: LinkState = {};
+    const p = this.pendingSelect;
+    if (this.selected) {
+      const { path, i } = parseStarKey(this.selected.key);
+      out.star = { designation: this.selected.designation, path, index: i };
+    } else if (p?.link && p.designation) {
+      out.star = { designation: p.designation, path: p.path, index: p.index };
+    } else if (this.selectedPlanet !== null && this.planetLayer.catalogue) {
+      out.planet = this.planetLayer.catalogue.planets[this.selectedPlanet].name;
+    } else if (this.selectedGalaxy !== null && this.galaxyLayer.catalogue) {
+      out.galaxy = { designation: galaxyDesignation(this.galaxyLayer.catalogue, this.selectedGalaxy), index: this.selectedGalaxy };
+    }
+    const end = (e: RouteEnd | null): LinkEnd | null =>
+      e ? { designation: e.designation, path: e.path, index: e.index, pos: worldToGalactic(new Vector3(e.pos.x, e.pos.y, e.pos.z)) } : null;
+    if (this.planner.from || this.planner.to) out.route = { from: end(this.planner.from), to: end(this.planner.to), mode: this.planner.mode };
+    return out;
+  }
+
+  /** Applies a shared link's selection and route (the view is set already). */
+  private async applyLink(link: LinkState): Promise<void> {
+    this.pendingLink = null;
+    try {
+      const tasks: Promise<unknown>[] = [];
+      if (link.star) this.selectLinkedStar(link.star);
+      else if (link.planet) {
+        const name = link.planet;
+        tasks.push(
+          this.ensurePlanets().then((cat) => {
+            const i = cat ? cat.planets.findIndex((p) => p.name === name) : -1;
+            if (i >= 0) this.selectPlanet(i);
+          }),
+        );
+      } else if (link.galaxy) {
+        const g = link.galaxy;
+        tasks.push(
+          this.ensureGalaxies().then((cat) => {
+            if (!cat) return;
+            let i = g.index >= 0 && g.index < cat.count && galaxyDesignation(cat, g.index) === g.designation ? g.index : -1;
+            for (let k = 0; i < 0 && k < cat.count; k++) if (galaxyDesignation(cat, k) === g.designation) i = k;
+            if (i >= 0) this.selectGalaxy(i);
+          }),
+        );
       }
-    }, 400);
+      if (link.route) tasks.push(this.applyLinkedRoute(link.route));
+      // the address keeps the link while it is applied (at most 20 s)
+      await Promise.race([Promise.allSettled(tasks), new Promise((r) => setTimeout(r, 20_000))]);
+    } finally {
+      this.linkApplying = false;
+      this.scheduleHash();
+    }
+  }
+
+  /** A shared link's star: its node and index if they still hold it, else by its designation. */
+  private selectLinkedStar(star: LinkStar): void {
+    const data = this.loader?.get(star.path);
+    if (data) {
+      if (star.index < data.count && designationOf(data, star.index) === star.designation) this.select(this.starInfo(data, star.index));
+      else void this.selectByDesignation(star.designation);
+      return;
+    }
+    if (!this.loader) return;
+    const pos = new Vector3();
+    this.pendingSelect = { nameEn: star.designation, nameDe: null, path: star.path, index: star.index, pos, rank: 0, matched: star.designation, designation: star.designation, link: true };
+    void this.reachNode(star.path).then((node) => {
+      if (!node) void this.selectByDesignation(star.designation);
+      else this.lodDirty = true;
+    });
+  }
+
+  /** Selects a named star by its designation (the search index), without moving the view. */
+  private async selectByDesignation(designation: string): Promise<void> {
+    if (!designation || !(await this.loadSearch())) return;
+    const tuple = this.searchIndex.find(designation);
+    if (!tuple) return;
+    const hit = hitOf(tuple);
+    const data = this.loader?.get(hit.path);
+    if (data) this.select(this.starInfo(data, hit.index));
+    else {
+      this.pendingSelect = hit;
+      void this.reachNode(hit.path).then(() => (this.lodDirty = true));
+    }
+  }
+
+  /** A shared link's route: both ends (named from the search index) and the mode. */
+  private async applyLinkedRoute(r: NonNullable<LinkState['route']>): Promise<void> {
+    const named = await this.loadSearch();
+    const end = (e: LinkEnd | null): RouteEnd | null => {
+      if (!e) return null;
+      const tuple = named ? this.searchIndex.find(e.designation) : null;
+      const pos = galacticToWorld(e.pos[0], e.pos[1], e.pos[2]);
+      return {
+        designation: e.designation,
+        nameEn: tuple ? tuple[0] : null,
+        nameDe: tuple ? (tuple[1] ?? null) : null,
+        // the Sun is at the origin
+        sun: pos.length() < 1e-6,
+        path: e.path,
+        index: e.index,
+        pos: { x: pos.x, y: pos.y, z: pos.z },
+      };
+    };
+    this.planner.setRoute(end(r.from), end(r.to), r.mode);
   }
 
   private applyHash(initial = false): void {
@@ -2158,6 +2344,12 @@ export class App {
     const o = parse('o');
     const r = Number(params.get('r'));
     if (Number.isFinite(r) && r >= RADIUS_MIN && r <= RADIUS_MAX) this.store.set({ radius: r });
+    const link = readLink(params);
+    if (hasLinkState(link)) {
+      this.linkApplying = true;
+      this.pendingLink = link;
+      if (this.loader) void this.applyLink(link);
+    }
     if (c && o) {
       this.nav.setView(galacticToWorld(c[0], c[1], c[2]), galacticToWorld(o[0], o[1], o[2]));
     } else if (initial) {

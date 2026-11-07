@@ -2,6 +2,17 @@
 
 Every round of changes that goes live raises the version by 0.01 (README, *Versions*).
 
+## 1.01 (2026-11-07)
+
+* Shared links: the address holds the view, the selected star, planet or galaxy and the route;
+  the new share button at the top sends or copies it. Opening a link restores all of it, also
+  after a data update.
+* The settings in five tabs: View, Stars, Space, Data, Jumps.
+* Planet motion: one month per second by default, a slider from real time to ten years per
+  second, and the same slider on the map when zoomed into a planetary system.
+* About & sources: a longer text on the map being a map (sizes, colours and the Milky Way
+  abstracted, assumed orbit values marked), and the sources of the planets and galaxies.
+
 ## 1.00 (2026-11-07)
 
 The first public version, online at https://nathansyntronics.github.io/Galactic-Map/ since

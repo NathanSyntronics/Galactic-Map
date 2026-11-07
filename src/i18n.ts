@@ -176,7 +176,9 @@ const en = {
 <p>The jump network links stars up to the jump range apart (9 ly by default); brighter stars get more links. A star's info card lists its links; click one to go there.</p>
 <p>Routes: “Route from here” and “Route to here” on a star’s info card plan a route through the jump network, also between distant stars (the Sun and Betelgeuse, say). The route box lists the waypoints; zoomed out, only the route is drawn.</p>
 <p>The search knows the stars and the galaxies. The empty search field lists the last three you picked from the search. A press anywhere beside the open settings only closes them (it selects no star); a click beside a dialog closes the dialog.</p>
-<p>A click on a star's name selects that star; where many stars crowd together, labelled stars are preferred.</p>`,
+<p>A click on a star's name selects that star; where many stars crowd together, labelled stars are preferred.</p>
+<p>Planets: zoomed into a planetary system, a slider at the bottom sets how fast the planets move, from real time to ten years per second (also under Space in the settings).</p>
+<p>Sharing: the share button at the top (beside the search) sends or copies a link to what is on screen: the view, the selected star, planet or galaxy, and the route. The address in the browser always holds that link too.</p>`,
   aboutText: `
 <p><b>A map, not a photograph.</b> The Galactic Map shows where the stars, planets and galaxies around us really are, as precisely as today's measurements allow. But it is deliberately not a true-to-life picture: like a road map that draws towns as dots and roads as broad lines, it abstracts so that something can be seen.</p>
 <ul>
@@ -320,6 +322,9 @@ const en = {
   routeModeDistance: 'Shortest distance',
   routeShowAll: 'Show whole route',
   versionN: 'Version {v}',
+  shareLink: 'Share a link',
+  linkCopied: 'Link copied',
+  linkCopyHint: 'A link to this view, with the selected object and the route:',
   tabView: 'View',
   tabStars: 'Stars',
   tabSpace: 'Space',
@@ -539,7 +544,9 @@ const de: Record<MessageKey, string> = {
 <p>Das Sprungnetz verbindet Sterne bis zur Sprungweite (standardmäßig 9 Lj); hellere Sterne bekommen mehr Verbindungen. Die Infokarte eines Sterns listet seine Verbindungen auf; ein Klick darauf führt dorthin.</p>
 <p>Routen: „Route von hier“ und „Route hierher“ in der Infokarte eines Sterns planen eine Route durch das Sprungnetz, auch zwischen weit entfernten Sternen (etwa der Sonne und Beteigeuze). Das Routenfeld listet die Wegpunkte; herausgezoomt wird nur die Route gezeichnet.</p>
 <p>Die Suche kennt Sterne und Galaxien. Das leere Suchfeld zeigt die drei zuletzt über die Suche gewählten. Ein Druck irgendwo neben die offenen Einstellungen schließt nur diese (es wird kein Stern gewählt); ein Klick neben einen Dialog schließt den Dialog.</p>
-<p>Ein Klick auf den Namen eines Sterns wählt diesen Stern; wo sich viele Sterne drängen, haben beschriftete Sterne Vorrang.</p>`,
+<p>Ein Klick auf den Namen eines Sterns wählt diesen Stern; wo sich viele Sterne drängen, haben beschriftete Sterne Vorrang.</p>
+<p>Planeten: Hineingezoomt in ein Planetensystem stellt ein Regler unten ein, wie schnell sich die Planeten bewegen, von Echtzeit bis zehn Jahre pro Sekunde (auch unter „Weltall“ in den Einstellungen).</p>
+<p>Teilen: Der Teilen-Knopf oben (neben der Suche) verschickt oder kopiert einen Link zu dem, was zu sehen ist: Ansicht, ausgewählter Stern, Planet oder Galaxie und Route. Auch die Adresse im Browser enthält immer diesen Link.</p>`,
   aboutText: `
 <p><b>Eine Karte, kein Foto.</b> Die Galaktische Karte zeigt, wo die Sterne, Planeten und Galaxien unserer Umgebung tatsächlich stehen, so genau, wie es die heutigen Messungen erlauben. Sie ist aber bewusst keine naturgetreue Darstellung: Wie eine Landkarte Städte als Punkte und Straßen als breite Linien zeichnet, abstrahiert sie, damit man etwas erkennen kann.</p>
 <ul>
@@ -683,6 +690,9 @@ const de: Record<MessageKey, string> = {
   routeModeDistance: 'Kürzeste Strecke',
   routeShowAll: 'Ganze Route zeigen',
   versionN: 'Version {v}',
+  shareLink: 'Link teilen',
+  linkCopied: 'Link kopiert',
+  linkCopyHint: 'Ein Link zu dieser Ansicht, mit dem ausgewählten Objekt und der Route:',
   tabView: 'Ansicht',
   tabStars: 'Sterne',
   tabSpace: 'Weltall',

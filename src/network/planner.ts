@@ -289,6 +289,16 @@ export class RoutePlanner<N extends CorridorNode> {
     this.run();
   }
 
+  /** Sets both ends and the mode at once (a shared link). */
+  setRoute(from: RouteEnd | null, to: RouteEnd | null, mode: RouteMode): void {
+    this.from = from;
+    this.to = to && !sameStar(from, to) ? to : null;
+    this.mode = mode;
+    this.route = null;
+    this.save();
+    this.run();
+  }
+
   swap(): void {
     [this.from, this.to] = [this.to, this.from];
     this.save();

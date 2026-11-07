@@ -1347,3 +1347,20 @@ label.check input {
 .translate-table td {
   border-top: 1px solid var(--border);
 }
+
+/* the share button's icon and the link field of its fallback dialog */
+.share-btn svg {
+  display: block;
+  margin: auto;
+}
+
+.link-field {
+  width: 100%;
+  padding: 8px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: rgba(127, 178, 255, 0.08);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
