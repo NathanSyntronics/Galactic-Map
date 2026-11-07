@@ -3,6 +3,7 @@ import { setLang } from '../../src/i18n';
 import {
   AUTO_RADIUS_RATIO,
   DEFAULT_SETTINGS,
+  PLANET_SPEEDS,
   RADIUS_MAX,
   RADIUS_MIN,
   SAVE_DELAY_MS,
@@ -12,6 +13,7 @@ import {
   distanceForRadius,
   followZoom,
   parseStored,
+  planetSpeedStop,
   radiusForDistance,
   sliderToStarSize,
   starCloseScale,
@@ -98,6 +100,19 @@ describe('stored settings', () => {
     expect(parseStored(JSON.stringify({ v: 2, jumpColor: 'stars', jumpBy: 'faction' }))).toEqual({ jumpColor: 'stars', jumpBy: 'faction' });
     expect(parseStored(JSON.stringify({ v: 2, starSize: 40 }))).toEqual({ starSize: 12 });
     expect(parseStored(JSON.stringify({ v: 2, starSize: 8 }))).toEqual({ starSize: 8 });
+  });
+
+  it('moves the planets a month per second by default, in stops from real time to ten years', () => {
+    expect(DEFAULT_SETTINGS.planetSpeed).toBe(30);
+    expect(PLANET_SPEEDS).toEqual([0, 1 / 24, 1, 7, 30, 365, 3652.5]);
+    expect(PLANET_SPEEDS.map(planetSpeedStop)).toEqual([0, 1, 2, 3, 4, 5, 6]);
+    // a stored hour per second survives the round trip; the old choices stay valid
+    expect(parseStored(JSON.stringify({ v: 2, planetSpeed: 1 / 24 }))).toEqual({ planetSpeed: 1 / 24 });
+    expect(parseStored(JSON.stringify({ v: 2, planetSpeed: 0 }))).toEqual({ planetSpeed: 0 });
+    expect(parseStored(JSON.stringify({ v: 2, planetSpeed: 365 }))).toEqual({ planetSpeed: 365 });
+    expect(parseStored(JSON.stringify({ v: 2, planetSpeed: 12 }))).toEqual({});
+    expect(planetSpeedStop(12)).toBe(3);
+    expect(planetSpeedStop(20)).toBe(4);
   });
 
   it('keeps a stored star size that differs from the defaults of the old range', () => {

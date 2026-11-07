@@ -78,7 +78,7 @@ export const DEFAULT_SETTINGS: Settings = {
   galaxies: true,
   milkyWay: true,
   planets: true,
-  planetSpeed: 0,
+  planetSpeed: 30,
   quality: 'medium',
   colorBy: '',
   sizeBy: '',
@@ -97,13 +97,29 @@ export const DEFAULT_SETTINGS: Settings = {
   flybyStep: 2.5,
 };
 
+/**
+ * Planet motion, the stops of its sliders: days per second, from real time (0, the positions of
+ * now) to ten years per second.
+ */
+export const PLANET_SPEEDS: readonly number[] = [0, 1 / 24, 1, 7, 30, 365, 3652.5];
+export const PLANET_SPEED_KEYS = ['speedReal', 'speedHour', 'speedDay', 'speedWeek', 'speedMonth', 'speedYear', 'speedDecade'] as const;
+
+/** The stop of a planet speed (the nearest one for a value that is none). */
+export function planetSpeedStop(speed: number): number {
+  let best = 0;
+  for (let k = 1; k < PLANET_SPEEDS.length; k++) {
+    if (Math.abs(Math.log1p(PLANET_SPEEDS[k]) - Math.log1p(speed)) < Math.abs(Math.log1p(PLANET_SPEEDS[best]) - Math.log1p(speed))) best = k;
+  }
+  return best;
+}
+
 /** Allowed values of the settings with a fixed set of choices. */
 const CHOICES: Partial<Record<keyof Settings, readonly unknown[]>> = {
   lang: ['en', 'de'],
   quality: ['low', 'medium', 'high', 'ultra'],
   missingStyle: ['dim', 'hide', 'normal'],
   jumpColor: ['stars', 'uniform', 'length'],
-  planetSpeed: [0, 1, 30, 365],
+  planetSpeed: PLANET_SPEEDS,
   flybyStep: [0.5, 1, 2.5, 5],
 };
 

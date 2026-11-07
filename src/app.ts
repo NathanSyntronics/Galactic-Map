@@ -78,6 +78,7 @@ import { Legend } from './ui/legend';
 import { LabelLayer, TopK, labelUnder, labelledStarNear, milkyWayLabelPos, namedCandidateLimit, onScreen, starPriority, type LabelCandidate } from './ui/labels';
 import { SettingsPanel } from './ui/panel';
 import { RouteBox, type RouteNames } from './ui/route-box';
+import { PlanetTimeControl } from './ui/time-control';
 import { SearchBox, SearchIndex, type SearchHit, type SearchTuple } from './ui/search';
 
 interface DownloadsApi {
@@ -179,6 +180,7 @@ export class App {
   private readonly planner: RoutePlanner<OctreeNode>;
   private readonly routeLine = new RouteLine();
   private readonly routeBox: RouteBox;
+  private readonly timeControl: PlanetTimeControl;
   /** Nodes the route planner waits for (requested in addition to the view's). */
   private routeNodes: OctreeNode[] = [];
   /** The route drawn: the planner's last result. */
@@ -230,6 +232,8 @@ export class App {
   private searchLoaded: Promise<boolean> | null = null;
   private selected: StarInfo | null = null;
   private pendingSelect: SearchHit | null = null;
+  /** The planet speed control is shown. */
+  private timeShown = false;
 
   private lodDirty = true;
   private lastLod = 0;
@@ -346,6 +350,10 @@ export class App {
     this.catchSecondTap(stack);
     this.routeBox = new RouteBox(stack);
     this.legend = new Legend(stack);
+    // the planets' speed, on top while a planetary system is to be seen
+    this.timeControl = new PlanetTimeControl(stack);
+    this.timeControl.onChange = (speed) => this.store.set({ planetSpeed: speed });
+    this.timeControl.set(this.store.get().planetSpeed);
     this.legend.onClose = () => this.store.set({ legend: false });
     this.planner = new RoutePlanner<OctreeNode>(
       {
@@ -729,7 +737,13 @@ export class App {
     // switch the language before anything re-renders
     if (has('lang')) setLang(s.lang);
     this.panel.settingsChanged(changed);
+    if (has('planetSpeed')) {
+      this.timeControl.set(s.planetSpeed);
+      // the planet card shows the date drawn (none in real time)
+      this.showPlanetCard();
+    }
     if (has('lang')) {
+      this.timeControl.updateTexts();
       this.search.updateTexts();
       this.info.rerender(this.nav.target);
       this.galaxyCard.rerender(this.nav.target);
@@ -1132,6 +1146,16 @@ export class App {
   private updatePlanets(s: Settings, scale: number): void {
     if (s.planets && s.radius < 2) void this.ensurePlanets();
     this.planetLayer.update(this.nav.target, s.radius, this.camera, scale, this.renderer.getPixelRatio(), this.planetJd(), s.planets);
+    // the speed control while planets can be made out (their orbits as large as for their labels;
+    // it goes when they fade, so that it does not flicker at the edge)
+    const drawn = this.planetLayer.drawn;
+    const shown = this.timeShown
+      ? s.planets && drawn.some((d) => d.alpha >= 0.3 && d.orbitPx >= 10)
+      : s.planets && drawn.some((d) => d.alpha >= 0.5 && d.orbitPx >= 16);
+    if (shown !== this.timeShown) {
+      this.timeShown = shown;
+      this.timeControl.show(shown);
+    }
     // the selection marker follows a moving planet
     if (this.selectedPlanet !== null) this.selMarker.show(this.planetLayer.livePosition(this.selectedPlanet), this.renderer.getPixelRatio());
   }

@@ -999,6 +999,43 @@ label.check input {
 
 /* ---------------------------------------------------------------- route */
 
+/* the planets' speed, on the map while a planetary system is to be seen */
+.time-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(330px, calc(100vw - 24px));
+  padding: 6px 10px;
+  background: var(--surface);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  font-size: 12px;
+  pointer-events: auto;
+}
+
+.time-control.hidden {
+  display: none;
+}
+
+.time-control input {
+  flex: 1;
+  min-width: 90px;
+  accent-color: var(--accent);
+}
+
+.time-icon {
+  color: var(--text-dim);
+}
+
+.time-value {
+  flex: none;
+  min-width: 9.5em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 .route-box {
   --route: rgb(255, 77, 214);
   flex: 0 1 auto;

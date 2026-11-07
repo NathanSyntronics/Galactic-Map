@@ -11,8 +11,11 @@ import {
   builtin,
 } from '../render/style';
 import {
+  PLANET_SPEED_KEYS,
+  PLANET_SPEEDS,
   RADIUS_MAX,
   RADIUS_MIN,
+  planetSpeedStop,
   sliderToStarSize,
   starSizeText,
   starSizeToSlider,
@@ -276,16 +279,15 @@ export class SettingsPanel {
     b.appendChild(this.checkbox('milkyWay', () => s().milkyWay, (v) => this.store.set({ milkyWay: v })));
     b.appendChild(this.checkbox('planets', () => s().planets, (v) => this.store.set({ planets: v })));
     b.appendChild(
-      this.select<string>(
+      // stops from real time to ten years per second (also on the map, close to a planetary system)
+      this.slider(
         'planetSpeed',
-        [
-          ['0', 'speedReal'],
-          ['1', 'speedDay'],
-          ['30', 'speedMonth'],
-          ['365', 'speedYear'],
-        ],
-        () => String(s().planetSpeed),
-        (v) => this.store.set({ planetSpeed: Number(v) }),
+        0,
+        PLANET_SPEEDS.length - 1,
+        1,
+        () => planetSpeedStop(s().planetSpeed),
+        (v) => this.store.set({ planetSpeed: PLANET_SPEEDS[v] }),
+        () => t(PLANET_SPEED_KEYS[planetSpeedStop(s().planetSpeed)]),
       ),
     );
     b.appendChild(
