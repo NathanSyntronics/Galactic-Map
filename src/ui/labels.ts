@@ -22,6 +22,8 @@ export interface LabelCandidate {
   appMag?: number;
   /** Symbol radius of the star's sprite in light years (before the star size setting). */
   size?: number;
+  /** The star's true radius (ly), close up where it may be drawn at its true size. */
+  trueRadius?: number;
   /** Start or destination of the route: always labelled, wherever it is. */
   pinned?: boolean;
   /** A galaxy (index in the galaxy catalogue) instead of a star. */
@@ -32,8 +34,8 @@ export interface LabelCandidate {
   probe?: number;
   /** Labelled first whenever it is on screen, like the Sun (the Milky Way). */
   priority?: boolean;
-  /** Name in colour: a star with a potentially habitable planet (green) or with planets (blue). */
-  tint?: 'habitable' | 'planets';
+  /** Our own: the Milky Way, written in yellow like the Sun. */
+  home?: boolean;
   /**
    * A waypoint of the route: a candidate wherever it is (the route is drawn whole), labelled ahead
    * of all other stars, but like them only where its label overlaps no other.
@@ -61,8 +63,6 @@ export interface ScreenLabel {
   merged?: string[];
   /** Extra distance (CSS px) of the label from the star, beside a large sprite. */
   gap?: number;
-  /** Name colour (set by mergeSystems): the strongest of the components merged into it. */
-  tint?: LabelCandidate['tint'];
 }
 
 /** A label drawn in the last frame: its star's screen position and its text box (CSS px). */
@@ -210,17 +210,10 @@ export function starPriority(logL: number, distToCamera: number, rank: number, a
   return score;
 }
 
-/** Stars whose names are coloured (planets) are labelled before most others in view. */
-export const TINT_BONUS = 8;
-
-/** Name colours of the marked stars. */
-export const TINT_COLORS = { habitable: '#7ee2a0', planets: '#8cc0ff' } as const;
-
-/** Label priority of a candidate: the star's, plus the route and marking bonuses. */
+/** Label priority of a candidate: the star's, plus the route bonuses. */
 export function labelScore(c: LabelCandidate, distToCamera: number): number {
   let score = starPriority(c.logL, distToCamera, c.rank, c.appMag, c.sun);
   if (c.priority) score += 100;
-  if (c.tint) score += TINT_BONUS;
   if (c.route) score += ROUTE_BONUS + (c.rank < 99 ? ROUTE_NAMED_BONUS : 0);
   if (c.pinned) score += PINNED_BONUS;
   return score;
@@ -338,7 +331,6 @@ export function mergeSystems(items: ScreenLabel[], selectedKey: string | null): 
     const selected = it.c.key === selectedKey || !!it.c.pinned;
     it.text = it.c.text;
     it.merged = undefined;
-    it.tint = it.c.tint;
     if (sys === undefined || (it.c.rank >= 99 && !selected)) {
       visible.push(it);
       continue;
@@ -347,7 +339,6 @@ export function mergeSystems(items: ScreenLabel[], selectedKey: string | null): 
     const leader = group.find((l) => Math.abs(l.x - it.x) < MERGE_PX && Math.abs(l.y - it.y) < MERGE_PX);
     if (leader && !selected) {
       (leader.merged ??= [leader.c.text]).push(it.c.text);
-      if (it.c.tint === 'habitable' || !leader.tint) leader.tint = it.c.tint ?? leader.tint;
       continue;
     }
     group.push(it);
@@ -516,8 +507,8 @@ export class LabelLayer {
     enabled: boolean;
     grid: GridLabel[] | null;
     gridHighlight: string;
-    /** Sprite size in CSS px = min(2 · size · scale / distance, max), as in the star shader. */
-    sprite?: { scale: number; max: number };
+    /** Sprite size in CSS px = min(2 · size · scale / distance, max), as in the star shader; `real`: CSS px per ly at unit distance (true discs). */
+    sprite?: { scale: number; max: number; real?: number };
   }): void {
     const { camera, target, radius } = opts;
     const ctx = this.ctx;
@@ -544,7 +535,9 @@ export class LabelLayer {
         const dist = c.pos.distanceTo(camera.position);
         const score = labelScore(c, dist) + (selected ? 1000 : 0);
         const sp = opts.sprite;
-        const gap = sp && c.size ? spriteGap(Math.min((2 * c.size * sp.scale) / Math.max(dist, 1e-6), sp.max)) : 0;
+        let gap = sp && c.size ? spriteGap(Math.min((2 * c.size * sp.scale) / Math.max(dist, 1e-6), sp.max)) : 0;
+        // beside a star drawn at its true size
+        if (sp?.real && c.trueRadius) gap = Math.max(gap, Math.min((c.trueRadius * sp.real) / Math.max(dist, 1e-12) - 4, 140));
         scored.push({ c, score, x: s[0], y: s[1], fade, text: c.text, gap });
       }
       scored.sort((a, b) => b.score - a.score);
@@ -589,17 +582,15 @@ export class LabelLayer {
         ? '#ffd27a'
         : it.c.pinned
           ? ROUTE_LABEL
-          : it.c.sun
+          : it.c.sun || it.c.home
             ? '#fff1b8'
-            : it.tint
-              ? TINT_COLORS[it.tint]
-              : named
-                ? 'rgba(232, 238, 250, 0.95)'
-                : 'rgba(160, 178, 205, 0.85)';
+            : named
+              ? 'rgba(232, 238, 250, 0.95)'
+              : 'rgba(160, 178, 205, 0.85)';
       ctx.fillText(it.text, l.tx, l.ty);
       // height lines only inside the visible sphere (route stars may lie far outside)
       const outside = (it.c.pinned || it.c.route) && it.c.pos.distanceTo(opts.target) > radius;
-      if (!it.c.sun && named && !outside && it.c.planet === undefined) this.labelledPositions.push(it.c.pos);
+      if (named && !outside && it.c.planet === undefined) this.labelledPositions.push(it.c.pos);
     }
     ctx.globalAlpha = 1;
   }

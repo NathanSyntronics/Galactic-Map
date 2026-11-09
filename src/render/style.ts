@@ -19,6 +19,11 @@ export interface BuiltinAttribute {
   scale: AttributeScale;
   categories?: string[];
   value(node: NodeData, i: number): AttrValue | undefined;
+  /** Colours by class instead of a scale (legend order); the class of a star, if it has one. */
+  classes?: { id: string; label: MessageKey; color: string }[];
+  classOf?(node: NodeData, i: number): string | undefined;
+  /** Legend text of the stars without a value (default: 'no value'). */
+  missingLabel?: MessageKey;
 }
 
 const SPEC_LETTERS = ['O', 'B', 'A', 'F', 'G', 'K', 'M', 'L', 'T', 'Y'];
@@ -37,6 +42,24 @@ export function planetsOf(node: NodeData, i: number): number {
   return node.flags[i] & Flag.SUN ? 8 : (node.planets.get(i) ?? 0);
 }
 
+/** The stars with a potentially habitable planet ("path:index"), from the planet catalogue once loaded. */
+let habitableHosts: ReadonlySet<string> = new Set();
+
+export function setHabitableHosts(keys: Iterable<string>): void {
+  habitableHosts = new Set(keys);
+}
+
+/** Colours of the stars by their planets (rims and the colour layer). */
+export const PLANET_CLASS_COLORS = { habitable: '#4fe08a', planets: '#5aa7ff', sun: '#ffd84d' } as const;
+export type PlanetClass = keyof typeof PLANET_CLASS_COLORS;
+
+/** The Sun, a star with a potentially habitable planet, one with planets, or none. */
+export function planetClass(node: NodeData, i: number): PlanetClass | undefined {
+  if (node.flags[i] & Flag.SUN) return 'sun';
+  if (!node.planets.get(i)) return undefined;
+  return habitableHosts.has(`${node.path}:${i}`) ? 'habitable' : 'planets';
+}
+
 /** Attributes every star has from the catalogue data; ids start with '@'. */
 export const BUILTIN_ATTRIBUTES: BuiltinAttribute[] = [
   {
@@ -45,6 +68,14 @@ export const BUILTIN_ATTRIBUTES: BuiltinAttribute[] = [
     type: 'number',
     scale: { min: 1, max: 8, palette: 'turbo' },
     value: (n, i) => planetsOf(n, i) || undefined,
+    // coloured by kind, not by number: with a potentially habitable planet, with planets, the Sun
+    classes: [
+      { id: 'habitable', label: 'planetClassHabitable', color: PLANET_CLASS_COLORS.habitable },
+      { id: 'planets', label: 'planetClassPlanets', color: PLANET_CLASS_COLORS.planets },
+      { id: 'sun', label: 'theSun', color: PLANET_CLASS_COLORS.sun },
+    ],
+    classOf: planetClass,
+    missingLabel: 'planetClassNone',
   },
   {
     id: '@spec',
@@ -73,24 +104,17 @@ export const BUILTIN_ATTRIBUTES: BuiltinAttribute[] = [
   },
   {
     id: '@lum',
-    label: 'luminosity',
+    label: 'luminosityAll',
     type: 'number',
     scale: { min: 1e-3, max: 1e4, log: true, palette: 'plasma' },
     value: (n, i) => (n.flags[i] & Flag.SUN ? 1 : Math.pow(10, logLOf(n, i))),
   },
   {
     id: '@absmag',
-    label: 'absMag',
+    label: 'absMagVisible',
     type: 'number',
     scale: { min: -5, max: 16, palette: 'plasma', reverse: true },
     value: (n, i) => (n.absMag[i] === UNKNOWN_I16 ? undefined : n.absMag[i] / 100),
-  },
-  {
-    id: '@dist',
-    label: 'distanceFromSun',
-    type: 'number',
-    scale: { min: 1, max: 1000, log: true, palette: 'viridis' },
-    value: (n, i) => Math.hypot(n.positions[3 * i], n.positions[3 * i + 1], n.positions[3 * i + 2]),
   },
   {
     id: '@disterr',
@@ -281,6 +305,19 @@ function colorRule(id: string, store: AttributeStore): StylePlan['color'] {
   const info = attributeInfo(id, store);
   const get = valueGetter(id, store);
   if (!info || !get) return null;
+  const b = builtin(id);
+  if (b?.classes && b.classOf) {
+    const classOf = b.classOf;
+    const rgb = new Map(b.classes.map((c) => [c.id, hexToRgb(c.color)]));
+    return (node, i, out, o) => {
+      const c = rgb.get(classOf(node, i) ?? '');
+      if (!c) return false;
+      out[o] = c[0];
+      out[o + 1] = c[1];
+      out[o + 2] = c[2];
+      return true;
+    };
+  }
   if (info.type === 'number') {
     const sc = numericScale(id, store);
     const lut = paletteLut(sc.palette ?? 'turbo');

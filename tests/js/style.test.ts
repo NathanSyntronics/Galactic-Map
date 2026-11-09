@@ -129,3 +129,29 @@ describe('data layers', () => {
     expect([...p.sizes].map((x) => x > 0)).toEqual([false, false, true, true]); // HIP 3 and the Sun
   });
 });
+
+describe('stars by their planets', () => {
+  it('colours by kind: potentially habitable, with planets, the Sun; the others grey', async () => {
+    const { setHabitableHosts, planetClass, PLANET_CLASS_COLORS } = await import('../../src/render/style');
+    const { planetMark } = await import('../../src/render/starfield');
+    const d = node();
+    const s = settings({ colorBy: '@planets' });
+    setHabitableHosts([]);
+    expect([0, 1, 2, 3].map((i) => planetClass(d, i))).toEqual([undefined, undefined, 'planets', 'sun']);
+    setHabitableHosts(['r:2']);
+    expect(planetClass(d, 2)).toBe('habitable');
+    expect(planetMark(d, 2)).toBe(2);
+    expect(planetMark(d, 3)).toBe(0);
+    const colors = new Uint8Array(12);
+    const sizes = new Float32Array(4);
+    const marks = new Uint8Array(4);
+    const missing = new Uint8Array(4);
+    computeStyle(d, s, buildPlan(s, new AttributeStore()), colors, sizes, marks, missing);
+    expect([...colors.slice(6, 9)]).toEqual(hexToRgb(PLANET_CLASS_COLORS.habitable));
+    expect([...colors.slice(9, 12)]).toEqual(hexToRgb(PLANET_CLASS_COLORS.sun));
+    expect([...colors.slice(0, 3)]).toEqual(hexToRgb(MISSING_COLOR));
+    expect([...missing]).toEqual([1, 1, 0, 0]);
+    expect([...marks]).toEqual([0, 0, 2, 0]);
+    setHabitableHosts([]);
+  });
+});

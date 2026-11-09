@@ -2,6 +2,22 @@
 
 Every round of changes that goes live raises the version by 0.01 (README, *Versions*).
 
+## 1.05 (2026-11-09)
+
+* Shared links carry the date the planets are drawn for (and the clock's speed).
+* The Sun has a height line to the grid, like the other stars.
+* *Earth* and *Sun* (View tab) are fixed views: the Sun in the centre, straight down onto the
+  ecliptic, the Galactic Centre to the left; *Earth* shows the inner Solar System (2 AU).
+* The Milky Way's name is yellow, like the Sun's.
+* Stars with planets: instead of coloured names, an optional thin rim right around the star
+  (blue, green with a potentially habitable planet); the labels stay as they are.
+* Colour by *Known planets*: blue, green, the Sun yellow, no colour scale; a tap prefers the
+  coloured (and rimmed) stars over the grey ones nearby.
+* *Distance from the Sun* left out of the layer menus; *Luminosity (all wavelengths)* and
+  *Absolute magnitude (visible light)* say how they differ.
+* Close up, stars are drawn at their true size once that is larger than their symbol.
+* The explanation of the habitable zone moved into the help.
+
 ## 1.04 (2026-11-07)
 
 * Fixed: close to planets (below about a hundred million kilometres) some phone graphics chips drew

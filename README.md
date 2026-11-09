@@ -110,24 +110,25 @@ The settings panel (☰) has five tabs (the last one open is remembered in the b
 * **View:** the visible radius (1e-7 ly, a hundredth of an AU, to 2 billion ly), and whether it
   follows the zoom (on by default: radius = camera distance / 2.2, the framing of the start view;
   the radius slider then moves the camera; switched off, the radius stays where it is); *Go to*:
-  the Earth (2 AU around it, from above its orbit), the Sun (10 ly) and the Galaxy (the Milky Way
-  from above, 100,000 ly); the labels; the galactic grid and the height lines.
+  the Earth (the inner Solar System, 2 AU around the Sun) and the Sun (10 ly), both seen straight
+  down onto the ecliptic with the Galactic Centre to the left, and the Galaxy (the Milky Way from
+  above, 100,000 ly); the labels; the galactic grid and the height lines (the Sun's too).
 * **Stars:** brown dwarfs (off by default) and white dwarfs; a maximum distance uncertainty; star
   size (0.2× to 12×, 4× by default), brightness and colour saturation; the level of detail (how
   many stars may be loaded at once; it matters only for view radii of a few hundred light years and
   more).
 * **Space:** the planets (on) and how fast the time runs: a slider from real time (one second per
   second) over an hour, a day, a week, a month (the default) and a year to ten years per second;
-  the spacecraft (on); the habitable zones (on); the names of the stars with a potentially
-  habitable planet in green and of all stars with planets in blue (both off; only stars shown on
-  the map anyway); the galaxies and the Milky Way model (both on).
+  the spacecraft (on); the habitable zones (on); a thin rim around the stars with known planets,
+  blue, green with a potentially habitable planet (off; the labels stay as they are); the galaxies
+  and the Milky Way model (both on).
 * **Layers:** the data layers and the jump network (below).
 * **Info:** the version, the controls, *About & sources*, the language and resetting the settings.
 
 ### Shared links
 
 The address in the browser always holds the view (centre, camera, radius), the selected star,
-planet or galaxy and the route, so it can be bookmarked or sent; the share button at the top
+planet, spacecraft or galaxy, the route and the planets' date, so it can be bookmarked or sent; the share button at the top
 (beside the search) sends it with the device's share sheet on phones and tablets, and copies it
 elsewhere. Opening such a link restores all of it:
 
@@ -135,26 +136,37 @@ elsewhere. Opening such a link restores all of it:
 * `s` and `sk`: a star by its designation and its node and index; `p`: a planet by name; `g` and
   `gi`: a galaxy by designation and index;
 * `rf`/`rt` with `rfk`/`rtk` and `rfp`/`rtp`: the route's start and destination (designation,
-  node and index, galactic position), `rm=d` for the shortest distance.
+  node and index, galactic position), `rm=d` for the shortest distance;
+* `t` and `ts`: the date the planets and spacecraft are drawn for (Julian date, to a second) and
+  the clock's speed (days per second, 0 real time); left out while the clock shows now. `k`: a
+  spacecraft by its key.
 
 Node and index find a star at once; when they no longer hold that star (the star data has been
 rebuilt since), it is found by its designation (and a route end near its position), so links stay
 valid across data updates (`src/data/link.ts`).
 
 Star colours follow the effective temperature. Symbol sizes follow the luminosity; true
-stellar diameters would be invisibly small.
+stellar diameters would be invisibly small. Only close up, once a star's real disc would look at
+least as large as its symbol, it is drawn at its true size (from luminosity and temperature:
+R ∝ √L / T²), limb darkened, for the eight largest on screen (`src/render/star-discs.ts`):
+Betelgeuse some 800 solar radii (almost 4 AU), the Sun within a few million kilometres.
 
 ### Data layers and your own attributes
 
 Under *Layers* in the settings, the star colours and sizes can follow any attribute:
 * **catalogue data**: known exoplanets (NASA Exoplanet Archive), spectral class, temperature,
-  luminosity, absolute magnitude, distance from the Sun, distance uncertainty;
+  luminosity, absolute magnitude, distance uncertainty;
 * **your own attributes**.
 
-Numbers are drawn on a colour scale (four palettes, adjustable range, optionally logarithmic or
-reversed) and can set the symbol size; text values get one colour per value; colour attributes
+Coloured by known planets, the stars are blue with known planets, green with a potentially
+habitable one and the Sun yellow (no scale); the size follows the number of planets. Luminosity
+is all the star radiates (bolometric), absolute magnitude its visible light only (V band, at
+10 pc): red dwarfs, most of the stars nearby, shine mostly in the infrared and are much fainter
+visually than their luminosity suggests, so the two orders differ. Numbers are drawn on a colour
+scale (four palettes, adjustable range, optionally logarithmic or reversed) and can set the
+symbol size; text values get one colour per value; colour attributes
 (`#rrggbb`) colour each star directly. Stars without a value are drawn grey and small, hidden, or
-as usual. A legend explains the colours (hidden at first: *Show legend* in the settings shows
+as usual; a tap prefers the stars that are not grey (and those with a planet rim). A legend explains the colours (hidden at first: *Show legend* in the settings shows
 it, its × hides it again).
 
 **Attributes** are managed under *Attributes & CSV…*: each has a name, a type (text, number,

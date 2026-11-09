@@ -103,11 +103,12 @@ In the app the zone is drawn as two green bands in the plane of the planet neare
 wider limits fainter, with a line along their inner and outer edge), fading in with its size on
 screen (*Show habitable zones*, settings, *Space*). The planet card says where the orbit lies
 (inside, at the edge, too hot, too cold) with the narrower limits, and tags potentially habitable
-planets. *Label stars with potentially habitable planets in green* writes their stars' names in
-green, *Label stars with planets in blue* those of all planet hosts in blue (green wins). Both
-apply only to stars on the map anyway (in the visible sphere and shown by the filters, not at
-galaxy scales): such a star gets a label candidate if it has none and is labelled before most
-others, but no star is added. Merged system labels take the colour of a marked component.
+planets. *Rim around stars with planets* (settings, *Space*) draws a thin ring just outside each
+planet host's star symbol, whatever its size on screen: blue, green with a potentially habitable
+planet (not the Sun). It is part of the star shader (a per-star mark from the star tiles' planet
+counts and the planet catalogue's potentially habitable hosts), so it changes no label and adds
+no star. The data layer *Known planets* colours the same way (blue, green, the Sun yellow, the
+others grey); a tap prefers the rimmed and coloured stars over the others nearby.
 
 ### Close pairs (`pipeline/galmap/binaries.py`, in the star build)
 

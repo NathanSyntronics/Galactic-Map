@@ -13,7 +13,15 @@ export interface PickCandidate {
   core: number;
   named: boolean;
   logL: number;
+  /**
+   * Stands out on the map: coloured or sized by the attribute the map shows (not grey for lack of
+   * a value), or rimmed for its planets. Within the pick radius such a star wins over the others.
+   */
+  preferred?: boolean;
 }
+
+/** Score advantage of a preferred star: more than any distance within the pick radius. */
+const PREFERRED = 1000;
 
 /**
  * Score of a star near the pointer (lower wins), or null when the pointer misses it. A star is hit
@@ -24,7 +32,7 @@ export interface PickCandidate {
 export function pickScore(c: PickCandidate, radiusPx: number): number | null {
   if (c.dist > Math.max(radiusPx, c.core)) return null;
   if (c.core > radiusPx && c.dist <= c.core) return -1e6 - c.core;
-  return c.dist - (c.named ? 4 : 0) - c.logL;
+  return c.dist - (c.named ? 4 : 0) - c.logL - (c.preferred ? PREFERRED : 0);
 }
 
 /** Labelled stars win within this radius of the pointer (CSS px), wider for fingers. */

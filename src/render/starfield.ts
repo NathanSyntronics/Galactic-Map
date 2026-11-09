@@ -15,7 +15,7 @@ import { LY_PER_PC } from '../data/galactic';
 import type { OctreeNode } from '../data/octree';
 import type { Settings } from '../settings';
 import { temperatureColor } from './colors';
-import { MISSING_COLOR, MISSING_SIZE, hexToRgb, type StylePlan } from './style';
+import { MISSING_COLOR, MISSING_SIZE, hexToRgb, planetClass, type StylePlan } from './style';
 
 const MISSING_RGB = hexToRgb(MISSING_COLOR);
 const DEFAULT_PLAN: StylePlan = { color: null, size: null, missing: 'dim' };
@@ -35,6 +35,9 @@ const DEFAULT_PLAN: StylePlan = { color: null, size: null, missing: 'dim' };
 const vertexShader = /* glsl */ `
 attribute vec3 aColor;
 attribute float aSize;
+attribute float aMark;
+uniform float uMarks;
+uniform float uPixelRatio;
 uniform vec3 uCamLocal;
 uniform vec3 uCamRest;
 uniform vec3 uTargetRel;
@@ -48,6 +51,10 @@ uniform float uMinAlpha;
 varying vec3 vColor;
 varying float vAlpha;
 varying float vPx;
+varying float vBody;
+varying float vFade;
+varying float vMark;
+varying float vRing;
 void main() {
   vec3 rel = position - uCamLocal;
   float d = distance(rel, uTargetRel);
@@ -58,6 +65,10 @@ void main() {
     vAlpha = 0.0;
     vColor = vec3(0.0);
     vPx = 0.0;
+    vBody = 1.0;
+    vFade = 0.0;
+    vMark = 0.0;
+    vRing = 0.0;
     return;
   }
   vec4 mv = vec4(mat3(modelViewMatrix) * rel + uCamRest, 1.0);
@@ -72,10 +83,22 @@ void main() {
     px = uMinPx;
   }
   px = min(px, uMaxPx);
+  vBody = px;
+  vMark = 0.0;
+  vRing = 0.0;
+  if (uMarks > 0.5 && aMark > 0.5) {
+    // a thin rim just outside the star's visible body (its core on a large sprite, the soft disk
+    // on a small one): the sprite grows to hold it
+    float large = clamp((px / uPixelRatio - 4.0) / 8.0, 0.0, 1.0);
+    vRing = mix(0.4, 0.14, large) * px + 2.0 * uPixelRatio;
+    px = max(px, 2.0 * (vRing + 1.5 * uPixelRatio));
+    vMark = aMark;
+  }
   gl_PointSize = px;
   gl_Position = projectionMatrix * mv;
   vColor = aColor;
   vAlpha = a * intensity;
+  vFade = a;
   vPx = px;
 }
 `;
@@ -86,19 +109,39 @@ uniform float uPixelRatio;
 varying vec3 vColor;
 varying float vAlpha;
 varying float vPx;
+varying float vBody;
+varying float vFade;
+varying float vMark;
+varying float vRing;
 void main() {
   vec2 c = gl_PointCoord * 2.0 - 1.0;
-  float r2 = dot(c, c);
-  if (r2 > 1.0) discard;
-  float r = sqrt(r2);
-  // tiny sprites: solid soft disk; large sprites: bright core with a glow
-  float large = clamp((vPx / uPixelRatio - 4.0) / 8.0, 0.0, 1.0);
-  float disk = 1.0 - smoothstep(0.55, 1.0, r);
-  float core = 1.0 - smoothstep(0.16, 0.4, r);
-  float glow = exp(-r2 * 5.0) * (1.0 - r2);
-  float profile = mix(disk, core * 0.95 + glow * 0.6, large);
-  float a = clamp(profile * vAlpha * uBrightness, 0.0, 1.0);
-  vec3 col = mix(vColor, vec3(1.0), core * 0.3 * large);
+  float rc2 = dot(c, c);
+  if (rc2 > 1.0) discard;
+  // distance from the centre in device pixels; the star itself in units of its own sprite
+  float rp = sqrt(rc2) * 0.5 * vPx;
+  float r = rp / (0.5 * vBody);
+  float r2 = r * r;
+  float a = 0.0;
+  vec3 col = vColor;
+  if (r < 1.0) {
+    // tiny sprites: solid soft disk; large sprites: bright core with a glow
+    float large = clamp((vBody / uPixelRatio - 4.0) / 8.0, 0.0, 1.0);
+    float disk = 1.0 - smoothstep(0.55, 1.0, r);
+    float core = 1.0 - smoothstep(0.16, 0.4, r);
+    float glow = exp(-r2 * 5.0) * (1.0 - r2);
+    float profile = mix(disk, core * 0.95 + glow * 0.6, large);
+    a = clamp(profile * vAlpha * uBrightness, 0.0, 1.0);
+    col = mix(vColor, vec3(1.0), core * 0.3 * large);
+  }
+  if (vMark > 0.5) {
+    // the planets' rim: blue, green with a potentially habitable planet (fades with the sphere only)
+    float w = 0.75 * uPixelRatio;
+    float ring = (1.0 - smoothstep(w * 0.5, w * 1.5, abs(rp - vRing))) * 0.9 * vFade * min(uBrightness, 1.0);
+    vec3 rc = vMark > 1.5 ? vec3(0.31, 0.88, 0.54) : vec3(0.35, 0.65, 1.0);
+    float t = a + ring;
+    if (t > 0.0) col = (col * a + rc * ring) / t;
+    a = min(t, 1.0);
+  }
   gl_FragColor = vec4(col, a);
 }
 `;
@@ -126,6 +169,7 @@ export function createStarMaterial(): ShaderMaterial {
       uMinAlpha: { value: 0.45 },
       uBrightness: { value: 1 },
       uPixelRatio: { value: 1 },
+      uMarks: { value: 0 },
     },
     transparent: true,
     depthWrite: false,
@@ -249,14 +293,34 @@ function temperatureStyle(node: NodeData, i: number, s: Settings, colors: Uint8A
   }
 }
 
-/** Colour and symbol size of every star of a node (size 0: hidden). */
-export function computeStyle(node: NodeData, s: Settings, plan: StylePlan, colors: Uint8Array, sizes: Float32Array): void {
+/** Rim of a star with planets (setting planetMarks): 0 none (and the Sun), 1 planets, 2 a potentially habitable one. */
+export function planetMark(node: NodeData, i: number): number {
+  const c = planetClass(node, i);
+  return c === 'habitable' ? 2 : c === 'planets' ? 1 : 0;
+}
+
+/**
+ * Colour and symbol size of every star of a node (size 0: hidden); optionally its planet rim and
+ * whether it is drawn grey and small for lack of a value (`missing`, picking prefers the others).
+ */
+export function computeStyle(
+  node: NodeData,
+  s: Settings,
+  plan: StylePlan,
+  colors: Uint8Array,
+  sizes: Float32Array,
+  marks?: Uint8Array,
+  missing?: Uint8Array,
+): void {
   for (let i = 0; i < node.count; i++) {
+    if (marks) marks[i] = 0;
+    if (missing) missing[i] = 0;
     if (!isStarVisible(node, i, s)) {
       sizes[i] = 0;
       colors[3 * i] = colors[3 * i + 1] = colors[3 * i + 2] = 0;
       continue;
     }
+    if (marks && node.planets.get(i)) marks[i] = planetMark(node, i);
     const hasColor = plan.color ? plan.color(node, i, colors, 3 * i) : true;
     let size = plan.size ? plan.size(node, i) : symbolRadius(starLogL(node, i));
     const hasSize = size !== undefined;
@@ -280,6 +344,7 @@ export function computeStyle(node: NodeData, s: Settings, plan: StylePlan, color
       colors[3 * i + 1] = MISSING_RGB[1];
       colors[3 * i + 2] = MISSING_RGB[2];
       size = MISSING_SIZE;
+      if (missing) missing[i] = 1;
     }
     sizes[i] = size;
   }
@@ -297,6 +362,10 @@ export interface RenderedNode {
   origin: Vector3;
   colors: Uint8Array;
   sizes: Float32Array;
+  /** Planet rims (see planetMark). */
+  marks: Uint8Array;
+  /** 1: drawn grey and small for lack of a value. */
+  missing: Uint8Array;
 }
 
 /** Owns one THREE.Points per loaded octree node and keeps their style attributes up to date. */
@@ -332,9 +401,12 @@ export class Starfield {
     geometry.setAttribute('position', position);
     const colors = new Uint8Array(data.count * 3);
     const sizes = new Float32Array(data.count);
-    computeStyle(data, this.settings(), this.plan(), colors, sizes);
+    const marks = new Uint8Array(data.count);
+    const missing = new Uint8Array(data.count);
+    computeStyle(data, this.settings(), this.plan(), colors, sizes, marks, missing);
     geometry.setAttribute('aColor', new BufferAttribute(colors, 3, true));
     geometry.setAttribute('aSize', new BufferAttribute(sizes, 1));
+    geometry.setAttribute('aMark', new BufferAttribute(marks, 1));
     geometry.boundingSphere = new Sphere(node.worldCenter.clone().sub(origin), node.radius);
     const points = new Points(geometry, this.material);
     points.position.copy(origin);
@@ -349,7 +421,7 @@ export class Starfield {
       this.material.uniformsNeedUpdate = true;
     };
     this.group.add(points);
-    const r: RenderedNode = { node, data, points, origin, colors, sizes };
+    const r: RenderedNode = { node, data, points, origin, colors, sizes, marks, missing };
     this.rendered.set(node.path, r);
     return r;
   }
@@ -382,9 +454,10 @@ export class Starfield {
     const s = this.settings();
     const plan = this.plan();
     for (const r of this.rendered.values()) {
-      computeStyle(r.data, s, plan, r.colors, r.sizes);
+      computeStyle(r.data, s, plan, r.colors, r.sizes, r.marks, r.missing);
       (r.points.geometry.getAttribute('aColor') as BufferAttribute).needsUpdate = true;
       (r.points.geometry.getAttribute('aSize') as BufferAttribute).needsUpdate = true;
+      (r.points.geometry.getAttribute('aMark') as BufferAttribute).needsUpdate = true;
     }
   }
 

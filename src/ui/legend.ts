@@ -7,6 +7,7 @@ import {
   SIZE_LUMINOSITY,
   SIZE_UNIFORM,
   attributeInfo,
+  builtin,
   categoryColors,
   numericScale,
   paletteGradient,
@@ -75,9 +76,15 @@ export class Legend {
     close.addEventListener('click', () => this.onClose());
     this.root.appendChild(close);
 
+    const classes = color ? builtin(color.id)?.classes : undefined;
     if (color) {
       this.root.appendChild(el('div', 'legend-title', attributeLabel(color)));
-      if (color.type === 'number') {
+      if (classes) {
+        // coloured by kind (the planets): one swatch per class
+        const list = el('ul', 'legend-cats');
+        for (const c of classes) list.appendChild(this.swatch(c.color, t(c.label)));
+        this.root.appendChild(list);
+      } else if (color.type === 'number') {
         const sc = numericScale(color.id, store);
         const bar = el('div', 'legend-bar');
         bar.style.background = paletteGradient(sc.palette ?? 'turbo', sc.reverse);
@@ -117,7 +124,9 @@ export class Legend {
     }
     if (layers && s.missingStyle === 'dim') {
       const list = el('ul', 'legend-cats');
-      list.appendChild(this.swatch(MISSING_COLOR, t('noValue')));
+      // the attribute the stars are coloured by names its own (no known planets)
+      const missingLabel = (color && builtin(color.id)?.missingLabel) || 'noValue';
+      list.appendChild(this.swatch(MISSING_COLOR, t(missingLabel)));
       this.root.appendChild(list);
     }
     if (route.shown) {

@@ -7,7 +7,7 @@ import { AttributeStore, type ChangeKind } from './data/attributes';
 import { Flag, designationOf, type NodeData } from './data/format';
 import { decodeCsv } from './data/csv';
 import { NO_LOOKUP, csvNeedsLookup, exportCsv, importCsvAsync, type ImportReport, type StarResolver } from './data/importer';
-import { galacticToWorld, worldToGalactic } from './data/galactic';
+import { ECLIPTIC_NORTH, galacticToWorld, worldToGalactic } from './data/galactic';
 import { hasLinkState, linkParams, readLink, type LinkEnd, type LinkStar, type LinkState } from './data/link';
 import {
   HttpError,
@@ -42,7 +42,7 @@ import { ROUTE_STORAGE_KEY, RoutePlanner, parseStoredRoute, type RouteEnd, type 
 import { JumpLines } from './render/links';
 import { DropLines, Marker, PolarGrid } from './render/overlays';
 import { RouteLine, fitDistance, routeBounds } from './render/route';
-import { Starfield, apparentMag, computeStyle, spritePx, starLogL } from './render/starfield';
+import { Starfield, apparentMag, computeStyle, spritePx, starLogL, type RenderedNode } from './render/starfield';
 import {
   SIZE_LUMINOSITY,
   SIZE_UNIFORM,
@@ -50,6 +50,7 @@ import {
   buildPlan,
   numericScale,
   planetsOf,
+  setHabitableHosts,
   valueGetter,
   type StylePlan,
 } from './render/style';
@@ -57,8 +58,10 @@ import {
   QUALITY_BUDGET,
   RADIUS_MAX,
   RADIUS_MIN,
+  PLANET_SPEEDS,
   SettingsStore,
   daysPerSecond,
+  planetSpeedStop,
   distanceForRadius,
   followZoom,
   type Settings,
@@ -73,7 +76,7 @@ import { InfoPanel, displayName, type JumpListing, type StarInfo } from './ui/in
 import { GalaxyCard } from './ui/galaxy-card';
 import { PlanetCard } from './ui/planet-card';
 import { PlanetLayer } from './render/planets';
-import { AU_PER_LY, PlanetFlag, julianDate, loadPlanets, planetName, type PlanetCatalogue, type PlanetHost } from './data/planets';
+import { AU_PER_LY, julianDate, loadPlanets, planetName, type PlanetCatalogue, type PlanetHost } from './data/planets';
 import { GalaxyFlag, galaxyDesignation, galaxyName, galaxyRank, loadGalaxies, type GalaxyCatalogue } from './data/galaxies';
 import { GalaxyLayer, milkyWayOpacity } from './render/galaxies';
 import { Legend } from './ui/legend';
@@ -84,6 +87,7 @@ import { PlanetTimeControl, formatClockDate } from './ui/time-control';
 import { ProbeCard } from './ui/probe-card';
 import { ProbeLayer } from './render/probes';
 import { scaleClipSpace } from './render/clip';
+import { MAX_DISCS, StarDiscLayer, starRadiusLy, type StarDisc } from './render/star-discs';
 import { loadProbes, probePosition, type ProbeCatalogue } from './data/probes';
 import { SearchBox, SearchIndex, hitOf, type SearchHit, type SearchTuple } from './ui/search';
 
@@ -101,6 +105,8 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: 
 /** Node path and star index of a StarInfo key ("path:index"). */
 /** From this visible radius on, the view is at galaxy scales: centring on a galaxy keeps the zoom. */
 const GALAXY_SCALE_RADIUS = 20_000;
+/** Below this visible radius (ly) stars may be drawn at their true size (see updateStarDiscs). */
+const DISC_RADIUS = 0.05;
 
 const SUN_INDEX = new WeakMap<NodeData, number>();
 
@@ -264,6 +270,8 @@ export class App {
   private galaxyCard!: GalaxyCard;
   /** Planets (docs/PLANETS.md): loaded when the view comes close to the stars or the search is used. */
   private readonly planetLayer = new PlanetLayer();
+  /** The nearest stars at their true size, close up. */
+  private readonly starDiscs = new StarDiscLayer();
   private planetLoad: Promise<PlanetCatalogue | null> | null = null;
   /** The spacecraft leaving the Solar System (docs/PROBES.md). */
   private readonly probeLayer = new ProbeLayer();
@@ -308,6 +316,7 @@ export class App {
       this.galaxyLayer.milkyWay,
       this.galaxyLayer.group,
       this.planetLayer.group,
+      this.starDiscs.group,
       this.probeLayer.group,
       this.grid.group,
       this.dropLines.lines,
@@ -349,7 +358,7 @@ export class App {
     this.panel = new SettingsPanel(container, this.store, this.attrs);
     this.panel.onScrimWheel = (e) => this.renderer.domElement.dispatchEvent(new WheelEvent('wheel', e));
     this.panel.onManageAttributes = () => this.showAttributes();
-    this.panel.onGoTo = (where) => (where === 'earth' ? void this.goToEarth() : where === 'galaxy' ? this.goToGalaxy() : this.goToSun());
+    this.panel.onGoTo = (where) => (where === 'earth' ? this.goToEarth() : where === 'galaxy' ? this.goToGalaxy() : this.goToSun());
     this.panel.onHelp = () => this.showHelp();
     this.panel.onAbout = () => this.showAbout();
 
@@ -506,7 +515,7 @@ export class App {
     this.loader.onFailed = (node) => this.nodeFailed(node);
     this.lodDirty = true;
     if (this.pendingLink) void this.applyLink(this.pendingLink);
-    if (this.store.get().habitableMarks || this.store.get().planetHostMarks) void this.ensurePlanets();
+    if (this.needsPlanets(this.store.get())) void this.ensurePlanets();
     // a route kept from the last visit
     this.planner.invalidate();
     this.loop();
@@ -823,13 +832,14 @@ export class App {
     // switch the language before anything re-renders
     if (has('lang')) setLang(s.lang);
     this.panel.settingsChanged(changed);
-    if (has('habitableMarks', 'planetHostMarks')) {
-      if (s.habitableMarks || s.planetHostMarks) void this.ensurePlanets();
-      this.candidatesDirty = true;
+    if (has('planetMarks', 'colorBy')) {
+      // the rims and the colours by planets need the planet catalogue (potentially habitable ones)
+      if (this.needsPlanets(s)) void this.ensurePlanets();
     }
     if (has('planetSpeed')) {
       this.timeControl.set(s.planetSpeed);
-      // the planet and probe cards show the date drawn (none in real time)
+      this.scheduleHash();
+      // the planet and probe cards show the date drawn
       this.showPlanetCard();
       this.showProbeCard();
     }
@@ -1075,6 +1085,7 @@ export class App {
         logL: cat.logL[mw] || 10,
         galaxy: mw,
         priority: true,
+        home: true,
       });
     }
     if (!s.galaxies) return;
@@ -1195,12 +1206,59 @@ export class App {
 
   // ------------------------------------------------------------------ planets
 
+  /**
+   * Per frame, close up: the stars in the visible sphere whose real disc looks at least half as large
+   * as their symbol's bright core are drawn at their true size (fading in up to the core's size).
+   */
+  private updateStarDiscs(s: Settings, scale: number): void {
+    const discs: (StarDisc & { px: number })[] = [];
+    if (s.radius < DISC_RADIUS && !starsHidden(s.radius)) {
+      const u = this.starfield.material.uniforms;
+      const minPx = u.uMinPx.value as number;
+      const maxPx = u.uMaxPx.value as number;
+      const sizeMul = s.starSize * starCloseScale(s.radius);
+      const target = this.nav.target;
+      const cam = this.camera.position;
+      const v = new Vector3();
+      for (const rn of this.starfield.visibleNodes()) {
+        if (rn.node.box.distanceToPoint(target) > s.radius) continue;
+        const d = rn.data;
+        const p = d.positions;
+        for (let i = 0; i < d.count; i++) {
+          if (rn.sizes[i] <= 0) continue;
+          v.set(p[3 * i], p[3 * i + 1], p[3 * i + 2]);
+          const fromTarget = v.distanceTo(target);
+          if (fromTarget > s.radius) continue;
+          const depth = Math.max(v.distanceTo(cam), 1e-12);
+          const radius = starRadiusLy(d, i);
+          const px = (2 * radius * scale) / depth;
+          const core = SPRITE_CORE * spritePx(rn.sizes[i], sizeMul, scale, depth, minPx, maxPx);
+          const ratio = px / Math.max(core, 1e-6);
+          if (ratio < 0.5) continue;
+          const fade = 1 - MathUtils.smoothstep(fromTarget, s.radius * 0.85, s.radius);
+          const c = rn.colors;
+          discs.push({ pos: v.clone(), radius, color: [c[3 * i] / 255, c[3 * i + 1] / 255, c[3 * i + 2] / 255], alpha: MathUtils.smoothstep(ratio, 0.5, 1) * fade, px });
+        }
+      }
+      discs.sort((a, b) => b.px - a.px);
+    }
+    this.starDiscs.update(discs.slice(0, MAX_DISCS), this.camera);
+  }
+
+  /** Whether the settings need the planet catalogue at any scale (rims, colours by planets). */
+  private needsPlanets(s: Settings): boolean {
+    return s.planetMarks || s.colorBy === '@planets';
+  }
+
   /** Loads the planets once (null if they are unavailable). */
   private ensurePlanets(): Promise<PlanetCatalogue | null> {
     if (!this.planetLoad) {
       this.planetLoad = loadPlanets(this.baseUrl).then(
         (cat) => {
           this.planetLayer.setCatalogue(cat);
+          // the stars with a potentially habitable planet: green rims and colours
+          setHabitableHosts(cat.hosts.filter((h) => h.habitable).map((h) => h.key));
+          this.styleDirty = true;
           this.candidatesDirty = true;
           this.addPlanetSearch();
           this.addProbeSearch();
@@ -1352,6 +1410,8 @@ export class App {
     c.ms = performance.now();
     c.speed = this.store.get().planetSpeed;
     this.candidatesDirty = true;
+    // the address bar's link carries the new date
+    this.scheduleHash();
   }
 
   /** Whether the clock shows the present (within half a minute). */
@@ -1391,32 +1451,6 @@ export class App {
     this.timeControl.update(jd, this.clockAtNow(jd), s.planetSpeed);
     // the selection marker follows a moving planet
     if (this.selectedPlanet !== null) this.selMarker.show(this.planetLayer.livePosition(this.selectedPlanet), this.renderer.getPixelRatio());
-  }
-
-  /**
-   * Marked stars (settings habitableMarks, planetHostMarks): their names in green (a potentially
-   * habitable planet) or blue (planets), labelled before most others. Only stars drawn now inside
-   * the visible sphere: marking adds no star that is not on the map anyway.
-   */
-  private markedCandidates(cands: LabelCandidate[]): void {
-    const s = this.store.get();
-    const cat = this.planetLayer.catalogue;
-    if (!cat || !(s.habitableMarks || s.planetHostMarks) || starsHidden(s.radius)) return;
-    const byKey = new Map(cands.map((c) => [c.key, c]));
-    const target = this.nav.target;
-    for (const h of cat.hosts) {
-      const tint = s.habitableMarks && h.habitable ? 'habitable' : s.planetHostMarks ? 'planets' : null;
-      if (!tint || h.pos.distanceTo(target) > s.radius) continue;
-      let c = byKey.get(h.key);
-      if (!c) {
-        // a star on the map without a label candidate yet (e.g. one with a catalogue designation only)
-        const rn = this.starfield.get(h.path);
-        if (!rn || !rn.points.visible || h.index >= rn.data.count || rn.sizes[h.index] <= 0) continue;
-        c = this.candidateOf(rn.data, h.index);
-        cands.push(c);
-      }
-      if (!c.sun) c.tint = tint;
-    }
   }
 
   /** Labels of the planets drawn, once their orbits are large enough on screen. */
@@ -1559,6 +1593,8 @@ export class App {
       const i = root ? sunIndex(root) : -1;
       if (root && i >= 0) named.push(Infinity, { d: root, i, size: 0 });
     }
+    // close up, labels keep clear of the stars drawn at their true size
+    const close = s.radius < DISC_RADIUS;
     for (const { d, i, size } of named.items()) {
       const name = d.names.get(i);
       const sun = (d.flags[i] & Flag.SUN) !== 0;
@@ -1577,6 +1613,7 @@ export class App {
         sysName: sysInfo?.nameEn ? localName(sysInfo.nameEn, sysInfo.nameDe) : undefined,
         appMag: apparentMag(d, i),
         size,
+        trueRadius: close ? starRadiusLy(d, i) : undefined,
       });
     }
     for (const { d, i, size } of unnamed.items()) {
@@ -1589,10 +1626,10 @@ export class App {
         rank: 99,
         logL: starLogL(d, i),
         size,
+        trueRadius: close ? starRadiusLy(d, i) : undefined,
       });
     }
     this.routeCandidates(cands);
-    this.markedCandidates(cands);
     this.galaxyCandidates(cands);
     this.planetCandidates(cands);
     this.probeCandidates(cands);
@@ -1676,6 +1713,8 @@ export class App {
       sysName: sysInfo?.nameEn ? localName(sysInfo.nameEn, sysInfo.nameDe) : undefined,
       appMag: apparentMag(d, i),
       size: this.starfield.get(d.path)?.sizes[i],
+      // close up, the label keeps clear of a disc drawn at its true size
+      trueRadius: this.store.get().radius < DISC_RADIUS ? starRadiusLy(d, i) : undefined,
     };
   }
 
@@ -1813,7 +1852,10 @@ export class App {
     const scale = u.uScale.value as number;
     const minPx = u.uMinPx.value as number;
     const maxPx = u.uMaxPx.value as number;
-    let best: { d: number; dist: number; data: NodeData; i: number } | null = null;
+    let best: { d: number; dist: number; data: NodeData; i: number; preferred: boolean } | null = null;
+    // stars that stand out (coloured by the data layer rather than grey, or rimmed for their planets) win
+    const layer = (!!this.stylePlan.color || !!this.stylePlan.size) && s.missingStyle === 'dim';
+    const prefer = (rn: RenderedNode, i: number) => (layer && !rn.missing[i]) || (s.planetMarks && rn.marks[i] > 0);
     // stars within the pick radius (a crowded view lets labelled stars win)
     let nearby = 0;
     for (const rn of this.starfield.visibleNodes()) {
@@ -1836,10 +1878,13 @@ export class App {
         const dist = Math.hypot(sx - mx, sy - my);
         if (dist > radiusPx && dist > (SPRITE_CORE * maxPx) / (2 * pr)) continue;
         // clip w is the view depth
-        const core = (SPRITE_CORE * spritePx(rn.sizes[i], s.starSize * starCloseScale(s.radius), scale, cw, minPx, maxPx)) / (2 * pr);
+        let core = (SPRITE_CORE * spritePx(rn.sizes[i], s.starSize * starCloseScale(s.radius), scale, cw, minPx, maxPx)) / (2 * pr);
+        // close up, a star drawn at its true size is hit anywhere on its disc
+        if (s.radius < DISC_RADIUS) core = Math.max(core, (starRadiusLy(d, i) * scale) / (cw * pr));
         if (dist <= radiusPx) nearby++;
-        const score = pickScore({ dist, core, named: d.names.has(i), logL: starLogL(d, i) }, radiusPx);
-        if (score !== null && (!best || score < best.d)) best = { d: score, dist, data: d, i };
+        const preferred = prefer(rn, i);
+        const score = pickScore({ dist, core, named: d.names.has(i), logL: starLogL(d, i), preferred }, radiusPx);
+        if (score !== null && (!best || score < best.d)) best = { d: score, dist, data: d, i, preferred };
       }
     }
     const usual = best ? this.starInfo(best.data, best.i) : null;
@@ -1847,11 +1892,20 @@ export class App {
     // near the pointer is what the user aims at, even where fainter stars lie closer.
     const touch = radiusPx > 16;
     const near = labelledStarNear(this.labels.hits, mx, my, LABELLED_RADIUS[touch ? 'touch' : 'mouse']);
+    // a star that stands out keeps the pick against a labelled one that does not (except on its name)
+    const ref = near?.hit.c.ref;
+    const rnNear = ref ? this.starfield.get(ref.data.path) : undefined;
+    const nearPreferred = !!(ref && rnNear && prefer(rnNear, ref.index));
     // right on a labelled star's dot: that star, even under another star's name
-    if (near && near.dist <= PRECISE_PX[touch ? 'touch' : 'mouse']) return this.labelStar(near.hit.c) ?? usual;
+    if (near && near.dist <= PRECISE_PX[touch ? 'touch' : 'mouse'] && (nearPreferred || !best?.preferred)) return this.labelStar(near.hit.c) ?? usual;
     const onText = labelUnder(this.labels.hits, mx, my, touch ? 6 : 2);
     if (onText) return this.labelStar(onText.c) ?? usual;
-    if (near && near.hit.c.key !== usual?.key && labelledWins(near.dist, best && { dist: best.dist, disc: best.d <= -1e6 }, touch, nearby)) {
+    if (
+      near &&
+      near.hit.c.key !== usual?.key &&
+      !(best?.preferred && !nearPreferred) &&
+      labelledWins(near.dist, best && { dist: best.dist, disc: best.d <= -1e6 }, touch, nearby)
+    ) {
       return this.labelStar(near.hit.c) ?? usual;
     }
     return usual;
@@ -2279,9 +2333,9 @@ export class App {
     this.nav.flyTo(point, distanceForRadius(radius), 1.2, direction);
   }
 
-  /** The Sun's neighbourhood: 10 light years around the Sun. */
+  /** The Sun's neighbourhood: 10 light years around the Sun, from above the ecliptic. */
   private goToSun(): void {
-    this.goTo(new Vector3(0, 0, 0), 10);
+    this.goTo(new Vector3(0, 0, 0), 10, ECLIPTIC_NORTH);
   }
 
   /** The Milky Way from above (from the galactic north), 100,000 light years around its centre. */
@@ -2292,17 +2346,9 @@ export class App {
     this.goTo(centre, 100_000, new Vector3(0, 1, 0).addScaledVector(towardsSun, 0.25));
   }
 
-  /** The Earth at the date drawn, 2 AU around it (where it will be when the flight ends). */
-  private async goToEarth(): Promise<void> {
-    const cat = await this.ensurePlanets();
-    const i = cat ? cat.planets.findIndex((p) => p.flags & PlanetFlag.SOLAR_SYSTEM && p.name === 'Earth') : -1;
-    if (!cat || i < 0) return;
-    const jd = this.planetJd() + 1.2 * daysPerSecond(this.store.get().planetSpeed);
-    const pos = this.planetLayer.position(i, jd);
-    // from above the Earth's orbit (its orbits as circles), a little outwards: the Sun beyond the Earth
-    const earth = cat.planets[i];
-    const north = new Vector3().crossVectors(earth.P, earth.Q).normalize();
-    this.goTo(pos, 2 / AU_PER_LY, north.addScaledVector(pos.clone().normalize(), 0.4));
+  /** The inner Solar System: 2 AU around the Sun, from above the ecliptic (the orbits as circles). */
+  private goToEarth(): void {
+    this.goTo(new Vector3(0, 0, 0), 2 / AU_PER_LY, ECLIPTIC_NORTH);
   }
 
   /** Radius follows zoom: the radius tracks the camera distance in steps of about 1 %. */
@@ -2479,6 +2525,9 @@ export class App {
     const end = (e: RouteEnd | null): LinkEnd | null =>
       e ? { designation: e.designation, path: e.path, index: e.index, pos: worldToGalactic(new Vector3(e.pos.x, e.pos.y, e.pos.z)) } : null;
     if (this.planner.from || this.planner.to) out.route = { from: end(this.planner.from), to: end(this.planner.to), mode: this.planner.mode };
+    // the planets' date and speed, unless the clock shows now
+    const jd = this.planetJd();
+    if (!this.clockAtNow(jd)) out.clock = { jd, speed: this.store.get().planetSpeed };
     return out;
   }
 
@@ -2587,6 +2636,12 @@ export class App {
     const r = Number(params.get('r'));
     if (Number.isFinite(r) && r >= RADIUS_MIN && r <= RADIUS_MAX) this.store.set({ radius: r });
     const link = readLink(params);
+    if (link.clock) {
+      // the planets' date (and speed) of the link
+      const sp = link.clock.speed;
+      if (sp !== undefined) this.store.set({ planetSpeed: PLANET_SPEEDS[planetSpeedStop(sp)] });
+      this.setClock(link.clock.jd);
+    }
     if (hasLinkState(link)) {
       this.linkApplying = true;
       this.pendingLink = link;
@@ -2645,8 +2700,10 @@ export class App {
     // the more stars are in view, the fainter the faintest ones, so dense regions do not saturate
     u.uMinAlpha.value = MathUtils.clamp(0.55 * Math.sqrt(2500 / Math.max(this.inView, 1)), 0.035, 0.55);
     u.uMinPx.value = 2.6 * this.renderer.getPixelRatio();
+    u.uMarks.value = s.planetMarks ? 1 : 0;
     this.updateGalaxies(s, u.uScale.value);
     this.updatePlanets(s, u.uScale.value);
+    this.updateStarDiscs(s, u.uScale.value);
     // larger star sizes raise the cap too (gently), so that the brightest stars keep growing
     u.uMaxPx.value = 64 * this.renderer.getPixelRatio() * MathUtils.clamp(Math.sqrt(s.starSize), 1, 3);
 
@@ -2707,7 +2764,7 @@ export class App {
       grid: s.grid ? this.grid.labels : null,
       gridHighlight: 'rgba(255, 200, 120, 0.85)',
       // labels keep clear of large sprites
-      sprite: { scale: (u.uSizeMul.value * u.uScale.value) / u.uPixelRatio.value, max: u.uMaxPx.value / u.uPixelRatio.value },
+      sprite: { scale: (u.uSizeMul.value * u.uScale.value) / u.uPixelRatio.value, max: u.uMaxPx.value / u.uPixelRatio.value, real: u.uScale.value / u.uPixelRatio.value },
     });
     if (s.dropLines && s.labels) this.dropLines.set(this.labels.labelledPositions, this.nav.target);
     this.dropLines.lines.visible = s.dropLines && s.labels && s.grid;

@@ -9,6 +9,13 @@ export function galacticToWorld(x: number, y: number, z: number, out = new Vecto
   return out.set(x, z, -y);
 }
 
+/**
+ * The north pole of the ecliptic (J2000: RA 18h, Dec +66.56°; galactic l 96.38°, b +29.81°) as a
+ * world-frame unit vector: looking from there, the planets' orbits are seen from above and the
+ * Galactic Centre lies to the left.
+ */
+export const ECLIPTIC_NORTH = galacticToWorld(-0.096477, 0.862285, 0.497147).normalize();
+
 export function worldToGalactic(v: Vector3): [number, number, number] {
   return [v.x, -v.z, v.y];
 }

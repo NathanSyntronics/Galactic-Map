@@ -391,9 +391,7 @@ export class SettingsPanel {
     );
     space.appendChild(this.checkbox('probesSetting', () => s().probes, (v) => this.store.set({ probes: v })));
     space.appendChild(this.checkbox('habitableZones', () => s().habitableZones, (v) => this.store.set({ habitableZones: v })));
-    space.appendChild(this.checkbox('habitableMarks', () => s().habitableMarks, (v) => this.store.set({ habitableMarks: v })));
-    space.appendChild(this.checkbox('planetHostMarks', () => s().planetHostMarks, (v) => this.store.set({ planetHostMarks: v })));
-    space.appendChild(el('p', 'hint', t('habitableHint')));
+    space.appendChild(this.checkbox('planetMarks', () => s().planetMarks, (v) => this.store.set({ planetMarks: v })));
     space.appendChild(el('h3', '', t('galaxiesSection')));
     space.appendChild(this.checkbox('galaxies', () => s().galaxies, (v) => this.store.set({ galaxies: v })));
     space.appendChild(this.checkbox('milkyWay', () => s().milkyWay, (v) => this.store.set({ milkyWay: v })));
@@ -476,7 +474,8 @@ export class SettingsPanel {
       this.dynSelect(t('colorBy'), colorOpts, colorGroups, () => this.store.get().colorBy, (v) => this.store.set({ colorBy: v })),
     );
     const color = s.colorBy ? attributeInfo(s.colorBy, this.attrs) : null;
-    if (color?.type === 'number') box.appendChild(this.scaleControls(color.id));
+    // the planets colour by kind: no scale to set
+    if (color?.type === 'number' && !builtin(color.id)?.classes) box.appendChild(this.scaleControls(color.id));
 
     // size
     const sizeOpts: Option[] = [

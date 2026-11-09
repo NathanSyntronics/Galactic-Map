@@ -1,6 +1,6 @@
 /**
- * What a shared link carries besides the view (README "Shared links"): the selected star, planet or
- * galaxy and the route. Stars and route ends by node and index (fast) and by designation (checked
+ * What a shared link carries besides the view (README "Shared links"): the selected star, planet,
+ * spacecraft or galaxy, the route and the planets' date. Stars and route ends by node and index (fast) and by designation (checked
  * against the node, and the fallback when the star data has been rebuilt since).
  */
 
@@ -22,7 +22,13 @@ export interface LinkState {
   probe?: string;
   galaxy?: { designation: string; index: number };
   route?: { from: LinkEnd | null; to: LinkEnd | null; mode: 'jumps' | 'distance' };
+  /** The date the planets and spacecraft are drawn for (Julian) and the clock's speed (days per second, 0 real time), when not now. */
+  clock?: { jd: number; speed?: number };
 }
+
+/** Julian dates a link may carry: the years 1000 to 3000 (the date picker's range). */
+const JD_MIN = 2086307.5;
+const JD_MAX = 2817151.5;
 
 /** A parameter value: percent-encoded, spaces as '+'. */
 function enc(v: string): string {
@@ -62,6 +68,11 @@ export function linkParams(s: LinkState): string {
     end('rt', r.to);
     if (r.mode === 'distance') out.push('rm=d');
   }
+  if (s.clock) {
+    // to a second
+    out.push(`t=${s.clock.jd.toFixed(5)}`);
+    if (s.clock.speed !== undefined) out.push(`ts=${Number(s.clock.speed.toPrecision(6))}`);
+  }
   return out.length ? `&${out.join('&')}` : '';
 }
 
@@ -87,6 +98,13 @@ export function readLink(params: URLSearchParams): LinkState {
   const from = end('rf');
   const to = end('rt');
   if (from || to) out.route = { from, to, mode: params.get('rm') === 'd' ? 'distance' : 'jumps' };
+  const t = params.get('t');
+  const jd = t ? Number(t) : NaN;
+  if (Number.isFinite(jd) && jd >= JD_MIN && jd <= JD_MAX) {
+    const ts = params.get('ts');
+    const speed = ts ? Number(ts) : NaN;
+    out.clock = Number.isFinite(speed) && speed >= 0 ? { jd, speed } : { jd };
+  }
   return out;
 }
 

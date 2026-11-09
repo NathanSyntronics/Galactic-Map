@@ -36,10 +36,8 @@ export interface Settings {
   probes: boolean;
   /** The habitable zones of the planetary systems drawn. */
   habitableZones: boolean;
-  /** The names of the stars with a potentially habitable planet in green (stars in view). */
-  habitableMarks: boolean;
-  /** The names of all stars with known planets in blue (stars in view). */
-  planetHostMarks: boolean;
+  /** A thin rim around the stars with known planets: blue, green with a potentially habitable one. */
+  planetMarks: boolean;
   quality: Quality;
   /** Attribute that sets the star colours ('' natural temperature colour). */
   colorBy: string;
@@ -89,8 +87,7 @@ export const DEFAULT_SETTINGS: Settings = {
   planetSpeed: 30,
   probes: true,
   habitableZones: true,
-  habitableMarks: false,
-  planetHostMarks: false,
+  planetMarks: false,
   quality: 'medium',
   colorBy: '',
   sizeBy: '',
