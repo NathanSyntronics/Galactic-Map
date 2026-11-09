@@ -411,6 +411,8 @@ def write(rows: list[dict], stars: pd.DataFrame, out: Path) -> dict:
             hosts[k] = {"i": len(hosts), "path": str(s["path"]), "index": int(s["index"]), "name": r["host"],
                         # exactly the float32 values of the node (the app draws the star there)
                         "pos": [float(s["x"]), float(s["y"]), float(s["z"])], "planets": 0,
+                        # and its velocity as the node stores it (km/s times VEL_SCALE, None unknown)
+                        "vel": None if "vx" not in s or int(s["vx"]) == -32768 else [int(s["vx"]), int(s["vy"]), int(s["vz"])],
                         "hz": None if r.get("hz") is None else [_r(v, 5) for v in r["hz"]]}
         h = hosts[k]
         h["planets"] += 1
@@ -434,7 +436,7 @@ def write(rows: list[dict], stars: pd.DataFrame, out: Path) -> dict:
         "habitableZone": "Kopparapu et al. 2013 (ApJ 765, 131; erratum ApJ 770, 82): recent Venus, runaway greenhouse, maximum greenhouse, early Mars",
         "methods": METHODS,
         # [node path, index, archive name, position, planets, habitable zone (4 edges, AU) or null]
-        "hosts": [[h["path"], h["index"], h["name"], h["pos"], h["planets"], h["hz"]] for h in sorted(hosts.values(), key=lambda h: h["i"])],
+        "hosts": [[h["path"], h["index"], h["name"], h["pos"], h["planets"], h["hz"], h.get("vel")] for h in sorted(hosts.values(), key=lambda h: h["i"])],
         "planets": planets,
         "sources": [SOURCE_INFO, {
             "key": "jpl-elements",

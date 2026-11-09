@@ -27,6 +27,8 @@ rows = [
          name_en=None, name_de=None),
 ]
 df = pd.DataFrame(rows)
+# velocities (km/s, galactic): Sirius moving, the Sun at rest, the Gaia star unknown, the dwarf slow
+df["vx"], df["vy"], df["vz"] = [0.0, -12.3, float("nan"), 1.0], [0.0, -2.5, float("nan"), 0.0], [0.0, -8.4, float("nan"), -0.5]
 for c, default in (("alt", None), ("system_id", -1), ("spect", None), ("planets", 0)):
     if c not in df:
         df[c] = default

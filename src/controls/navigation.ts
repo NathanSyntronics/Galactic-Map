@@ -219,7 +219,16 @@ export class Navigation {
     this.startFlight(point, distance, duration, direction);
   }
 
+  /** Counts the flights started or redirected: a new destination to look for a star at. */
+  flights = 0;
+
+  /** Where the view centre is going: the running flight's destination, else the centre. */
+  get destination(): Vector3 {
+    return this.flight?.toTarget ?? this.controls.target;
+  }
+
   private startFlight(point: Vector3, distance?: number, duration = 1.2, direction?: Vector3): void {
+    this.flights++;
     const flight: Flight = {
       fromTarget: this.controls.target.clone(),
       toTarget: point.clone(),
@@ -254,6 +263,7 @@ export class Navigation {
     const f = this.flight;
     if (f && f.toTarget.distanceTo(from) <= tolerance) {
       f.toTarget.copy(point);
+      this.flights++;
       return true;
     }
     if (!f && this.controls.target.distanceTo(from) <= tolerance) {
@@ -291,6 +301,20 @@ export class Navigation {
     this.startFlight(start, distance, approach, tour.viewDirection(tour.s));
     this.tourState = { tour, phase: 'approach', steer: true, lag: new Vector3(), index: tour.index };
     this.onTourStep(tour.index);
+  }
+
+  /**
+   * Moves the whole view (centre, camera and a running flight's ends) by `delta`: the view follows
+   * the star it is centred on as the stars move.
+   */
+  translate(delta: Vector3): void {
+    this.controls.target.add(delta);
+    this.camera.position.add(delta);
+    const f = this.flight;
+    if (f) {
+      f.fromTarget.add(delta);
+      f.toTarget.add(delta);
+    }
   }
 
   /** Stops a flyby (the view stays where it is). */

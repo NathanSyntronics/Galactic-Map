@@ -118,7 +118,8 @@ The settings panel (☰) has five tabs (the last one open is remembered in the b
   many stars may be loaded at once; it matters only for view radii of a few hundred light years and
   more).
 * **Space:** the planets (on) and how fast the time runs: a slider from real time (one second per
-  second) over an hour, a day, a week, a month (the default) and a year to ten years per second;
+  second) over an hour, a day, a week, a month (the default), a year, ten, a hundred, a thousand
+  and ten thousand to 100,000 years per second;
   the spacecraft (on); the habitable zones (on); a thin rim around the stars with known planets,
   blue, green with a potentially habitable planet (off; the labels stay as they are); the galaxies
   and the Milky Way model (both on).
@@ -145,6 +146,25 @@ Node and index find a star at once; when they no longer hold that star (the star
 rebuilt since), it is found by its designation (and a route end near its position), so links stay
 valid across data updates (`src/data/link.ts`).
 
+### Time and star motion
+
+A clock on the map (whenever the stars, planets or spacecraft can be seen) shows the date the map
+is drawn for: *Now*, a calendar button for a day and, with a tap on the date, a year to type (two
+million years either way; `−50000` or `50000 v. Chr.`). The stars move from their J2016.0
+positions in straight lines with their heliocentric space velocities (proper motion and distance;
+the radial velocity where known, for 225,000 of the 243,000 stars within 200 pc from Gaia DR3, else
+0); members of a system move together. The Sun stays at the origin. The GPU moves the stars every
+frame (velocity × time in the shader); labels, the selection marker and the planets' host stars
+follow in double precision, the positions used for picking and the jump network a few times a
+second, and the nodes loaded reach as far as the stars may have come (100 km/s). The view follows
+the star it is centred on (or flies to). Straight lines ignore the stars' orbits around the
+Galactic Centre (some 230 million years): over a few million years the paths stay close.
+Examples: Alpha Centauri comes closest (about 3.1 ly) some 28,000 years from now, and Ross 248 is
+the nearest star (also about 3.1 ly) some 36,000 years from now; Gliese 710 passes
+the Sun at about 0.2 ly in 1.29 million years. A route keeps the positions it was planned for. A
+system takes the velocity of its member with the most reliable radial velocity (Gaia DR3 first):
+the catalogue's value for Alpha Centauri A is outdated, Proxima's from Gaia.
+
 Star colours follow the effective temperature. Symbol sizes follow the luminosity; true
 stellar diameters would be invisibly small. Only close up, once a star's real disc would look at
 least as large as its symbol, it is drawn at its true size (from luminosity and temperature:
@@ -158,8 +178,8 @@ Under *Layers* in the settings, the star colours and sizes can follow any attrib
   luminosity, absolute magnitude, distance uncertainty;
 * **your own attributes**.
 
-Coloured by known planets, the stars are blue with known planets, green with a potentially
-habitable one and the Sun yellow (no scale); the size follows the number of planets. Luminosity
+Coloured by known planets, the Sun is yellow, stars with a potentially habitable planet green,
+those with other planets blue and the rest grey (no scale); the size follows the number of planets. Luminosity
 is all the star radiates (bolometric), absolute magnitude its visible light only (V band, at
 10 pc): red dwarfs, most of the stars nearby, shine mostly in the infrared and are much fainter
 visually than their luminosity suggests, so the two orders differ. Numbers are drawn on a colour

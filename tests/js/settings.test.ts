@@ -104,8 +104,8 @@ describe('stored settings', () => {
 
   it('moves the planets a month per second by default, in stops from real time to ten years', () => {
     expect(DEFAULT_SETTINGS.planetSpeed).toBe(30);
-    expect(PLANET_SPEEDS).toEqual([0, 1 / 24, 1, 7, 30, 365, 3652.5]);
-    expect(PLANET_SPEEDS.map(planetSpeedStop)).toEqual([0, 1, 2, 3, 4, 5, 6]);
+    expect(PLANET_SPEEDS).toEqual([0, 1 / 24, 1, 7, 30, 365, 3652.5, 36525, 365250, 3652500, 36525000]);
+    expect(PLANET_SPEEDS.map(planetSpeedStop)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
     // a stored hour per second survives the round trip; the old choices stay valid
     expect(parseStored(JSON.stringify({ v: 2, planetSpeed: 1 / 24 }))).toEqual({ planetSpeed: 1 / 24 });
     expect(parseStored(JSON.stringify({ v: 2, planetSpeed: 0 }))).toEqual({ planetSpeed: 0 });

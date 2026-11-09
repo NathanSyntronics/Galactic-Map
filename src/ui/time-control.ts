@@ -1,4 +1,4 @@
-import { getLang, t } from '../i18n';
+import { formatNumber, getLang, t } from '../i18n';
 import { PLANET_SPEED_KEYS, PLANET_SPEEDS, planetSpeedStop } from '../settings';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -13,9 +13,34 @@ const jdOfMs = (ms: number) => ms / 86_400_000 + 2440587.5;
 /** JavaScript time (ms since 1970) of a Julian date. */
 export const msOfJd = (jd: number) => (jd - 2440587.5) * 86_400_000;
 
-/** The dates the picker offers (the planets' orbits are approximations beyond a few centuries). */
-export const DATE_MIN = '1000-01-01';
-export const DATE_MAX = '3000-12-31';
+/** The dates the picker offers (beyond, a year can be typed; the planets' orbits are approximations beyond a few centuries). */
+export const DATE_MIN = '0001-01-01';
+export const DATE_MAX = '9999-12-31';
+
+/** How far the clock goes: two million years either way (the stars move in straight lines). */
+export const CLOCK_YEARS = 2_000_000;
+export const CLOCK_MIN_JD = 2451545 - CLOCK_YEARS * 365.25;
+export const CLOCK_MAX_JD = 2451545 + CLOCK_YEARS * 365.25;
+
+/** The (astronomical) year of a Julian date: 0 is 1 BC. */
+export function yearOfJd(jd: number): number {
+  return Math.floor(2000 + (jd - 2451545) / 365.25);
+}
+
+/**
+ * A typed year: "52026", "52.026", "-50000" (astronomical), "50000 v. Chr." or "50000 BC" (1 BC is
+ * year 0); null if there is no number in it.
+ */
+export function parseYear(text: string): number | null {
+  const s = text.toLowerCase().replace(/[−–]/g, '-');
+  const bc = /v\.?\s*chr|\bbce?\b|v\.?\s*u\.?\s*z/.test(s);
+  const m = /(-?)\s*([\d.,'’\s]*\d)/.exec(s);
+  if (!m) return null;
+  const n = Number(m[2].replace(/[^\d]/g, ''));
+  if (!Number.isFinite(n)) return null;
+  if (bc) return 1 - n;
+  return m[1] ? -n : n;
+}
 
 /** "2026-11-07" of a date, in local time (the picker's format). */
 export function isoDay(ms: number): string {
@@ -37,8 +62,15 @@ export function jdOfPickedDay(value: string, nowMs: number): number | null {
 
 const formats = new Map<string, Intl.DateTimeFormat>();
 
-/** A date as the map shows it ("7. Nov. 2026", with the time of day: "7. Nov. 2026, 20:16"). */
+/**
+ * A date as the map shows it ("7. Nov. 2026", with the time of day: "7. Nov. 2026, 20:16"); far
+ * from now only the year ("Jahr 52.026", "50.000 v. Chr.").
+ */
 export function formatClockDate(jd: number, withTime: boolean, lang = getLang()): string {
+  const year = yearOfJd(jd);
+  if (!Number.isFinite(year)) return '';
+  if (year < 1) return t('yearBC', { n: formatNumber(1 - year) });
+  if (year > 9999) return t('yearN', { n: formatNumber(year) });
   const key = `${lang}:${withTime}`;
   let f = formats.get(key);
   if (!f) {
@@ -50,13 +82,14 @@ export function formatClockDate(jd: number, withTime: boolean, lang = getLang())
 }
 
 /**
- * The planets' clock on the map, while planets or spacecraft are to be seen: the date drawn, a
- * button back to now, a date picker and the speed (a slider with the stops of the setting, from
- * real time, one second per second, to ten years per second).
+ * The clock of the stars, planets and spacecraft on the map: the date drawn (a tap on it lets a
+ * year be typed), a button back to now, a date picker and the speed (a slider with the stops of
+ * the setting, from real time, one second per second, to 100,000 years per second).
  */
 export class PlanetTimeControl {
   readonly root = el('div', 'time-control hidden');
-  private readonly date = el('span', 'time-date');
+  private readonly date = el('button', 'time-date');
+  private readonly year = el('input', 'time-year hidden');
   private readonly now = el('button', 'btn subtle time-now');
   private readonly pickWrap = el('span', 'btn subtle time-pick');
   private readonly picker = el('input');
@@ -72,10 +105,39 @@ export class PlanetTimeControl {
   onNow: () => void = () => {};
   /** A date was picked (Julian date). */
   onDate: (jd: number) => void = () => {};
+  /** A year was typed (astronomical: 0 is 1 BC). */
+  onYear: (year: number) => void = () => {};
 
   constructor(parent: HTMLElement) {
     const dateRow = el('div', 'time-row');
     this.date.setAttribute('aria-live', 'off');
+    this.date.type = 'button';
+    // a tap on the date: a year to type (also far in the past or future)
+    this.year.type = 'text';
+    this.year.inputMode = 'text';
+    this.year.autocomplete = 'off';
+    let editing = false;
+    const close = (apply: boolean) => {
+      if (!editing) return;
+      editing = false;
+      const y = parseYear(this.year.value);
+      this.year.classList.add('hidden');
+      this.date.classList.remove('hidden');
+      if (apply && y !== null) this.onYear(y);
+    };
+    this.date.addEventListener('click', () => {
+      editing = true;
+      this.year.value = String(yearOfJd(this.jd));
+      this.date.classList.add('hidden');
+      this.year.classList.remove('hidden');
+      this.year.focus();
+      this.year.select();
+    });
+    this.year.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') close(true);
+      else if (e.key === 'Escape') close(false);
+    });
+    this.year.addEventListener('blur', () => close(true));
     this.now.type = 'button';
     this.now.classList.add('hidden');
     this.now.addEventListener('click', () => this.onNow());
@@ -103,7 +165,7 @@ export class PlanetTimeControl {
       const jd = jdOfPickedDay(this.picker.value, Date.now());
       if (jd !== null) this.onDate(jd);
     });
-    dateRow.append(this.date, this.now, this.pickWrap);
+    dateRow.append(this.date, this.year, this.now, this.pickWrap);
 
     const speedRow = el('div', 'time-row');
     this.input.type = 'range';
@@ -149,6 +211,9 @@ export class PlanetTimeControl {
     this.now.title = t('timeNowHint');
     this.pickWrap.title = t('timePick');
     this.picker.setAttribute('aria-label', t('timePick'));
+    this.date.title = t('timeYear');
+    this.year.placeholder = t('timeYear');
+    this.year.setAttribute('aria-label', t('timeYear'));
     this.date.textContent = '';
     this.set(PLANET_SPEEDS[Number(this.input.value)] ?? 0);
   }

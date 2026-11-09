@@ -7,7 +7,7 @@ import logging
 import numpy as np
 import pandas as pd
 
-from .coords import LY_PER_PC, icrs_to_galactic_xyz
+from .coords import LY_PER_PC, LY_PER_YR_PER_KMS, icrs_to_galactic_xyz, space_velocity
 from .flags import Flag, is_giant_spect, spectral_code
 from .photometry import Photometry, g_minus_v, spt_number
 
@@ -15,6 +15,23 @@ log = logging.getLogger(__name__)
 
 MAX_DIST_PC = 15_000.0
 MAX_REL_ERR = 1.0
+#: the epoch of all positions in the star tiles (Gaia DR3); the app moves the stars from there
+EPOCH = 2016.0
+
+
+def kinematics(s: pd.DataFrame, dist_pc: np.ndarray, rows: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
+    """Galactic xyz (ly) at EPOCH and velocity (km/s) of the given rows (all if None): the catalogue
+    position (at its own epoch) moved along the space velocity to EPOCH."""
+    def col(name: str, default: float = np.nan) -> np.ndarray:
+        v = s[name].to_numpy(dtype=float) if name in s else np.full(len(s), default)
+        return v if rows is None else v[rows]
+
+    ra, dec = col("ra"), col("dec")
+    xyz = icrs_to_galactic_xyz(ra, dec, dist_pc) * LY_PER_PC
+    vel = space_velocity(ra, dec, dist_pc, col("pmra"), col("pmdec"), col("rv"))
+    dt = EPOCH - np.nan_to_num(col("epoch", EPOCH), nan=EPOCH)
+    xyz += np.nan_to_num(vel) * LY_PER_YR_PER_KMS * dt[:, None]
+    return xyz, vel
 
 
 def positions(s: pd.DataFrame) -> pd.DataFrame:
@@ -28,8 +45,10 @@ def positions(s: pd.DataFrame) -> pd.DataFrame:
     plx = s["plx"].to_numpy(dtype=float)
     sun = s["is_sun"].to_numpy(dtype=bool)
     dist_pc = np.where(sun, 0.0, 1000.0 / np.where(sun, 1.0, plx))
-    xyz = icrs_to_galactic_xyz(s["ra"].to_numpy(float), s["dec"].to_numpy(float), dist_pc) * LY_PER_PC
+    xyz, vel = kinematics(s, dist_pc)
+    vel[sun] = 0.0
     s["x"], s["y"], s["z"] = xyz[:, 0], xyz[:, 1], xyz[:, 2]
+    s["vx"], s["vy"], s["vz"] = vel[:, 0], vel[:, 1], vel[:, 2]
     s["dist_pc"] = dist_pc
     s["dist_err"] = np.where(sun, 0.0, s["plx_err"].to_numpy(dtype=float) / np.where(sun, 1.0, plx))
     return s
@@ -42,10 +61,14 @@ def place(s: pd.DataFrame, rows) -> None:
         return
     plx = s["plx"].to_numpy(dtype=float)[rows]
     dist_pc = 1000.0 / plx
-    xyz = icrs_to_galactic_xyz(s["ra"].to_numpy(float)[rows], s["dec"].to_numpy(float)[rows], dist_pc) * LY_PER_PC
+    xyz, vel = kinematics(s, dist_pc, rows)
     for k, c in enumerate(("x", "y", "z")):
         v = s[c].to_numpy(dtype=float).copy()
         v[rows] = xyz[:, k]
+        s[c] = v
+    for k, c in enumerate(("vx", "vy", "vz")):
+        v = s[c].to_numpy(dtype=float).copy() if c in s else np.full(len(s), np.nan)
+        v[rows] = vel[:, k]
         s[c] = v
     for c, val in (("dist_pc", dist_pc), ("dist_err", s["plx_err"].to_numpy(dtype=float)[rows] / plx)):
         v = s[c].to_numpy(dtype=float).copy()

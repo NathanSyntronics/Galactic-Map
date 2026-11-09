@@ -167,10 +167,17 @@ def _i16(values: np.ndarray, scale: float) -> np.ndarray:
     return v.astype("<i2")
 
 
+#: velocities in the tiles: km/s times this (0.02 km/s steps, up to ±655 km/s), -32768 unknown
+VEL_SCALE = 50
+
+
 def encode_node(node: Node, cols: dict[str, np.ndarray], sys_info: dict[int, list] | None = None) -> bytes:
     idx = node.idx
     n = len(idx)
     pos = cols["xyz"][idx].astype("<f4")
+    # heliocentric galactic velocity (km/s, x y z per star; see docs/DATA_FORMAT.md)
+    vel_col = cols.get("vel")
+    vel = _i16(vel_col[idx], VEL_SCALE).reshape(-1) if vel_col is not None else None
 
     absmag = _i16(cols["absmag"][idx], 100)
     logl = _i16(cols["logl"][idx], 1000)
@@ -250,6 +257,11 @@ def encode_node(node: Node, cols: dict[str, np.ndarray], sys_info: dict[int, lis
         _pad8(body)
         offsets.append(len(body))
         body += arr.tobytes()
+    off_vel = 0
+    if vel is not None:
+        _pad8(body)
+        off_vel = len(body)
+        body += vel.tobytes()
     _pad8(body)
     off_extra = len(body)
     body += extra_bytes
@@ -263,7 +275,7 @@ def encode_node(node: Node, cols: dict[str, np.ndarray], sys_info: dict[int, lis
         *offsets,
         off_extra,
         len(extra_bytes),
-        0,
+        off_vel,
         0,
     )
     assert len(header) == HEADER_BYTES
@@ -285,6 +297,7 @@ def columns_of(stars: pd.DataFrame) -> dict[str, np.ndarray]:
 
     return {
         "xyz": stars[["x", "y", "z"]].to_numpy(dtype=float),
+        "vel": stars[["vx", "vy", "vz"]].to_numpy(dtype=float) if "vx" in stars else np.full((len(stars), 3), np.nan),
         "absmag": num("absmag", np.nan),
         "logl": num("logl", np.nan),
         "teff": num("teff", np.nan),

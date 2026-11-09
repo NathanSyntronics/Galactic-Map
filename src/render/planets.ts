@@ -200,6 +200,8 @@ export class PlanetLayer {
       view.lastUsed = this.frame;
       view.group.visible = true;
       const host = cat.hosts[h];
+      // the system moves with its star
+      view.group.position.copy(host.pos);
       if (view.zones.length && host.hz) {
         // the zone fades in with its size on screen, like the orbits
         const zonePx = (host.hz[3] / AU_PER_LY / camD) * css;

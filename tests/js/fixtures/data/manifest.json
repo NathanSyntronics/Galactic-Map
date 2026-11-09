@@ -1,9 +1,11 @@
 {
  "format": "galmap-octree",
- "version": 1,
- "generated": "2026-10-21T16:01:33Z",
+ "version": 2,
+ "generated": "2026-11-09T12:45:27Z",
  "units": "ly",
  "frame": "galactic-heliocentric",
+ "epoch": 2016.0,
+ "velocityScale": 50,
  "root": {
   "center": [
    -0.5912,
@@ -22,7 +24,7 @@
   [
    "r",
    4,
-   384,
+   408,
    0,
    0,
    0

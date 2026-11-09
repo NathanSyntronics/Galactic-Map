@@ -50,8 +50,8 @@ def gliese_designation(gl: str | None) -> str | None:
 def load(refresh: bool = False) -> pd.DataFrame:
     path = fetch(URL, FILE, sha256=SHA256, refresh=refresh)
     log.info("reading %s", path)
-    str_cols = ["tyc", "gaia", "gl", "bayer", "con", "proper", "pos_src", "dist_src", "mag_src", "spect", "pm_src"]
-    num_cols = ["id", "hyg", "hip", "hd", "hr", "flam", "ra", "dec", "dist", "mag", "absmag", "ci", "pmra", "pmdec"]
+    str_cols = ["tyc", "gaia", "gl", "bayer", "con", "proper", "pos_src", "dist_src", "mag_src", "spect", "pm_src", "rv_src"]
+    num_cols = ["id", "hyg", "hip", "hd", "hr", "flam", "ra", "dec", "dist", "mag", "absmag", "ci", "pmra", "pmdec", "rv"]
     df = pd.read_csv(
         path,
         usecols=str_cols + num_cols,

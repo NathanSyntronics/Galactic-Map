@@ -143,6 +143,17 @@ export class GalaxyCard {
       if (Number.isFinite(err)) row(t('distUncertainty'), `± ${formatNumber(err * 100, err < 0.1 ? 1 : 0)} %`);
       const method = cat.methods[cat.method[i]] ?? '';
       if (method && METHOD_KEYS[method]) row(t('distanceMethod'), t(METHOD_KEYS[method]));
+      else {
+        // no method in the catalogue: the paper the distance comes from
+        const ref = cat.refs.get(i);
+        if (ref) {
+          const a = el('a', '', ref.cite);
+          a.href = `https://ui.adsabs.harvard.edu/abs/${encodeURIComponent(ref.bibcode)}/abstract`;
+          a.target = '_blank';
+          a.rel = 'noopener';
+          row(t('distanceSource'), '').dd.appendChild(a);
+        }
+      }
       const { l, b } = galacticLB(p);
       row(t('galacticCoords'), `l = ${formatNumber(l, 2)}°, b = ${formatNumber(b, 2)}°`);
     }

@@ -58,11 +58,22 @@ export function displayName(info: StarInfo): string {
 }
 
 /** Bottom/right card with details about the selected star. */
+const lbText = (l: number, b: number) => `l = ${formatNumber(l, 2)}°, b = ${formatNumber(b, 2)}°`;
+const xyzText = (x: number, y: number, z: number) => `${formatNumber(x, 2)} / ${formatNumber(y, 2)} / ${formatNumber(z, 2)} ${t('ly')}`;
+
+/** "4,24 Lj (1,30 pc)". */
+function sunDistanceText(d: number): string {
+  return `${formatLy(d)} (${formatNumber(d / LY_PER_PC, d < 33 ? 2 : 1)} ${t('pc')})`;
+}
+
 export class InfoPanel {
   readonly root: HTMLElement;
   private info: StarInfo | null = null;
   /** The "distance from view centre" row, the only part that changes while the view moves. */
   private centreRow: { dt: HTMLElement; dd: HTMLElement } | null = null;
+  private sunRow: HTMLElement | null = null;
+  private lbRow: HTMLElement | null = null;
+  private xyzRow: HTMLElement | null = null;
   onClose: () => void = () => {};
   onFlyTo: (info: StarInfo) => void = () => {};
   /** Flies close to a star with planets (null: the planets are not known). */
@@ -110,6 +121,16 @@ export class InfoPanel {
   updateView(target: Vector3): void {
     const row = this.centreRow;
     if (!this.info || !row) return;
+    if (this.sunRow) {
+      const [gx, gy, gz] = worldToGalactic(this.info.pos);
+      const set = (e: HTMLElement | null, text: string) => {
+        if (e && e.textContent !== text) e.textContent = text;
+      };
+      set(this.sunRow, sunDistanceText(Math.hypot(gx, gy, gz)));
+      const { l, b } = galacticLB(this.info.pos);
+      set(this.lbRow, lbText(l, b));
+      set(this.xyzRow, xyzText(gx, gy, gz));
+    }
     const d = this.info.pos.distanceTo(target);
     const show = d > 0.01;
     const text = show ? formatLy(d) : '';
@@ -202,8 +223,11 @@ export class InfoPanel {
     };
     const [gx, gy, gz] = worldToGalactic(info.pos);
     const dSun = Math.hypot(gx, gy, gz);
+    this.sunRow = this.lbRow = this.xyzRow = null;
     if (!(info.flags & Flag.SUN)) {
-      row(t('distanceFromSun'), `${formatLy(dSun)} (${formatNumber(dSun / LY_PER_PC, dSun < 33 ? 2 : 1)} ${t('pc')})`);
+      // follows the star as it moves (the clock)
+      this.sunRow = row(t('distanceFromSun'), sunDistanceText(dSun)).dd;
+      this.sunRow.setAttribute('aria-live', 'off');
     }
     this.centreRow = row(t('distanceFromCentre'), '');
     // changes continuously while the view moves: not announced by screen readers
@@ -216,8 +240,11 @@ export class InfoPanel {
     }
     if (!(info.flags & Flag.SUN)) {
       const { l, b } = galacticLB(info.pos);
-      row(t('galacticCoords'), `l = ${formatNumber(l, 2)}°, b = ${formatNumber(b, 2)}°`);
-      row(t('galacticXYZ'), `${formatNumber(gx, 2)} / ${formatNumber(gy, 2)} / ${formatNumber(gz, 2)} ${t('ly')}`);
+      // (both follow the star as it moves)
+      this.lbRow = row(t('galacticCoords'), lbText(l, b)).dd;
+      this.xyzRow = row(t('galacticXYZ'), xyzText(gx, gy, gz)).dd;
+      this.lbRow.setAttribute('aria-live', 'off');
+      this.xyzRow.setAttribute('aria-live', 'off');
     }
     const spec = info.specType ?? spectralClassOf(info.spec);
     row(t('spectralType'), spec ?? t('unknown'));

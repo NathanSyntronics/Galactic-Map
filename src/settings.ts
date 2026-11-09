@@ -110,8 +110,20 @@ export const DEFAULT_SETTINGS: Settings = {
  * Planet motion, the stops of its sliders: days per second, from real time (0, the positions of
  * now) to ten years per second.
  */
-export const PLANET_SPEEDS: readonly number[] = [0, 1 / 24, 1, 7, 30, 365, 3652.5];
-export const PLANET_SPEED_KEYS = ['speedReal', 'speedHour', 'speedDay', 'speedWeek', 'speedMonth', 'speedYear', 'speedDecade'] as const;
+export const PLANET_SPEEDS: readonly number[] = [0, 1 / 24, 1, 7, 30, 365, 3652.5, 36525, 365250, 3652500, 36525000];
+export const PLANET_SPEED_KEYS = [
+  'speedReal',
+  'speedHour',
+  'speedDay',
+  'speedWeek',
+  'speedMonth',
+  'speedYear',
+  'speedDecade',
+  'speedCentury',
+  'speedMillennium',
+  'speed10k',
+  'speed100k',
+] as const;
 
 /** Days per second of a planet speed: 0 is real time, one second per second (from any date). */
 export function daysPerSecond(speed: number): number {

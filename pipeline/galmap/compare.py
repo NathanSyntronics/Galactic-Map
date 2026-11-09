@@ -49,8 +49,10 @@ def read_stars(out: Path) -> pd.DataFrame:
 
 def decode(blob: bytes, path: str) -> pd.DataFrame:
     _magic, _version, _r, n = struct.unpack_from("<IHHI", blob, 0)
-    offs = struct.unpack_from("<" + "I" * 11, blob, 12)
+    offs = struct.unpack_from("<" + "I" * 12, blob, 12)
     pos = np.frombuffer(blob, "<f4", n * 3, offs[0]).reshape(n, 3)
+    # the velocities (km/s times VEL_SCALE, -32768 unknown), where the tile has them
+    vel = np.frombuffer(blob, "<i2", n * 3, offs[11]).reshape(n, 3) if offs[11] else np.full((n, 3), -32768, np.int16)
     did = np.frombuffer(blob, "<u4", 2 * n, offs[8]).astype(np.int64)
     dcat = np.frombuffer(blob, "u1", n, offs[7]).astype(np.int64)
     extra = json.loads(blob[offs[9] : offs[9] + offs[10]].decode("utf-8")) if offs[10] else {}
@@ -66,6 +68,9 @@ def decode(blob: bytes, path: str) -> pd.DataFrame:
             "x": pos[:, 0],
             "y": pos[:, 1],
             "z": pos[:, 2],
+            "vx": vel[:, 0],
+            "vy": vel[:, 1],
+            "vz": vel[:, 2],
             "absmag": np.frombuffer(blob, "<i2", n, offs[1]),
             "logl": np.frombuffer(blob, "<i2", n, offs[2]),
             "teff": np.frombuffer(blob, "<u2", n, offs[3]),

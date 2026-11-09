@@ -36,6 +36,8 @@ const vertexShader = /* glsl */ `
 attribute vec3 aColor;
 attribute float aSize;
 attribute float aMark;
+attribute vec3 aVel;
+uniform float uDt;
 uniform float uMarks;
 uniform float uPixelRatio;
 uniform vec3 uCamLocal;
@@ -56,7 +58,8 @@ varying float vFade;
 varying float vMark;
 varying float vRing;
 void main() {
-  vec3 rel = position - uCamLocal;
+  // the epoch position (exact relative to the camera close by) plus the motion since then
+  vec3 rel = (position - uCamLocal) + aVel * uDt;
   float d = distance(rel, uTargetRel);
   float a = 1.0 - smoothstep(uRadius * uFade, uRadius, d);
   if (a <= 0.0 || aSize <= 0.0) {
@@ -170,6 +173,7 @@ export function createStarMaterial(): ShaderMaterial {
       uBrightness: { value: 1 },
       uPixelRatio: { value: 1 },
       uMarks: { value: 0 },
+      uDt: { value: 0 },
     },
     transparent: true,
     depthWrite: false,
@@ -394,7 +398,8 @@ export class Starfield {
     const geometry = new BufferGeometry();
     // node-relative positions; origin + attribute == data.positions exactly (CPU picking and labels)
     const origin = renderOrigin(node.worldCenter, node.halfSize);
-    const local = relativePositions(data.positions, origin);
+    // the epoch positions: the shader moves the stars (aVel · uDt)
+    const local = relativePositions(data.base, origin);
     const position = new BufferAttribute(local, 3);
     // the CPU side keeps using data.positions: the node-relative copy is not needed after upload
     position.onUpload(releaseArray);
@@ -407,6 +412,9 @@ export class Starfield {
     geometry.setAttribute('aColor', new BufferAttribute(colors, 3, true));
     geometry.setAttribute('aSize', new BufferAttribute(sizes, 1));
     geometry.setAttribute('aMark', new BufferAttribute(marks, 1));
+    const vel = new BufferAttribute(data.vel ?? new Float32Array(3 * data.count), 3);
+    vel.onUpload(releaseArray);
+    geometry.setAttribute('aVel', vel);
     geometry.boundingSphere = new Sphere(node.worldCenter.clone().sub(origin), node.radius);
     const points = new Points(geometry, this.material);
     points.position.copy(origin);
@@ -432,6 +440,23 @@ export class Starfield {
     this.group.remove(r.points);
     r.points.geometry.dispose();
     this.rendered.delete(path);
+  }
+
+  /**
+   * The date drawn, in years since the positions' epoch: the shader moves the stars, and each
+   * node's culling sphere grows by the farthest its stars can have gone.
+   */
+  setTime(dt: number): void {
+    this.material.uniforms.uDt.value = dt;
+    for (const r of this.rendered.values()) {
+      const sphere = r.points.geometry.boundingSphere;
+      if (sphere) sphere.radius = r.node.radius + r.data.vmax * Math.abs(dt);
+    }
+  }
+
+  /** Every node added (for moving their positions). */
+  all(): IterableIterator<RenderedNode> {
+    return this.rendered.values();
   }
 
   /** Show exactly the given set of node paths. */

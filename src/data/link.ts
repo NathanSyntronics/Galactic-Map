@@ -26,9 +26,9 @@ export interface LinkState {
   clock?: { jd: number; speed?: number };
 }
 
-/** Julian dates a link may carry: the years 1000 to 3000 (the date picker's range). */
-const JD_MIN = 2086307.5;
-const JD_MAX = 2817151.5;
+/** Julian dates a link may carry: two million years either way (the clock's range). */
+const JD_MIN = 2451545 - 2_000_000 * 365.25;
+const JD_MAX = 2451545 + 2_000_000 * 365.25;
 
 /** A parameter value: percent-encoded, spaces as '+'. */
 function enc(v: string): string {

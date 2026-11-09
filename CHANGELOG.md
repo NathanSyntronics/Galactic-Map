@@ -2,6 +2,19 @@
 
 Every round of changes that goes live raises the version by 0.01 (README, *Versions*).
 
+## 1.06 (2026-11-09)
+
+* The stars move: from their measured velocities (proper motion, distance and, for most stars
+  within 650 ly, the radial velocity), in straight lines, up to two million years into the past or
+  future. The clock is on the map whenever stars are, with speeds up to 100,000 years per second;
+  a tap on the date lets you type a year. The view follows the star it is centred on (planetary
+  systems move with their star), and the star card's distance follows too.
+* Galaxies whose catalogue names no distance method show the paper the distance comes from (the
+  Large Magellanic Cloud: Pietrzynski 2019), with a link.
+* The *Known planets* legend: the Sun first, short texts.
+* *Luminosity* and *Absolute magnitude* without the explanations in brackets (no line break on
+  phones).
+
 ## 1.05 (2026-11-09)
 
 * Shared links carry the date the planets are drawn for (and the clock's speed).

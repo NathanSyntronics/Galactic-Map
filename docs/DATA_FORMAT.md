@@ -12,10 +12,16 @@ web app (`src/`). Both sides must implement exactly what is written here.
   * The Sun is at the origin. The X–Y plane is the galactic plane *through the
     Sun* (the Sun lies ~20 pc above the true mid-plane; we do not correct for that).
 * **Unit:** light years (ly). `1 pc = 3.261563777 ly`.
-* **Epoch:** positions are the catalogue positions (Gaia: J2016.0,
-  Hipparcos/HYG: J2000.0). Proper motion over a few decades moves even the
-  fastest nearby stars by far less than 0.001 ly, so no epoch correction is
-  applied to 3-D positions (it *is* applied when cross-matching catalogues).
+* **Epoch:** all positions are for J2016.0 (Gaia DR3): catalogue positions of
+  other epochs (Hipparcos J1991.25, Tycho/HYG J2000.0, Gliese ~J1991) are moved
+  there along the star's space velocity (`galmap.derive.kinematics`).
+* **Velocities:** each star's heliocentric space velocity in the galactic frame
+  (km/s): the tangential part from the proper motion and the distance
+  (4.74047 km/s per arcsec/yr and pc), the radial part from the radial velocity
+  where AT-HYG has one (mostly Gaia DR3; a Gaia value only where the Gaia link
+  holds), else 0. Members of a multiple system share their system's velocity
+  (the primary's). The web app moves every star in a straight line with it from
+  the epoch to the date drawn (`src/data/motion.ts`); the Sun stays at the origin.
 * ICRS → galactic rotation matrix (Hipparcos definition, ESA 1997 Vol. 1 §1.5.3):
 
   ```
@@ -57,6 +63,8 @@ the pack in memory for the other nodes in it).
   "generated": "2026-10-14T12:00:00Z",   // ISO timestamp of the build
   "units": "ly",
   "frame": "galactic-heliocentric",
+  "epoch": 2016.0,                       // the positions' epoch (Julian year)
+  "velocityScale": 50,                   // vel = km/s × velocityScale
   "root": { "center": [cx, cy, cz], "halfSize": H },  // root cube, ly
   "capacity": 4096,                      // max stars stored per node
   "starCount": 2900000,
@@ -139,7 +147,7 @@ without copying once the blob is in its own `ArrayBuffer`.
 | 44     | u32    | offDesigId     | offset of `desigId`                       |
 | 48     | u32    | offExtra       | offset of the UTF-8 JSON `extra` blob     |
 | 52     | u32    | lenExtra       | length of the JSON blob in bytes          |
-| 56     | u32    | reserved       | `0`                                       |
+| 56     | u32    | offVel         | offset of `vel`, `0` when the node has no velocities (older tiles) |
 | 60     | u32    | reserved       | `0`                                       |
 
 ### Columns
@@ -155,6 +163,7 @@ without copying once the blob is in its own `ArrayBuffer`.
 | `spec`     | u8 × N        | spectral class code, see below                                           |
 | `desigCat` | u8 × N        | catalogue of the star's primary designation, see below                   |
 | `desigId`  | u32 × 2N      | designation payload `(lo, hi)` per star                                  |
+| `vel`      | i16 × 3N      | interleaved galactic velocity vX, vY, vZ in km/s × `velocityScale` (50: 0.02 km/s steps, ±655 km/s); `-32768` = unknown (the star stays) |
 | `extra`    | UTF-8 JSON    | sparse per-star extras, see below                                        |
 
 #### flags

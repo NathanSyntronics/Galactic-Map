@@ -41,6 +41,10 @@ function node(): NodeData {
     systemInfo: new Map([[5, { nameEn: 'Test', nameDe: null, members: 2, primary: 'HR 1' }]]),
     spectralTypes: new Map(),
     planets: new Map([[2, 2]]),
+    base: new Float32Array([1, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 0]),
+    vel: null,
+    vmax: 0,
+    movedTo: 0,
   };
 }
 

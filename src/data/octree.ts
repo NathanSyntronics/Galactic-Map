@@ -24,6 +24,9 @@ export interface Manifest {
   generated: string;
   units: string;
   frame: string;
+  /** Epoch of the positions (Julian year) and the velocities' unit (km/s = stored / velocityScale). */
+  epoch?: number;
+  velocityScale?: number;
   root: { center: [number, number, number]; halfSize: number };
   capacity: number;
   starCount: number;

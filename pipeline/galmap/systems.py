@@ -254,3 +254,46 @@ def system_table(s: pd.DataFrame) -> pd.DataFrame:
     else:
         out["designation"] = None
     return out
+
+
+def common_velocities(s: pd.DataFrame) -> int:
+    """Members of a multiple system move together: each gets its system's velocity (vx, vy, vz,
+    km/s), that of the member with the most reliable one: a Gaia DR3 radial velocity first, then
+    any radial velocity, then none (the primary first among equals), else the mean of the members
+    that have one. Their own differ by the orbital motion and by measurement errors, which over
+    millennia would pull bound pairs apart. Returns the number of members whose velocity changed."""
+    if "vx" not in s:
+        return 0
+    sid = s["system_id"].to_numpy()
+    vel = s[["vx", "vy", "vz"]].to_numpy(float).copy()
+    flags = s["flags"].to_numpy(np.int64)
+    rows = np.nonzero(sid >= 0)[0]
+    if not len(rows):
+        return 0
+    rv = s["rv"].to_numpy(float) if "rv" in s else np.full(len(s), np.nan)
+    rv_gaia = s["rv_gaia"].fillna(False).to_numpy(bool) if "rv_gaia" in s else np.zeros(len(s), bool)
+    df = pd.DataFrame(
+        {
+            "sid": sid[rows],
+            "row": rows,
+            "prim": (flags[rows] & Flag.SYSTEM_PRIMARY) != 0,
+            "ok": np.isfinite(vel[rows, 0]),
+            # 2: Gaia radial velocity, 1: another one, 0: none
+            "quality": np.where(rv_gaia[rows], 2, np.where(np.isfinite(rv[rows]), 1, 0)),
+        }
+    )
+    changed = 0
+    for _sid, g in df.groupby("sid"):
+        ok = g[g.ok]
+        if len(ok):
+            best = ok.sort_values(["quality", "prim"], ascending=[False, False]).iloc[0]
+            v = vel[best.row]
+        else:
+            continue
+        r = g.row.to_numpy()
+        changed += int((~np.isclose(vel[r], v).all(axis=1)).sum())
+        vel[r] = v
+    s["vx"], s["vy"], s["vz"] = vel[:, 0], vel[:, 1], vel[:, 2]
+    log.info("systems: %d members take their system's velocity", changed)
+    return changed
+

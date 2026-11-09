@@ -1,4 +1,5 @@
 // Decoder for the binary node files described in docs/DATA_FORMAT.md.
+import { DEFAULT_VELOCITY_SCALE, worldVelocity } from './motion';
 
 export const MAGIC = 0x4d4c4147; // "GALM"
 export const FORMAT_VERSION = 1;
@@ -82,6 +83,20 @@ export interface NodeData {
   spectralTypes: Map<number, string>;
   /** Number of known exoplanets (NASA Exoplanet Archive) of the host stars in this node. */
   planets: Map<number, number>;
+  /** Positions at the epoch (J2016.0); `positions` are moved to the date drawn (see motion.ts). */
+  base: Float32Array;
+  /** World-frame velocities in ly/yr, 3 * count (null: the node has none). */
+  vel: Float32Array | null;
+  /** Largest speed in the node (ly/yr). */
+  vmax: number;
+  /** Years since the epoch that `positions` are moved to. */
+  movedTo: number;
+}
+
+/** The tiles' velocity unit: km/s = stored / scale (the manifest's velocityScale). */
+let velocityScale = DEFAULT_VELOCITY_SCALE;
+export function setVelocityScale(scale: number): void {
+  if (Number.isFinite(scale) && scale > 0) velocityScale = scale;
 }
 
 export class FormatError extends Error {}
@@ -108,6 +123,8 @@ export function decodeNode(buffer: ArrayBuffer, path: string): NodeData {
   const offDesigId = off(8);
   const offExtra = off(9);
   const lenExtra = off(10);
+  // (a spare header field in older tiles: 0 there)
+  const offVel = off(11);
 
   const gal = new Float32Array(buffer, offPos, count * 3);
   const positions = new Float32Array(count * 3);
@@ -116,6 +133,22 @@ export function decodeNode(buffer: ArrayBuffer, path: string): NodeData {
     positions[3 * i] = gal[3 * i];
     positions[3 * i + 1] = gal[3 * i + 2];
     positions[3 * i + 2] = -gal[3 * i + 1];
+  }
+
+  // heliocentric galactic velocities (km/s × scale; -32768 unknown) -> world frame, ly/yr
+  let vel: Float32Array | null = null;
+  let vmax = 0;
+  if (offVel > 0 && offVel + 6 * count <= buffer.byteLength) {
+    const raw = new Int16Array(buffer, offVel, count * 3);
+    vel = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+      const w = worldVelocity(raw[3 * i], raw[3 * i + 1], raw[3 * i + 2], velocityScale);
+      if (!w) continue;
+      vel[3 * i] = w[0];
+      vel[3 * i + 1] = w[1];
+      vel[3 * i + 2] = w[2];
+      vmax = Math.max(vmax, Math.hypot(w[0], w[1], w[2]));
+    }
   }
 
   let extra: NodeExtra = {};
@@ -154,6 +187,10 @@ export function decodeNode(buffer: ArrayBuffer, path: string): NodeData {
     ),
     spectralTypes: toMap(extra.t),
     planets: toMap(extra.p),
+    base: vel ? positions.slice() : positions,
+    vel,
+    vmax,
+    movedTo: 0,
   };
 }
 

@@ -1078,12 +1078,30 @@ label.check input {
 .time-date {
   flex: 1;
   min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: text;
   font-size: 14px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.time-year {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--text);
+  background: rgba(127, 178, 255, 0.08);
+  border: 1px solid var(--border);
+  border-radius: 6px;
 }
 
 .time-control .btn {

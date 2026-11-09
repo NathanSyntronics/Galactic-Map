@@ -142,6 +142,17 @@ def athyg_rows(athyg_g: pd.DataFrame, hyg: pd.DataFrame, hipparcos: pd.DataFrame
     out.loc[pos_h, "pmdec"] = hip_astro[pos_h, 3]
     out["pmra"] = out["pmra"].fillna(a["pmra"])
     out["pmdec"] = out["pmdec"].fillna(a["pmdec"])
+    # radial velocity (km/s): AT-HYG's (mostly Gaia DR3), where it has one ('N': none) and, if it comes
+    # from Gaia, only where the Gaia link holds (else it belongs to another source)
+    if "rv" in a:
+        rv_src = a["rv_src"].fillna("N").astype(str).str.upper().to_numpy() if "rv_src" in a else np.full(n, "OTHER")
+        rv_ok = (rv_src != "N") & (~np.char.startswith(rv_src.astype(str), "G_") | ok)
+        out["rv"] = np.where(rv_ok, a["rv"].to_numpy(dtype=float), np.nan)
+        # (Gaia DR3 radial velocities are the most reliable: a system takes its velocity from one)
+        out["rv_gaia"] = rv_ok & np.char.startswith(rv_src.astype(str), "G_")
+    else:
+        out["rv"] = np.nan
+        out["rv_gaia"] = False
     out["ruwe"] = a["g_ruwe"]
     out["vmag"] = a["vmag"]
     out["gmag"] = a["g_phot_g_mean_mag"]

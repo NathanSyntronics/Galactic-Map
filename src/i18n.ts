@@ -58,12 +58,13 @@ const en = {
   temperature: 'Temperature',
   absMag: 'Absolute magnitude (V)',
   luminosity: 'Luminosity',
-  luminosityAll: 'Luminosity (all wavelengths)',
-  absMagVisible: 'Absolute magnitude (visible light)',
+  luminosityAll: 'Luminosity',
+  absMagVisible: 'Absolute magnitude',
   planetMarks: 'Rim around stars with planets (green: potentially habitable)',
-  planetClassHabitable: 'with a potentially habitable planet',
-  planetClassPlanets: 'with known planets',
-  planetClassNone: 'no known planets',
+  planetClassSun: 'habitable (the Sun only)',
+  planetClassHabitable: 'possibly habitable',
+  planetClassPlanets: 'not habitable',
+  planetClassNone: 'none known',
   distUncertainty: 'Distance uncertainty',
   distEstimated: 'estimate, no parallax',
   designation: 'Designation',
@@ -89,6 +90,13 @@ const en = {
   speedMonth: '1 month per second',
   speedYear: '1 year per second',
   speedDecade: '10 years per second',
+  speedCentury: '100 years per second',
+  speedMillennium: '1,000 years per second',
+  speed10k: '10,000 years per second',
+  speed100k: '100,000 years per second',
+  yearN: 'Year {n}',
+  yearBC: '{n} BC',
+  timeYear: 'Enter a year (e.g. 52026 or −50000)',
   planet: 'Planet',
   planetRocky: 'Rocky planet',
   planetSubNeptune: 'Mini-Neptune',
@@ -134,6 +142,7 @@ const en = {
   localGroup: 'Local Group',
   distanceToCentre: 'Distance to its centre',
   distanceMethod: 'Distance measured via',
+  distanceSource: 'Distance from',
   methodTRGB: 'its brightest red giant stars',
   methodCep: 'pulsating stars (Cepheids)',
   methodMaser: 'gas clouds near its centre, geometrically',
@@ -195,7 +204,7 @@ const en = {
 <p>Routes: “Route from here” and “Route to here” on a star’s info card plan a route through the jump network, also between distant stars (the Sun and Betelgeuse, say). The route box lists the waypoints; zoomed out, only the route is drawn.</p>
 <p>The search knows the stars, the planets and the galaxies. The empty search field lists the last five you picked from the search. A press anywhere beside the open settings only closes them (it selects no star); a click beside a dialog closes the dialog.</p>
 <p>A click on a star's name selects that star; where many stars crowd together, labelled stars are preferred.</p>
-<p>Planets: zoomed into a planetary system (or out to the spacecraft), a small clock shows the date drawn. Its slider sets how fast the time runs, from real time (one second per second) to ten years per second (also under Space in the settings); “Now” goes back to the present date and the calendar button sets any date, past or future. The View tab takes you to the Earth, the Sun or the whole Galaxy.</p>
+<p>Time: a small clock shows the date the map is drawn for. Its slider sets how fast the time runs, from real time (one second per second) to 100,000 years per second (also under Space in the settings); “Now” goes back to the present date, the calendar button sets a day, and a tap on the date lets you type a year, up to two million years in the past or the future (e.g. −50000). The stars move with their measured velocities in straight lines (the Sun stays in the centre), the planets on their orbits, the spacecraft on their paths; the view follows the star it is centred on. The View tab takes you to the Earth, the Sun or the whole Galaxy.</p>
 <p>Around stars with planets a green band shows the habitable zone: the region around a star where a rocky planet could have liquid water on its surface (Kopparapu et al. 2013). The stronger band lies between the narrower limits, the fainter one reaches out to the wider limits. A planet counts as potentially habitable when it is in the zone and at most 2.5 Earth radii (or, without a measured radius, 10 Earth masses). Under Space in the settings, a thin rim can mark the stars with known planets on the map: blue, green with a potentially habitable planet. Under Layers, the stars can also be coloured by their planets. The spacecraft Voyager 1 and 2, Pioneer 10 and 11 and New Horizons are shown on their paths out of the Solar System, and the search finds them.</p>
 <p>Sharing: the share button at the top (beside the search) sends or copies a link to what is on screen: the view, the selected star, planet or galaxy, and the route. The address in the browser always holds that link too.</p>`,
   aboutText: `
@@ -208,7 +217,7 @@ const en = {
   colorBy: 'Colour by',
   colorTemperature: 'Temperature (natural colour)',
   sizeBy: 'Size by',
-  sizeLuminosity: 'Luminosity (all wavelengths)',
+  sizeLuminosity: 'Luminosity',
   sizeUniform: 'Same size for all',
   missingStyle: 'Stars without a value',
   missingDim: 'grey and small',
@@ -461,12 +470,13 @@ const de: Record<MessageKey, string> = {
   temperature: 'Temperatur',
   absMag: 'Absolute Helligkeit (V)',
   luminosity: 'Leuchtkraft',
-  luminosityAll: 'Leuchtkraft (alle Wellenlängen)',
-  absMagVisible: 'Absolute Helligkeit (sichtbares Licht)',
+  luminosityAll: 'Leuchtkraft',
+  absMagVisible: 'Absolute Helligkeit',
   planetMarks: 'Sterne mit Planeten umranden (grün: möglicherweise lebensfreundlich)',
-  planetClassHabitable: 'mit möglicherweise lebensfreundlichem Planeten',
-  planetClassPlanets: 'mit bekannten Planeten',
-  planetClassNone: 'keine Planeten bekannt',
+  planetClassSun: 'lebensfreundlich (nur Sonne)',
+  planetClassHabitable: 'vielleicht lebensfreundlich',
+  planetClassPlanets: 'nicht lebensfreundlich',
+  planetClassNone: 'keine bekannt',
   distUncertainty: 'Entfernungsunsicherheit',
   distEstimated: 'Schätzung, keine Parallaxe',
   designation: 'Bezeichnung',
@@ -492,6 +502,13 @@ const de: Record<MessageKey, string> = {
   speedMonth: '1 Monat pro Sekunde',
   speedYear: '1 Jahr pro Sekunde',
   speedDecade: '10 Jahre pro Sekunde',
+  speedCentury: '100 Jahre pro Sekunde',
+  speedMillennium: '1.000 Jahre pro Sekunde',
+  speed10k: '10.000 Jahre pro Sekunde',
+  speed100k: '100.000 Jahre pro Sekunde',
+  yearN: 'Jahr {n}',
+  yearBC: '{n} v. Chr.',
+  timeYear: 'Jahr eingeben (z. B. 52026 oder −50000)',
   planet: 'Planet',
   planetRocky: 'Gesteinsplanet',
   planetSubNeptune: 'Mini-Neptun',
@@ -537,6 +554,7 @@ const de: Record<MessageKey, string> = {
   localGroup: 'Lokale Gruppe',
   distanceToCentre: 'Entfernung zum Zentrum',
   distanceMethod: 'Entfernung gemessen über',
+  distanceSource: 'Entfernung aus',
   methodTRGB: 'ihre hellsten Roten Riesen',
   methodCep: 'pulsierende Sterne (Cepheiden)',
   methodMaser: 'Gaswolken nahe ihrem Zentrum, geometrisch',
@@ -598,7 +616,7 @@ const de: Record<MessageKey, string> = {
 <p>Routen: „Route von hier“ und „Route hierher“ in der Infokarte eines Sterns planen eine Route durch das Sprungnetz, auch zwischen weit entfernten Sternen (etwa der Sonne und Beteigeuze). Das Routenfeld listet die Wegpunkte; herausgezoomt wird nur die Route gezeichnet.</p>
 <p>Die Suche kennt Sterne, Planeten und Galaxien. Das leere Suchfeld zeigt die fünf zuletzt über die Suche gewählten. Ein Druck irgendwo neben die offenen Einstellungen schließt nur diese (es wird kein Stern gewählt); ein Klick neben einen Dialog schließt den Dialog.</p>
 <p>Ein Klick auf den Namen eines Sterns wählt diesen Stern; wo sich viele Sterne drängen, haben beschriftete Sterne Vorrang.</p>
-<p>Planeten: Hineingezoomt in ein Planetensystem (oder hinaus bis zu den Raumsonden) zeigt eine kleine Uhr das Datum der Darstellung. Ihr Regler stellt ein, wie schnell die Zeit läuft, von Echtzeit (eine Sekunde pro Sekunde) bis zehn Jahre pro Sekunde (auch unter „Weltall“ in den Einstellungen); „Jetzt“ springt zurück zum heutigen Datum, und der Kalender-Knopf stellt ein beliebiges Datum ein, in der Vergangenheit oder der Zukunft. Der Reiter „Ansicht“ bringt dich zur Erde, zur Sonne oder zur ganzen Galaxis.</p>
+<p>Zeit: Eine kleine Uhr zeigt das Datum, für das die Karte gezeichnet ist. Ihr Regler stellt ein, wie schnell die Zeit läuft, von Echtzeit (eine Sekunde pro Sekunde) bis 100.000 Jahre pro Sekunde (auch unter „Weltall“ in den Einstellungen); „Jetzt“ springt zurück zum heutigen Datum, der Kalender-Knopf stellt einen Tag ein, und ein Tipp auf das Datum lässt dich ein Jahr eingeben, bis zu zwei Millionen Jahre in der Vergangenheit oder Zukunft (z. B. −50000). Die Sterne bewegen sich mit ihren gemessenen Geschwindigkeiten auf geraden Bahnen (die Sonne bleibt in der Mitte), die Planeten auf ihren Umlaufbahnen, die Raumsonden auf ihren Wegen; die Ansicht folgt dem Stern, auf den sie zentriert ist. Der Reiter „Ansicht“ bringt dich zur Erde, zur Sonne oder zur ganzen Galaxis.</p>
 <p>Um Sterne mit Planeten zeigt ein grünes Band die habitable Zone: den Bereich um einen Stern, in dem ein Gesteinsplanet flüssiges Wasser auf seiner Oberfläche haben könnte (Kopparapu et al. 2013). Das kräftigere Band liegt zwischen den engeren Grenzen, das blassere reicht bis zu den weiter gefassten. Als möglicherweise lebensfreundlich gilt ein Planet in der Zone mit höchstens 2,5 Erdradien (oder, ohne gemessenen Radius, 10 Erdmassen). Unter „Weltall“ in den Einstellungen kann ein dünner Rand die Sterne mit bekannten Planeten auf der Karte markieren: blau, grün mit einem möglicherweise lebensfreundlichen Planeten. Unter „Ebenen“ lassen sich die Sterne auch nach ihren Planeten einfärben. Die Raumsonden Voyager 1 und 2, Pioneer 10 und 11 und New Horizons sind auf ihren Bahnen aus dem Sonnensystem zu sehen, und die Suche findet sie.</p>
 <p>Teilen: Der Teilen-Knopf oben (neben der Suche) verschickt oder kopiert einen Link zu dem, was zu sehen ist: Ansicht, ausgewählter Stern, Planet oder Galaxie und Route. Auch die Adresse im Browser enthält immer diesen Link.</p>`,
   aboutText: `
@@ -611,7 +629,7 @@ const de: Record<MessageKey, string> = {
   colorBy: 'Farbe nach',
   colorTemperature: 'Temperatur (natürliche Farbe)',
   sizeBy: 'Größe nach',
-  sizeLuminosity: 'Leuchtkraft (alle Wellenlängen)',
+  sizeLuminosity: 'Leuchtkraft',
   sizeUniform: 'Alle gleich groß',
   missingStyle: 'Sterne ohne Wert',
   missingDim: 'grau und klein',

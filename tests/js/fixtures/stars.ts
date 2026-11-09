@@ -37,7 +37,12 @@ export function source(path: string, stars: Star[]): PlaceSource {
     ),
     spectralTypes: new Map(),
     planets: new Map(),
+    base: new Float32Array(0),
+    vel: null,
+    vmax: 0,
+    movedTo: 0,
   };
+  data.base = data.positions;
   return {
     data,
     sizes: new Float32Array(stars.map((s) => (s.hidden ? 0 : 0.2))),

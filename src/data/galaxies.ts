@@ -37,6 +37,8 @@ export interface GalaxyMeta {
   classes: string[];
   methods: string[];
   names: GalaxyNameRow[];
+  /** Where no method is given: [index, first author and year, ADS bibcode] of the distance's paper. */
+  refs?: [number, string, string][];
   sources: SourceInfo[];
   stats?: Record<string, number>;
 }
@@ -71,6 +73,8 @@ export interface GalaxyCatalogue {
   pgc: Uint32Array;
   names: Map<number, GalaxyName>;
   methods: string[];
+  /** The paper a distance comes from where the catalogue names no method: author and year, ADS bibcode. */
+  refs: Map<number, { cite: string; bibcode: string }>;
   sources: SourceInfo[];
 }
 
@@ -94,6 +98,7 @@ export function decodeGalaxies(bin: ArrayBuffer, meta: GalaxyMeta): GalaxyCatalo
     pgc: new Uint32Array(n),
     names: new Map(),
     methods: meta.methods ?? [],
+    refs: new Map((meta.refs ?? []).map(([k, cite, bibcode]) => [k, { cite, bibcode }])),
     sources: meta.sources ?? [],
   };
   const unit = (o: number, out: Float32Array, k: number) => {

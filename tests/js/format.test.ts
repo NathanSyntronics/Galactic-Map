@@ -161,3 +161,34 @@ describe('node selection', () => {
     expect(sel).toEqual([]);
   });
 });
+
+describe('star velocities', () => {
+  const { data } = loadRoot();
+  const idx = (name: string) => [...Array(data.count).keys()].find((k) => data.names.get(k)?.en === name)!;
+
+  it('decodes them into the world frame (ly per year), unknown ones as 0', async () => {
+    const { LY_PER_YR_PER_KMS } = await import('../../src/data/motion');
+    const i = idx('Sirius');
+    // galactic (-12.3, -2.5, -8.4) km/s -> world (X, Z, -Y)
+    expect(data.vel![3 * i] / LY_PER_YR_PER_KMS).toBeCloseTo(-12.3, 2);
+    expect(data.vel![3 * i + 1] / LY_PER_YR_PER_KMS).toBeCloseTo(-8.4, 2);
+    expect(data.vel![3 * i + 2] / LY_PER_YR_PER_KMS).toBeCloseTo(2.5, 2);
+    const sun = idx('Sun');
+    expect([...data.vel!.slice(3 * sun, 3 * sun + 3)]).toEqual([0, 0, 0]);
+    const gaia = [...Array(data.count).keys()].find((k) => data.desigCat[k] === DesigCat.GAIA_DR3)!;
+    expect([...data.vel!.slice(3 * gaia, 3 * gaia + 3)]).toEqual([0, 0, 0]);
+    expect(data.vmax).toBeCloseTo(Math.hypot(12.3, 2.5, 8.4) * LY_PER_YR_PER_KMS, 9);
+  });
+
+  it('moves the stars from the epoch, in float32 and in double precision', async () => {
+    const { moveTo, starPosition } = await import('../../src/data/motion');
+    const i = idx('Sirius');
+    const x0 = data.base[3 * i];
+    moveTo(data, 10_000);
+    expect(data.positions[3 * i]).toBeCloseTo(x0 + data.vel![3 * i] * 10_000, 4);
+    const p = starPosition(data, i, 10_000, new Vector3());
+    expect(p.x).toBeCloseTo(x0 + data.vel![3 * i] * 10_000, 9);
+    moveTo(data, 0);
+    expect(data.positions[3 * i]).toBe(x0);
+  });
+});

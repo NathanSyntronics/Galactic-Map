@@ -79,7 +79,8 @@ M = M0 + 2π (t − J2000) / period.
 assumed, 4 phase assumed, 8 eccentricity assumed, 16 Solar System, 32 circumbinary, 64 in the
 habitable zone, 128 in its narrower limits, 256 potentially habitable), `hosts`
 (`[node path, index, archive name, [x, y, z] galactic ly, number of planets, habitable zone or
-null]`) and `planets`
+null, [vX, vY, vZ] as the star tile stores them (km/s × 50) or null]`: the systems move with their
+stars, docs/DATA_FORMAT.md) and `planets`
 (`[host, name, German name, a, e, period, M0, P, Q, radius R⊕, mass M⊕, Teq K, method, year,
 flags, inclination]`), `sources`, `stats`.
 

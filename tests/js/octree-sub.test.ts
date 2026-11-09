@@ -108,8 +108,8 @@ describe('octree with sub-manifests (manifest version 2)', () => {
   });
 
   it('reads version 1 manifests (no sub-manifests) as before', () => {
-    const v1 = JSON.parse(readFileSync(new URL('./fixtures/data/manifest.json', import.meta.url), 'utf8')) as Manifest;
-    expect(v1.version).toBe(1);
+    // the fixture without sub-manifests, as a version 1 manifest wrote it
+    const v1 = { ...(JSON.parse(readFileSync(new URL('./fixtures/data/manifest.json', import.meta.url), 'utf8')) as Manifest), version: 1 };
     const t = new Octree(v1);
     expect(t.nodes.size).toBe(v1.nodes.length);
     expect([...t.nodes.values()].some((n) => Octree.hasUnloaded(n))).toBe(false);

@@ -29,6 +29,31 @@ def icrs_to_galactic_xyz(ra_deg, dec_deg, dist) -> np.ndarray:
     return (u @ A_G.T) * np.asarray(dist, dtype=float)[..., None]
 
 
+#: km/s -> pc/yr and km/s -> ly/yr
+PC_PER_YR_PER_KMS = 1.0227121650537077e-6
+LY_PER_YR_PER_KMS = PC_PER_YR_PER_KMS * LY_PER_PC
+#: proper motion (mas/yr) times distance (pc) -> tangential velocity (km/s)
+K_TAN = 4.740470463533348e-3
+
+
+def space_velocity(ra_deg, dec_deg, dist_pc, pmra_masyr, pmdec_masyr, rv_kms) -> np.ndarray:
+    """Heliocentric velocity in the galactic frame (km/s), shape (N, 3): the tangential part from
+    the proper motion (pmra is mu_alpha*, already times cos dec) and the distance, the radial part
+    from the radial velocity (0 where it is unknown). NaN where the proper motion is unknown."""
+    ra = np.radians(np.asarray(ra_deg, dtype=float))
+    dec = np.radians(np.asarray(dec_deg, dtype=float))
+    d = np.asarray(dist_pc, dtype=float)
+    pmra = np.asarray(pmra_masyr, dtype=float)
+    pmdec = np.asarray(pmdec_masyr, dtype=float)
+    rv = np.nan_to_num(np.asarray(rv_kms, dtype=float))
+    sa, ca, sd, cd = np.sin(ra), np.cos(ra), np.sin(dec), np.cos(dec)
+    r_hat = np.stack([cd * ca, cd * sa, sd], axis=-1)
+    e_ra = np.stack([-sa, ca, np.zeros_like(ra)], axis=-1)
+    e_dec = np.stack([-sd * ca, -sd * sa, cd], axis=-1)
+    v_eq = rv[..., None] * r_hat + (K_TAN * d)[..., None] * (pmra[..., None] * e_ra + pmdec[..., None] * e_dec)
+    return v_eq @ A_G.T
+
+
 def galactic_lb(xyz: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Galactic longitude/latitude in degrees from Cartesian coordinates."""
     x, y, z = xyz[..., 0], xyz[..., 1], xyz[..., 2]

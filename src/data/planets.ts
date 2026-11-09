@@ -4,6 +4,7 @@
  * converted here to the world frame of the stars, and the mean anomaly at J2000.
  */
 import { Vector3 } from 'three';
+import { worldVelocity } from './motion';
 import type { SourceInfo } from './octree';
 
 export const AU_PER_LY = 63241.077;
@@ -37,8 +38,11 @@ export interface PlanetFile {
   version: number;
   epoch: number;
   methods: string[];
-  /** [node path, index in the node, archive name, galactic position (ly), number of planets, habitable zone (AU) or null] */
-  hosts: [string, number, string, [number, number, number], number, (HabitableZone | null)?][];
+  /**
+   * [node path, index in the node, archive name, galactic position (ly), number of planets,
+   * habitable zone (AU) or null, galactic velocity as the star tile stores it (km/s × 50) or null]
+   */
+  hosts: [string, number, string, [number, number, number], number, (HabitableZone | null)?, ([number, number, number] | null)?][];
   planets: PlanetRow[];
   sources: SourceInfo[];
 }
@@ -57,8 +61,11 @@ export interface PlanetHost {
   index: number;
   /** Name in the NASA Exoplanet Archive (Sun for the Solar System). */
   name: string;
-  /** World position of the star (ly), exactly as the star is drawn. */
+  /** World position of the star (ly) at the date drawn (see moveHosts), exactly as the star is drawn. */
   pos: Vector3;
+  /** Its position at the epoch (J2016.0) and its velocity (ly/yr, as the star's; null: unknown). */
+  base: Vector3;
+  vel: Vector3 | null;
   /** Indices of its planets, from the innermost. */
   planets: number[];
   /** Largest apoapsis of its planets (ly). */
@@ -107,17 +114,23 @@ const world = (v: [number, number, number]) => new Vector3(v[0], v[2], -v[1]);
 const num = (v: number | null) => (v === null ? NaN : v);
 
 export function decodePlanets(file: PlanetFile): PlanetCatalogue {
-  const hosts: PlanetHost[] = file.hosts.map(([path, index, name, pos, , hz]) => ({
-    key: `${path}:${index}`,
-    path,
-    index,
-    name,
-    pos: new Vector3(Math.fround(pos[0]), Math.fround(pos[2]), Math.fround(-pos[1])),
-    planets: [],
-    reach: 0,
-    hz: Array.isArray(hz) && hz.length === 4 && hz.every(Number.isFinite) ? hz : null,
-    habitable: false,
-  }));
+  const hosts: PlanetHost[] = file.hosts.map(([path, index, name, pos, , hz, vel]) => {
+    const base = new Vector3(Math.fround(pos[0]), Math.fround(pos[2]), Math.fround(-pos[1]));
+    const v = Array.isArray(vel) && vel.length === 3 ? worldVelocity(vel[0], vel[1], vel[2]) : null;
+    return {
+      key: `${path}:${index}`,
+      path,
+      index,
+      name,
+      pos: base.clone(),
+      base,
+      vel: v ? new Vector3(v[0], v[1], v[2]) : null,
+      planets: [],
+      reach: 0,
+      hz: Array.isArray(hz) && hz.length === 4 && hz.every(Number.isFinite) ? hz : null,
+      habitable: false,
+    };
+  });
   const planets: Planet[] = file.planets.map((r, i) => {
     const [host, name, nameDe, a, e, period, m0, P, Q, radius, mass, eqt, method, year, flags, incl] = r;
     const h = hosts[host];
@@ -130,6 +143,13 @@ export function decodePlanets(file: PlanetFile): PlanetCatalogue {
     };
   });
   return { hosts, planets, byStar: new Map(hosts.map((h, i) => [h.key, i])), sources: file.sources ?? [] };
+}
+
+/** Moves the planet hosts to `dt` years after the epoch (in place: everything keeps the same vectors). */
+export function moveHosts(cat: PlanetCatalogue, dt: number): void {
+  for (const h of cat.hosts) {
+    if (h.vel) h.pos.copy(h.base).addScaledVector(h.vel, dt);
+  }
 }
 
 /** Eccentric anomaly of a mean anomaly (Newton's method). */

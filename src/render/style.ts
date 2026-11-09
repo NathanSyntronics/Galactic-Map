@@ -70,9 +70,9 @@ export const BUILTIN_ATTRIBUTES: BuiltinAttribute[] = [
     value: (n, i) => planetsOf(n, i) || undefined,
     // coloured by kind, not by number: with a potentially habitable planet, with planets, the Sun
     classes: [
+      { id: 'sun', label: 'planetClassSun', color: PLANET_CLASS_COLORS.sun },
       { id: 'habitable', label: 'planetClassHabitable', color: PLANET_CLASS_COLORS.habitable },
       { id: 'planets', label: 'planetClassPlanets', color: PLANET_CLASS_COLORS.planets },
-      { id: 'sun', label: 'theSun', color: PLANET_CLASS_COLORS.sun },
     ],
     classOf: planetClass,
     missingLabel: 'planetClassNone',

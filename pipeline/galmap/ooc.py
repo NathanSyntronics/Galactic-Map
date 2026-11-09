@@ -39,7 +39,8 @@ import numpy as np
 import pandas as pd
 
 from .naming import designation_text
-from .octree import MAX_DEPTH, NAMED_MAX_RANK, ROOT_OFFSET, Node, columns_of, encode_node, importance_of, iter_nodes, octree_order, tie_keys
+from .derive import EPOCH
+from .octree import VEL_SCALE, MAX_DEPTH, NAMED_MAX_RANK, ROOT_OFFSET, Node, columns_of, encode_node, importance_of, iter_nodes, octree_order, tie_keys
 
 log = logging.getLogger(__name__)
 
@@ -60,6 +61,9 @@ RECORD = np.dtype(
         ("x", "<f8"),
         ("y", "<f8"),
         ("z", "<f8"),
+        ("vx", "<f4"),
+        ("vy", "<f4"),
+        ("vz", "<f4"),
         ("absmag", "<f8"),
         ("logl", "<f8"),
         ("teff", "<f8"),
@@ -85,6 +89,10 @@ def to_records(cols: dict[str, np.ndarray], uid0: int) -> tuple[np.ndarray, dict
     n = len(cols["xyz"])
     rec = np.empty(n, RECORD)
     rec["x"], rec["y"], rec["z"] = cols["xyz"][:, 0], cols["xyz"][:, 1], cols["xyz"][:, 2]
+    vel = cols.get("vel")
+    if vel is None:
+        vel = np.full((n, 3), np.nan)
+    rec["vx"], rec["vy"], rec["vz"] = vel[:, 0], vel[:, 1], vel[:, 2]
     for c in ("absmag", "logl", "teff", "dist_err", "system_id", "flags", "planets", "spec_code", "desig_cat", "name_rank"):
         rec[c] = cols[c]
     rec["desig_lo"] = cols["desig_lo"].astype(np.int64) & 0xFFFFFFFF
@@ -113,7 +121,10 @@ def _clean(v):
 def columns_from_records(rec: np.ndarray, texts: dict[int, tuple]) -> dict[str, np.ndarray]:
     """The column arrays encode_node reads, for records and their text fields."""
     n = len(rec)
-    cols: dict[str, np.ndarray] = {"xyz": np.stack([rec["x"], rec["y"], rec["z"]], axis=1)}
+    cols: dict[str, np.ndarray] = {
+        "xyz": np.stack([rec["x"], rec["y"], rec["z"]], axis=1),
+        "vel": np.stack([rec["vx"], rec["vy"], rec["vz"]], axis=1).astype(float),
+    }
     for c in ("absmag", "logl", "teff", "dist_err"):
         cols[c] = rec[c].astype(float)
     for c in ("flags", "spec_code", "desig_cat", "name_rank", "system_id", "planets"):
@@ -643,6 +654,9 @@ class OctreeWriter:
             "generated": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
             "units": "ly",
             "frame": "galactic-heliocentric",
+            # the positions' epoch (Julian year) and the velocities' unit: km/s = stored / velocityScale
+            "epoch": EPOCH,
+            "velocityScale": VEL_SCALE,
             "root": {"center": [float(v) for v in c0], "halfSize": float(h0)},
             "capacity": self.capacity,
             "starCount": int(self.spool.count),

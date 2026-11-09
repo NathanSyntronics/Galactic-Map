@@ -245,6 +245,8 @@ def load_lvdb(refresh: bool = False) -> pd.DataFrame:
             "dm": num(t["distance_modulus"]),
             "e_dm": np.where(np.isfinite(err), err, 0.15),
             "method": [mmap.get(m.split("_")[0], "other") if m else "other" for m in method],
+            # the paper the distance comes from (an ADS bibcode after the first author's name)
+            "ref": t["ref_distance"].fillna("").astype(str) if "ref_distance" in t else "",
             "rhalf": num(t["rhalf"]),  # arcmin, major axis
             "ell": num(t["ellipticity"]),
             "pa": num(t["position_angle"]),
@@ -573,19 +575,21 @@ def galaxy_table(cf4, ungc, lvdb, xsc, labels, codes, wpos) -> pd.DataFrame:
         return out
 
     # --- distance: the most precise of the catalogues
+    no_ref = np.full(n, "", dtype=object)
     cand = [
-        (take(lvdb, li, "dm"), take(lvdb, li, "e_dm"), take(lvdb, li, "method", ""), F_LVDB),
-        (take(ungc, ui, "dm"), take(ungc, ui, "e_dm"), take(ungc, ui, "method", ""), F_UNGC),
-        (take(cf4, ci, "dm"), take(cf4, ci, "e_dm"), take(cf4, ci, "method", ""), F_CF4),
+        (take(lvdb, li, "dm"), take(lvdb, li, "e_dm"), take(lvdb, li, "method", ""), take(lvdb, li, "ref", "") if "ref" in lvdb else no_ref, F_LVDB),
+        (take(ungc, ui, "dm"), take(ungc, ui, "e_dm"), take(ungc, ui, "method", ""), no_ref, F_UNGC),
+        (take(cf4, ci, "dm"), take(cf4, ci, "e_dm"), take(cf4, ci, "method", ""), no_ref, F_CF4),
     ]
     dm = np.full(n, np.nan)
     edm = np.full(n, np.inf)
     method = np.full(n, "", dtype=object)
+    ref = np.full(n, "", dtype=object)
     flags = np.zeros(n, np.int64)
-    for d, e, m, f in cand:
+    for d, e, m, r, f in cand:
         ok = np.isfinite(d)
         better = ok & (np.nan_to_num(e, nan=0.5) < edm)
-        dm[better], edm[better], method[better] = d[better], np.nan_to_num(e[better], nan=0.5), m[better]
+        dm[better], edm[better], method[better], ref[better] = d[better], np.nan_to_num(e[better], nan=0.5), m[better], r[better]
     flags |= np.where(li >= 0, F_LVDB, 0) | np.where(ui >= 0, F_UNGC, 0) | np.where(ci >= 0, F_CF4, 0)
     keep = np.isfinite(dm)
     log.info("galaxies: %d in all, %d without a redshift-independent distance left out", n, int((~keep).sum()))
@@ -673,6 +677,7 @@ def galaxy_table(cf4, ungc, lvdb, xsc, labels, codes, wpos) -> pd.DataFrame:
             "dm": dm,
             "e_dm": edm,
             "method": method,
+            "ref": ref,
             "diam_ly": diam_ly,
             "q": q,
             "pa": pa,
@@ -882,6 +887,18 @@ def milky_way() -> dict:
 # ------------------------------------------------------------------ output
 
 
+def distance_reference(ref) -> tuple[str, str] | None:
+    """The LVDB's distance reference ("Pietrzynski2019Natur.567..200P") as (first author and
+    year, ADS bibcode): ("Pietrzynski 2019", "2019Natur.567..200P")."""
+    if not isinstance(ref, str):
+        return None
+    m = re.fullmatch(r"([A-Za-z][A-Za-z'\-]*?)((\d{4})[A-Za-z&.]\S{14})", ref.strip())
+    if not m:
+        return None
+    author = re.sub(r"(?<=[a-z]{3})(?=[A-Z])", " ", m.group(1))  # MartinezVazquez, not McConnachie
+    return f"{author} {m.group(3)}", m.group(2)
+
+
 def _text(v) -> str | None:
     """A name, or None (pandas stores a missing one as NaN)."""
     return v if isinstance(v, str) and v else None
@@ -894,8 +911,13 @@ def write(g: pd.DataFrame, out: Path) -> dict:
     rows = [milky_way()] + g.to_dict("records")
     buf = bytearray()
     names = []
+    refs = []
     methods = {m: k for k, m in enumerate(METHODS)}
     for k, r in enumerate(rows):
+        # where the catalogue names no method, the paper the distance comes from
+        cite = distance_reference(r.get("ref"))
+        if cite and r["method"] in ("", "other"):
+            refs.append([k, *cite])
         derr = r["e_dm"] * math.log(10) / 5  # relative distance error
         logl = r["logl"]
         buf += RECORD.pack(
@@ -931,6 +953,7 @@ def write(g: pd.DataFrame, out: Path) -> dict:
         "classes": CLASSES,
         "methods": METHODS,
         "names": names,
+        "refs": refs,
         "sources": SOURCES,
         "stats": {
             "galaxies": len(rows),

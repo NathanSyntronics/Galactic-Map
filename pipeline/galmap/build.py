@@ -296,6 +296,8 @@ def build(
     s = derive.physics(s, phot)
     s = systems.assign_systems(s)
     derive.place(s, systems.common_distances(s))
+    # members of a system move together (their own velocities differ by their orbits)
+    systems.common_velocities(s)
     # components at one position: separated by their orbits where ORB6 has them
     try:
         binaries.separate(s, binaries.load(refresh))

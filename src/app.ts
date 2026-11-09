@@ -4,7 +4,8 @@ import { medianJump, tourStart } from './controls/tour';
 import { LABELLED_RADIUS, PRECISE_PX, SPRITE_CORE, labelledWins, pickScore } from './controls/pick';
 import { TapDetector } from './controls/tap';
 import { AttributeStore, type ChangeKind } from './data/attributes';
-import { Flag, designationOf, type NodeData } from './data/format';
+import { Flag, designationOf, setVelocityScale, type NodeData } from './data/format';
+import { DEFAULT_VELOCITY_SCALE, moveTo, starPosition, yearsSinceEpoch } from './data/motion';
 import { decodeCsv } from './data/csv';
 import { NO_LOOKUP, csvNeedsLookup, exportCsv, importCsvAsync, type ImportReport, type StarResolver } from './data/importer';
 import { ECLIPTIC_NORTH, galacticToWorld, worldToGalactic } from './data/galactic';
@@ -76,14 +77,14 @@ import { InfoPanel, displayName, type JumpListing, type StarInfo } from './ui/in
 import { GalaxyCard } from './ui/galaxy-card';
 import { PlanetCard } from './ui/planet-card';
 import { PlanetLayer } from './render/planets';
-import { AU_PER_LY, julianDate, loadPlanets, planetName, type PlanetCatalogue, type PlanetHost } from './data/planets';
+import { AU_PER_LY, julianDate, loadPlanets, moveHosts, planetName, type PlanetCatalogue, type PlanetHost } from './data/planets';
 import { GalaxyFlag, galaxyDesignation, galaxyName, galaxyRank, loadGalaxies, type GalaxyCatalogue } from './data/galaxies';
 import { GalaxyLayer, milkyWayOpacity } from './render/galaxies';
 import { Legend } from './ui/legend';
 import { LabelLayer, TopK, labelUnder, labelledStarNear, milkyWayLabelPos, namedCandidateLimit, onScreen, starPriority, type LabelCandidate } from './ui/labels';
 import { SettingsPanel } from './ui/panel';
 import { RouteBox, type RouteNames } from './ui/route-box';
-import { PlanetTimeControl, formatClockDate } from './ui/time-control';
+import { CLOCK_MAX_JD, CLOCK_MIN_JD, PlanetTimeControl, formatClockDate, yearOfJd } from './ui/time-control';
 import { ProbeCard } from './ui/probe-card';
 import { ProbeLayer } from './render/probes';
 import { scaleClipSpace } from './render/clip';
@@ -105,6 +106,12 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: 
 /** Node path and star index of a StarInfo key ("path:index"). */
 /** From this visible radius on, the view is at galaxy scales: centring on a galaxy keeps the zoom. */
 const GALAXY_SCALE_RADIUS = 20_000;
+/** The view follows a star within this fraction of the visible radius of its centre. */
+const ANCHOR_FRACTION = 0.02;
+/** A typical star speed relative to the Sun (ly/yr, about 50 km/s): when to recompute the jump network. */
+const TYPICAL_SPEED = 1.7e-4;
+/** Nearly all stars nearby are slower than this (ly/yr, 100 km/s): the nodes to load for a date. */
+const DRIFT_SPEED = 3.4e-4;
 /** Below this visible radius (ly) stars may be drawn at their true size (see updateStarDiscs). */
 const DISC_RADIUS = 0.05;
 
@@ -270,6 +277,18 @@ export class App {
   private galaxyCard!: GalaxyCard;
   /** Planets (docs/PLANETS.md): loaded when the view comes close to the stars or the search is used. */
   private readonly planetLayer = new PlanetLayer();
+  /** Years since the positions' epoch the stars were last moved to (NaN: not yet). */
+  private motionDt = NaN;
+  /** The star the view is centred on, followed as it moves. */
+  private anchor: { data: NodeData; i: number } | null = null;
+  private anchorChecked = 0;
+  private anchorFlights = 0;
+  /** When the stars' positions on the CPU were last moved (performance.now()). */
+  private lastMove = -Infinity;
+  /** Years since the epoch the jump network was last computed for. */
+  private jumpDt = 0;
+  /** How far the stars may have drifted at the last node selection (ly). */
+  private lodDrift = 0;
   /** The nearest stars at their true size, close up. */
   private readonly starDiscs = new StarDiscLayer();
   private planetLoad: Promise<PlanetCatalogue | null> | null = null;
@@ -396,6 +415,11 @@ export class App {
     this.timeControl.onChange = (speed) => this.store.set({ planetSpeed: speed });
     this.timeControl.onNow = () => this.setClock(julianDate(Date.now()));
     this.timeControl.onDate = (jd) => this.setClock(jd);
+    // a typed year: the same day and time of day in that year
+    this.timeControl.onYear = (year) => {
+      const jd = this.planetJd();
+      this.setClock(jd + (year - yearOfJd(jd)) * 365.25);
+    };
     this.timeControl.set(this.store.get().planetSpeed);
     this.legend.onClose = () => this.store.set({ legend: false });
     this.planner = new RoutePlanner<OctreeNode>(
@@ -494,6 +518,7 @@ export class App {
   async start(): Promise<void> {
     try {
       this.manifest = await this.fetchManifest();
+      setVelocityScale(this.manifest.velocityScale ?? DEFAULT_VELOCITY_SCALE);
     } catch (err) {
       console.error(err);
       this.showLoadError(err instanceof HttpError && err.status === 404 ? 'noData' : 'loadError');
@@ -927,6 +952,8 @@ export class App {
   // ------------------------------------------------------------------ data
 
   private nodeLoaded(node: OctreeNode, data: NodeData): void {
+    // its stars where they are at the date drawn
+    if (data.vel && Number.isFinite(this.motionDt)) moveTo(data, this.motionDt);
     const r = this.starfield.add(node, data);
     r.points.visible = this.selectedPaths.has(node.path);
     this.candidatesDirty = true;
@@ -950,7 +977,8 @@ export class App {
       // the flight went to the search index's rounded position: on to the exact one, unless the
       // view has been moved since
       const t = this.searchTarget;
-      if (t && t.hit === pending) this.nav.retarget(t.pos, info.pos, 0.002);
+      // (far from the positions' epoch the star has moved from where the search index has it)
+      if (t && t.hit === pending) this.nav.retarget(t.pos, info.pos, 0.002 + DRIFT_SPEED * Math.abs(this.motionDt || 0));
       this.searchTarget = null;
     }
     this.planner.nodeArrived();
@@ -978,11 +1006,13 @@ export class App {
     // the jump network also needs the stars just outside the visible sphere (faded out by the
     // shader), but only when all of them fit the budget: it never takes stars from the sphere
     const margin = s.jumps && !this.routeOnly && !this.jumpBlocked ? jumpMargin(s.jumpRange) : 0;
+    // far from the epoch the stars in view may come from farther away: the nodes they started in
+    const drift = this.lodDrift = DRIFT_SPEED * Math.abs(Number.isFinite(this.motionDt) ? this.motionDt : 0);
     const { nodes: selected, wide } = hidden
       ? { nodes: [] as OctreeNode[], wide: false }
       : selectWithMargin(
           this.octree,
-          { cameraPos: this.camera.position, target: this.nav.target, radius: s.radius, budget: viewBudget, pixelsPerUnitAtUnitDistance: pxPerUnit },
+          { cameraPos: this.camera.position, target: this.nav.target, radius: s.radius + drift, budget: viewBudget, pixelsPerUnitAtUnitDistance: pxPerUnit },
           margin,
         );
     const before = this.selectedPaths;
@@ -1221,7 +1251,7 @@ export class App {
       const cam = this.camera.position;
       const v = new Vector3();
       for (const rn of this.starfield.visibleNodes()) {
-        if (rn.node.box.distanceToPoint(target) > s.radius) continue;
+        if (rn.node.box.distanceToPoint(target) > s.radius + rn.data.vmax * Math.abs(rn.data.movedTo)) continue;
         const d = rn.data;
         const p = d.positions;
         for (let i = 0; i < d.count; i++) {
@@ -1394,7 +1424,13 @@ export class App {
     const c = this.planetClock;
     const now = performance.now();
     const speed = this.store.get().planetSpeed;
-    const current = c.jd + ((now - c.ms) / 1000) * daysPerSecond(c.speed);
+    let current = c.jd + ((now - c.ms) / 1000) * daysPerSecond(c.speed);
+    // the clock stops at the ends of its range (two million years either way)
+    if (current > CLOCK_MAX_JD || current < CLOCK_MIN_JD) {
+      current = Math.min(Math.max(current, CLOCK_MIN_JD), CLOCK_MAX_JD);
+      c.jd = current;
+      c.ms = now;
+    }
     if (speed !== c.speed) {
       c.jd = current;
       c.ms = now;
@@ -1403,10 +1439,108 @@ export class App {
     return current;
   }
 
+  /**
+   * Per frame: the stars to the date drawn (years since the positions' epoch). The shader moves
+   * them on the GPU; their positions on the CPU (labels, picking, the jump network) follow once
+   * they are off by a fraction of a pixel, the planet hosts and the label anchors in double
+   * precision. The view follows the star it is centred on.
+   */
+  private updateMotion(s: Settings): void {
+    const dt = yearsSinceEpoch(this.planetJd());
+    this.starfield.setTime(dt);
+    const prev = this.motionDt;
+    if (dt === prev) return;
+    this.motionDt = dt;
+    // a new flight: the star at its destination (where the star is right now) is followed
+    if (this.nav.flights !== this.anchorFlights) {
+      this.anchorFlights = this.nav.flights;
+      this.anchor = null;
+      this.findAnchor(s, Number.isFinite(prev) ? prev : dt, true);
+    }
+    const a = this.anchor;
+    if (a && Number.isFinite(prev) && !this.nav.touring) {
+      const before = starPosition(a.data, a.i, prev, new Vector3());
+      // the user moved away from it: the view stays
+      if (before.distanceTo(this.nav.destination) > this.anchorReach(s, before)) this.anchor = null;
+      else this.nav.translate(starPosition(a.data, a.i, dt, new Vector3()).sub(before));
+    }
+    // (a few times a second at most: the GPU moves the stars smoothly, the labels follow below)
+    const tol = Math.max(s.radius * 2e-4, 1e-10);
+    let moved = false;
+    const t = performance.now();
+    if (t - this.lastMove > 140) {
+      for (const rn of this.starfield.all()) {
+        const d = rn.data;
+        if (d.vel && d.vmax * Math.abs(dt - d.movedTo) > tol) {
+          moveTo(d, dt);
+          moved = true;
+        }
+      }
+      if (moved) this.lastMove = t;
+    }
+    const cat = this.planetLayer.catalogue;
+    if (cat) moveHosts(cat, dt);
+    // the labels follow at once (the candidates are rebuilt a few times a second)
+    for (const c of this.labels.candidates) {
+      if (c.ref && !c.route && !c.pinned) starPosition(c.ref.data, c.ref.index, dt, c.pos);
+    }
+    const sel = this.selected;
+    if (sel) {
+      const { path, i } = parseStarKey(sel.key);
+      const d = this.loader?.get(path);
+      if (d && i < d.count) {
+        starPosition(d, i, dt, sel.pos);
+        this.selMarker.show(sel.pos, this.renderer.getPixelRatio());
+      }
+    }
+    // the nodes to load: farther out the farther the stars may have come
+    if (Math.abs(DRIFT_SPEED * Math.abs(dt) - this.lodDrift) > 0.1 * s.radius) this.lodDirty = true;
+    if (moved) {
+      this.candidatesDirty = true;
+      // the jump network is computed again once the stars have moved by a few percent of the view
+      if (s.jumps && Math.abs(dt - this.jumpDt) * TYPICAL_SPEED > 0.03 * s.radius) {
+        this.jumpDt = dt;
+        this.jumpDirty = true;
+      }
+    }
+    this.findAnchor(s, dt);
+  }
+
+  /** How close to the view centre (or a flight's destination) a star is followed. */
+  private anchorReach(s: Settings, pos: Vector3): number {
+    // (the float32 positions' rounding far from the Sun)
+    return Math.max(s.radius * ANCHOR_FRACTION, pos.length() * 3e-7, 1e-12);
+  }
+
+  /** The star the view is centred on (within a few percent of the radius), to follow as it moves. */
+  private findAnchor(s: Settings, dt: number, now = false): void {
+    const t = performance.now();
+    if (!now && (this.anchor || t - this.anchorChecked < 250)) return;
+    this.anchorChecked = t;
+    const target = this.nav.destination;
+    const r = this.anchorReach(s, target);
+    let best: { data: NodeData; i: number } | null = null;
+    let bestD = r;
+    const v = new Vector3();
+    for (const rn of this.starfield.visibleNodes()) {
+      const d = rn.data;
+      if (!d.vel || rn.node.box.distanceToPoint(target) > r + d.vmax * Math.abs(dt) + 1e-9) continue;
+      for (let i = 0; i < d.count; i++) {
+        if (rn.sizes[i] <= 0) continue;
+        const dist = starPosition(d, i, dt, v).distanceTo(target);
+        if (dist < bestD) {
+          bestD = dist;
+          best = { data: d, i };
+        }
+      }
+    }
+    this.anchor = best;
+  }
+
   /** Sets the clock to a date (Julian); it runs on from there at the chosen speed. */
   private setClock(jd: number): void {
     const c = this.planetClock;
-    c.jd = jd;
+    c.jd = Math.min(Math.max(jd, CLOCK_MIN_JD), CLOCK_MAX_JD);
     c.ms = performance.now();
     c.speed = this.store.get().planetSpeed;
     this.candidatesDirty = true;
@@ -1437,13 +1571,14 @@ export class App {
       this.probeCard.update(jd, this.clockText(jd));
     }
     if (this.selectedPlanet !== null) this.planetCard.setDate(this.clockText(jd));
-    // the clock while planets or spacecraft can be made out (orbits as large as for their labels;
-    // it goes when they fade, so that it does not flicker at the edge)
+    // the clock whenever the stars (which move with it), planets or spacecraft can be seen: not at
+    // galaxy scales (planets and spacecraft as large as for their labels; with some hysteresis)
     const drawn = this.planetLayer.drawn;
     const probes = this.probeLayer.drawn;
+    const stars = !starsHidden(s.radius);
     const shown = this.timeShown
-      ? (s.planets && drawn.some((d) => d.alpha >= 0.3 && d.orbitPx >= 10)) || probes.some((d) => d.alpha >= 0.3)
-      : (s.planets && drawn.some((d) => d.alpha >= 0.5 && d.orbitPx >= 16)) || probes.some((d) => d.alpha >= 0.5);
+      ? stars || (s.planets && drawn.some((d) => d.alpha >= 0.3 && d.orbitPx >= 10)) || probes.some((d) => d.alpha >= 0.3)
+      : stars || (s.planets && drawn.some((d) => d.alpha >= 0.5 && d.orbitPx >= 16)) || probes.some((d) => d.alpha >= 0.5);
     if (shown !== this.timeShown) {
       this.timeShown = shown;
       this.timeControl.show(shown);
@@ -1561,7 +1696,7 @@ export class App {
       const d = rn.data;
       const p = d.positions;
       // quick reject: node entirely outside the sphere
-      if (rn.node.box.distanceToPoint(target) > s.radius) continue;
+      if (rn.node.box.distanceToPoint(target) > s.radius + rn.data.vmax * Math.abs(rn.data.movedTo)) continue;
       for (let i = 0; i < d.count; i++) {
         const x = p[3 * i];
         const y = p[3 * i + 1];
@@ -1861,7 +1996,7 @@ export class App {
     for (const rn of this.starfield.visibleNodes()) {
       const d = rn.data;
       const p = d.positions;
-      if (rn.node.box.distanceToPoint(target) > s.radius) continue;
+      if (rn.node.box.distanceToPoint(target) > s.radius + rn.data.vmax * Math.abs(rn.data.movedTo)) continue;
       for (let i = 0; i < d.count; i++) {
         if (rn.sizes[i] <= 0) continue;
         const x = p[3 * i];
@@ -2000,7 +2135,7 @@ export class App {
     };
     let net: JumpNetwork;
     if (this.jumpRegion) {
-      const sources = this.starfield.visibleNodes().filter((rn) => rn.node.box.distanceToPoint(centre) <= region);
+      const sources = this.starfield.visibleNodes().filter((rn) => rn.node.box.distanceToPoint(centre) <= region + rn.data.vmax * Math.abs(rn.data.movedTo));
       net = computeNetwork(sources, opt);
       if (net.overflow === 'places' || net.overflow === 'pairs') {
         // the region's extra stars are of no use: the level of detail goes back to the sphere
@@ -2679,6 +2814,7 @@ export class App {
     this.lastTime = now;
     this.nav.update(dt);
     this.radiusFollowsZoom();
+    this.updateMotion(this.store.get());
 
     const s = this.store.get();
     const dist = this.nav.distance;

@@ -15,8 +15,9 @@ describe('shared links with a date', () => {
     expect(readLink(params('t=2461354.5')).clock).toEqual({ jd: 2461354.5 });
   });
 
-  it('leaves out dates beyond the years 1000 to 3000 and bad speeds', () => {
-    expect(readLink(params('t=99')).clock).toBeUndefined();
+  it('leaves out dates beyond two million years and bad speeds', () => {
+    expect(readLink(params('t=-1e9')).clock).toBeUndefined();
+    expect(readLink(params('t=-5000000')).clock).toEqual({ jd: -5000000 });
     expect(readLink(params('t=abc')).clock).toBeUndefined();
     expect(readLink(params('t=2461354.5&ts=-1')).clock).toEqual({ jd: 2461354.5 });
   });
