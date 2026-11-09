@@ -3,6 +3,7 @@ import { attrName, normalizeColor, valueFromLabel, valueLabel, type AttrValue, t
 import { parseNumber } from '../data/csv';
 import { Flag, UNKNOWN_I16, distErrPercent, spectralClassOf } from '../data/format';
 import { LY_PER_PC, galacticLB, worldToGalactic } from '../data/galactic';
+import { LY_PER_YR_PER_KMS } from '../data/motion';
 import { formatLy, formatNumber, getLang, localName, numberText, t } from '../i18n';
 
 export interface StarInfo {
@@ -24,6 +25,37 @@ export interface StarInfo {
   systemPrimary: string | null;
   /** Known exoplanets. */
   planets: number;
+  /** Heliocentric velocity, world frame, ly/yr (null: unknown). */
+  vel?: Vector3 | null;
+}
+
+/** The card's tabs: the basics (a small card), the position and motion, the star, attributes, jump links. */
+export const CARD_TABS = ['basics', 'position', 'properties', 'attributes', 'jumps'] as const;
+export type CardTab = (typeof CARD_TABS)[number];
+const CARD_TAB_KEYS = {
+  basics: 'cardBasics',
+  position: 'cardPosition',
+  properties: 'cardProperties',
+  attributes: 'cardAttributes',
+  jumps: 'cardJumps',
+} as const;
+const CARD_TAB_STORAGE = 'galactic-map:card-tab';
+
+function loadCardTab(): CardTab {
+  try {
+    const v = localStorage.getItem(CARD_TAB_STORAGE);
+    return (CARD_TABS as readonly string[]).includes(v ?? '') ? (v as CardTab) : 'basics';
+  } catch {
+    return 'basics';
+  }
+}
+
+function saveCardTab(tab: CardTab): void {
+  try {
+    localStorage.setItem(CARD_TAB_STORAGE, tab);
+  } catch {
+    // (private mode: the tab is not remembered)
+  }
 }
 
 /** Jump links of the selected star's place, nearest first. */
@@ -74,6 +106,10 @@ export class InfoPanel {
   private sunRow: HTMLElement | null = null;
   private lbRow: HTMLElement | null = null;
   private xyzRow: HTMLElement | null = null;
+  private speedRow: HTMLElement | null = null;
+  private radialRow: HTMLElement | null = null;
+  /** The tab shown (remembered in the browser). */
+  private tab: CardTab = loadCardTab();
   onClose: () => void = () => {};
   onFlyTo: (info: StarInfo) => void = () => {};
   /** Flies close to a star with planets (null: the planets are not known). */
@@ -119,19 +155,39 @@ export class InfoPanel {
    * rebuilt, so clicks and keyboard focus on its buttons survive while the view moves.
    */
   updateView(target: Vector3): void {
-    const row = this.centreRow;
-    if (!this.info || !row) return;
-    if (this.sunRow) {
-      const [gx, gy, gz] = worldToGalactic(this.info.pos);
-      const set = (e: HTMLElement | null, text: string) => {
-        if (e && e.textContent !== text) e.textContent = text;
-      };
-      set(this.sunRow, sunDistanceText(Math.hypot(gx, gy, gz)));
-      const { l, b } = galacticLB(this.info.pos);
+    const info = this.info;
+    if (!info) return;
+    const set = (e: HTMLElement | null, text: string) => {
+      if (e && e.textContent !== text) e.textContent = text;
+    };
+    const [gx, gy, gz] = worldToGalactic(info.pos);
+    const dSun = Math.hypot(gx, gy, gz);
+    set(this.sunRow, sunDistanceText(dSun));
+    if (this.lbRow || this.xyzRow) {
+      const { l, b } = galacticLB(info.pos);
       set(this.lbRow, lbText(l, b));
       set(this.xyzRow, xyzText(gx, gy, gz));
     }
-    const d = this.info.pos.distanceTo(target);
+    if (this.speedRow || this.radialRow) {
+      const v = info.vel;
+      const rvKnown = (info.flags & Flag.RV_KNOWN) !== 0;
+      if (!v) {
+        set(this.speedRow, t('unknown'));
+        set(this.radialRow, t('unknown'));
+      } else {
+        const speed = v.length() / LY_PER_YR_PER_KMS;
+        // without a radial velocity only the motion across the line of sight is known
+        set(this.speedRow, rvKnown ? `${formatNumber(speed, 1)} km/s` : t('speedAtLeast', { v: formatNumber(speed, 1) }));
+        // the change of the distance: the velocity along the line of sight now (it changes as the star passes)
+        const radial = dSun > 0 ? v.dot(info.pos) / info.pos.length() / LY_PER_YR_PER_KMS : 0;
+        const sign = radial > 0.05 ? '+' : radial < -0.05 ? '−' : '';
+        const text = `${sign}${formatNumber(Math.abs(radial), 1)} km/s (${t(radial < -0.05 ? 'approaching' : radial > 0.05 ? 'receding' : 'passing')})`;
+        set(this.radialRow, rvKnown ? text : t('distanceChangeUnknown'));
+      }
+    }
+    const row = this.centreRow;
+    if (!row) return;
+    const d = info.pos.distanceTo(target);
     const show = d > 0.01;
     const text = show ? formatLy(d) : '';
     if (row.dd.textContent !== text) row.dd.textContent = text;
@@ -203,16 +259,26 @@ export class InfoPanel {
     head.append(titles, close);
     this.root.appendChild(head);
 
-    const tags: string[] = [];
-    if (info.flags & Flag.BROWN_DWARF) tags.push(t('brownDwarf'));
-    if (info.flags & Flag.WHITE_DWARF) tags.push(t('whiteDwarf'));
-    if (info.flags & Flag.GIANT) tags.push(t('giant'));
-    if (info.flags & Flag.VARIABLE) tags.push(t('variable'));
-    if (tags.length) {
-      const tagRow = el('div', 'tags');
-      for (const tag of tags) tagRow.appendChild(el('span', 'tag', tag));
-      this.root.appendChild(tagRow);
+    // tabs: the basics (small), the position, the star's properties, attributes, jump links
+    const tab = this.editing ? 'attributes' : this.tab;
+    const bar = el('div', 'card-tabs');
+    bar.setAttribute('role', 'tablist');
+    for (const id of CARD_TABS) {
+      const b = el('button', 'card-tab', t(CARD_TAB_KEYS[id]));
+      b.type = 'button';
+      b.setAttribute('role', 'tab');
+      b.setAttribute('aria-selected', String(id === tab));
+      b.classList.toggle('active', id === tab);
+      b.addEventListener('click', () => {
+        if (id === this.tab && !this.editing) return;
+        this.tab = id;
+        this.editing = false;
+        saveCardTab(id);
+        this.render(target);
+      });
+      bar.appendChild(b);
     }
+    this.root.appendChild(bar);
 
     const dl = el('dl');
     const row = (k: string, v: string) => {
@@ -221,55 +287,75 @@ export class InfoPanel {
       dl.append(dt, dd);
       return { dt, dd };
     };
-    const [gx, gy, gz] = worldToGalactic(info.pos);
-    const dSun = Math.hypot(gx, gy, gz);
-    this.sunRow = this.lbRow = this.xyzRow = null;
-    if (!(info.flags & Flag.SUN)) {
-      // follows the star as it moves (the clock)
-      this.sunRow = row(t('distanceFromSun'), sunDistanceText(dSun)).dd;
-      this.sunRow.setAttribute('aria-live', 'off');
-    }
-    this.centreRow = row(t('distanceFromCentre'), '');
-    // changes continuously while the view moves: not announced by screen readers
-    this.centreRow.dd.setAttribute('aria-live', 'off');
-    this.updateView(target);
-    const err = distErrPercent(info.distErr);
-    if (err !== null && !(info.flags & Flag.SUN)) {
-      const est = info.flags & Flag.DIST_NO_PARALLAX ? ` (${t('distEstimated')})` : '';
-      row(t('distUncertainty'), (err < 0.5 ? '< 0.5 %' : `± ${formatNumber(err, err < 10 ? 1 : 0)} %`) + est);
-    }
-    if (!(info.flags & Flag.SUN)) {
-      const { l, b } = galacticLB(info.pos);
-      // (both follow the star as it moves)
-      this.lbRow = row(t('galacticCoords'), lbText(l, b)).dd;
-      this.xyzRow = row(t('galacticXYZ'), xyzText(gx, gy, gz)).dd;
-      this.lbRow.setAttribute('aria-live', 'off');
-      this.xyzRow.setAttribute('aria-live', 'off');
-    }
-    const spec = info.specType ?? spectralClassOf(info.spec);
-    row(t('spectralType'), spec ?? t('unknown'));
-    if (info.teff > 0) row(t('temperature'), `${formatNumber(info.teff)} K`);
-    if (info.absMag !== UNKNOWN_I16) row(t('absMag'), formatNumber(info.absMag / 100, 2));
-    if (info.logL !== UNKNOWN_I16) {
+    // a row that follows the star as it moves (the clock): not announced by screen readers
+    const live = (k: string) => {
+      const dd = row(k, '').dd;
+      dd.setAttribute('aria-live', 'off');
+      return dd;
+    };
+    const sun = (info.flags & Flag.SUN) !== 0;
+    this.sunRow = this.lbRow = this.xyzRow = this.speedRow = this.radialRow = null;
+    const luminosity = () => {
+      if (info.logL === UNKNOWN_I16) return;
       const L = Math.pow(10, info.logL / 1000);
       const digits = L >= 100 ? 0 : L >= 1 ? 2 : Math.min(6, Math.ceil(-Math.log10(L)) + 2);
       row(t('luminosity'), `${formatNumber(L, digits)} L☉`);
+    };
+    if (tab === 'basics') {
+      if (!sun) {
+        this.sunRow = live(t('distanceFromSun'));
+        this.radialRow = live(t('distanceChange'));
+      }
+      luminosity();
+      this.root.appendChild(dl);
+    } else if (tab === 'position') {
+      if (!sun) this.sunRow = live(t('distanceFromSun'));
+      this.centreRow = row(t('distanceFromCentre'), '');
+      this.centreRow.dd.setAttribute('aria-live', 'off');
+      const err = distErrPercent(info.distErr);
+      if (err !== null && !sun) {
+        const est = info.flags & Flag.DIST_NO_PARALLAX ? ` (${t('distEstimated')})` : '';
+        row(t('distUncertainty'), (err < 0.5 ? '< 0.5 %' : `± ${formatNumber(err, err < 10 ? 1 : 0)} %`) + est);
+      }
+      if (!sun) {
+        this.lbRow = live(t('galacticCoords'));
+        this.xyzRow = live(t('galacticXYZ'));
+        this.speedRow = live(t('speedToSun'));
+        this.radialRow = live(t('distanceChange'));
+      }
+      this.root.appendChild(dl);
+    } else if (tab === 'properties') {
+      const tags: string[] = [];
+      if (info.flags & Flag.BROWN_DWARF) tags.push(t('brownDwarf'));
+      if (info.flags & Flag.WHITE_DWARF) tags.push(t('whiteDwarf'));
+      if (info.flags & Flag.GIANT) tags.push(t('giant'));
+      if (info.flags & Flag.VARIABLE) tags.push(t('variable'));
+      if (tags.length) {
+        const tagRow = el('div', 'tags');
+        for (const tag of tags) tagRow.appendChild(el('span', 'tag', tag));
+        this.root.appendChild(tagRow);
+      }
+      const spec = info.specType ?? spectralClassOf(info.spec);
+      row(t('spectralType'), spec ?? t('unknown'));
+      if (info.teff > 0) row(t('temperature'), `${formatNumber(info.teff)} K`);
+      if (info.absMag !== UNKNOWN_I16) row(t('absMag'), formatNumber(info.absMag / 100, 2));
+      luminosity();
+      if (info.planets > 0) row(t('knownPlanets'), String(info.planets));
+      if (info.system) {
+        row(t('system'), `${localName(info.system.nameEn, info.system.nameDe)} (${info.system.members} ${t('systemMembers')})`);
+      }
+      if (info.alt.length) row(t('otherNames'), info.alt.join(' · '));
+      row(t('source'), sourceText(info.flags));
+      this.root.appendChild(dl);
+    } else if (tab === 'attributes') {
+      this.root.appendChild(this.editing ? this.attributeForm(info, target) : this.attributeList(info, target));
+    } else {
+      const jumps = el('div', 'attr-box jump-box');
+      this.jumpBox = jumps;
+      this.renderJumps(info, jumps);
+      this.root.appendChild(jumps);
     }
-    if (info.planets > 0) row(t('knownPlanets'), String(info.planets));
-    if (info.system) {
-      row(
-        t('system'),
-        `${localName(info.system.nameEn, info.system.nameDe)} (${info.system.members} ${t('systemMembers')})`,
-      );
-    }
-    if (info.alt.length) row(t('otherNames'), info.alt.join(' · '));
-    row(t('source'), sourceText(info.flags));
-    this.root.appendChild(dl);
-    this.root.appendChild(this.editing ? this.attributeForm(info, target) : this.attributeList(info, target));
-    const jumps = el('div', 'attr-box jump-box');
-    this.jumpBox = jumps;
-    this.renderJumps(info, jumps);
-    this.root.appendChild(jumps);
+    this.updateView(target);
 
     const actions = el('div', 'info-actions');
     const fly = el('button', 'btn', t('flyTo'));

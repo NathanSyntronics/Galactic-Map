@@ -58,6 +58,8 @@ export interface PlannerHost<N extends CorridorNode> {
   want(nodes: N[]): void;
   /** Decoded data of a loaded node. */
   data(path: string): NodeData | undefined;
+  /** Brings a node's stars to the date drawn (the stars move; the planner keeps nodes the view let go). */
+  fresh?(data: NodeData): void;
   /** The node could not be loaded (the loader gave up). */
   failed(path: string): boolean;
   /** Lets the loader try a given-up node again. */
@@ -593,7 +595,13 @@ export class RoutePlanner<N extends CorridorNode> {
         throw new LoadFailed(failed.length);
       }
       this.host.want(missing);
-      if (!missing.length) return;
+      if (!missing.length) {
+        for (const n of nodes) {
+          const c = this.cache.get(n.path);
+          if (c) this.host.fresh?.(c.data);
+        }
+        return;
+      }
       this.setStatus({ kind: 'loading', width, loaded: nodes.length - missing.length, total: nodes.length, loadedBytes, totalBytes });
       await this.arrival(signal);
     }

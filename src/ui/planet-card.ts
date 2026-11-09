@@ -1,6 +1,9 @@
 import { PlanetFlag, planetKind, planetName, type PlanetCatalogue } from '../data/planets';
 import { formatKm, formatNumber, getLang, t, type MessageKey } from '../i18n';
 
+/** The Earth's mean radius (km). */
+const EARTH_RADIUS_KM = 6371;
+
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
@@ -89,13 +92,16 @@ export class PlanetCard {
     const p = cat.planets[i];
     const lang = getLang();
     const solar = (p.flags & PlanetFlag.SOLAR_SYSTEM) !== 0;
+    const parent = p.parent !== null ? cat.planets[p.parent] : null;
 
     const head = el('div', 'info-head');
     const titles = el('div');
     const title = el('h2', '', planetName(p, lang));
     title.tabIndex = -1;
     titles.appendChild(title);
-    if (this.hostName) titles.appendChild(el('div', 'sub', this.hostName));
+    // a moon: its planet; a planet: its star
+    if (parent) titles.appendChild(el('div', 'sub', planetName(parent, lang)));
+    else if (this.hostName) titles.appendChild(el('div', 'sub', this.hostName));
     const close = el('button', 'icon-btn', '×');
     close.setAttribute('aria-label', t('close'));
     close.addEventListener('click', () => this.onClose());
@@ -103,7 +109,7 @@ export class PlanetCard {
     this.root.appendChild(head);
 
     const tags = el('div', 'tags');
-    tags.appendChild(el('span', 'tag', t(KIND_KEYS[planetKind(p)])));
+    tags.appendChild(el('span', 'tag', parent ? t('moonOf', { planet: planetName(parent, lang) }) : t(KIND_KEYS[planetKind(p)])));
     if (Number.isFinite(p.eqt) && p.eqt > 1300) tags.appendChild(el('span', 'tag', t('planetHot')));
     if (solar) tags.appendChild(el('span', 'tag', t('solarSystem')));
     if (p.flags & PlanetFlag.POTENTIALLY_HABITABLE) tags.appendChild(el('span', 'tag habitable', t('potentiallyHabitable')));
@@ -111,25 +117,30 @@ export class PlanetCard {
 
     const dl = el('dl');
     const row = (k: string, v: string) => dl.append(el('dt', '', k), el('dd', '', v));
-    // below 1 AU also in kilometres (TRAPPIST-1 b: 0.0115 AU, 1.72 million km)
-    row(t('semiMajorAxis'), `${sig(p.a)} ${t('au')}${p.a < 1 ? ` (${formatKm(p.a * KM_PER_AU)})` : ''}`);
+    // below 1 AU also in kilometres (TRAPPIST-1 b: 0.0115 AU, 1.72 million km); a moon's in km
+    if (parent) row(t('semiMajorAxis'), formatKm(p.a * KM_PER_AU));
+    else row(t('semiMajorAxis'), `${sig(p.a)} ${t('au')}${p.a < 1 ? ` (${formatKm(p.a * KM_PER_AU)})` : ''}`);
     row(t('eccentricity'), p.flags & PlanetFlag.ECCENTRICITY_ASSUMED ? t('assumedCircular') : sig(p.e));
     // where the orbit lies relative to the star's habitable zone (its narrower limits shown)
-    const hz = cat.hosts[p.host].hz;
+    const hz = parent ? null : cat.hosts[p.host].hz;
     if (hz) {
       const where: MessageKey =
         p.flags & PlanetFlag.HABITABLE_ZONE_CONSERVATIVE ? 'hzInside' : p.flags & PlanetFlag.HABITABLE_ZONE ? 'hzEdge' : p.a < hz[1] ? 'hzInner' : 'hzOuter';
       row(t('habitableZone'), `${t(where)} · ${sig(hz[1])}–${sig(hz[2])} ${t('au')}`);
     }
     row(t('orbitalPeriod'), p.period >= 1000 ? t('yearsN', { n: sig(p.period / 365.25) }) : t('daysN', { n: sig(p.period) }));
-    if (Number.isFinite(p.radius)) {
+    if (parent) {
+      // a moon's radius in km (the small ones without a measured size: about a few km)
+      if (!(p.flags & PlanetFlag.RADIUS_ESTIMATED)) row(t('planetRadius'), `${formatNumber(p.radius * EARTH_RADIUS_KM, p.radius * EARTH_RADIUS_KM < 100 ? 1 : 0)} km`);
+    } else if (Number.isFinite(p.radius)) {
       row(t('planetRadius'), `${sig(p.radius)} R⊕${p.flags & PlanetFlag.RADIUS_ESTIMATED ? ` (${t('estimatedFromMass')})` : ''}`);
     }
     if (Number.isFinite(p.mass)) row(t('planetMass'), `${sig(p.mass)} M⊕`);
     if (Number.isFinite(p.eqt)) row(t('eqTemperature'), `${formatNumber(p.eqt, 0)} K`);
     if (Number.isFinite(p.incl) && !(p.flags & PlanetFlag.INCLINATION_ASSUMED)) {
       // (the Earth's -0.00002 deg: 0)
-      row(solar ? t('inclinationEcliptic') : t('inclinationSky'), `${sig(Math.abs(p.incl) < 0.005 ? 0 : p.incl)}°`);
+      // (a moon's to its reference plane: the ecliptic, its planet's equator or its Laplace plane)
+      row(parent ? t('inclinationMoon') : solar ? t('inclinationEcliptic') : t('inclinationSky'), `${sig(Math.abs(p.incl) < 0.005 ? 0 : p.incl)}°`);
     }
     if (!solar && (p.method || p.year)) {
       const method = lang === 'de' ? (METHODS_DE[p.method] ?? p.method) : p.method;

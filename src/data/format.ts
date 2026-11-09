@@ -24,6 +24,8 @@ export const Flag = {
   SRC_GAIA: 1 << 13,
   /** A planet host from the NASA Exoplanet Archive that no other catalogue has. */
   SRC_EXOPLANET: 1 << 14,
+  /** The velocity includes a measured radial velocity (its own or its system's). */
+  RV_KNOWN: 1 << 15,
 } as const;
 
 export const DesigCat = {

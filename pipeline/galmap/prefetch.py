@@ -18,7 +18,7 @@ log = logging.getLogger(__name__)
 
 
 def steps() -> list[tuple[str, Callable[[], object]]]:
-    from . import binaries, galaxies, planets, probes
+    from . import binaries, galaxies, moons, planets, probes
     from .sources import athyg, census20, gaia, gcns, hyg, iau, simbad, wikidata
 
     def gaia_core() -> None:
@@ -39,6 +39,7 @@ def steps() -> list[tuple[str, Callable[[], object]]]:
         ("Wikidata stars", wikidata.load),
         ("IAU names", iau.load),
         ("NASA Exoplanet Archive", planets.load),
+        ("Moons (JPL)", moons.load),
         ("Cosmicflows-4", galaxies.load_cf4),
         ("UNGC", galaxies.load_ungc),
         ("LVDB", galaxies.load_lvdb),

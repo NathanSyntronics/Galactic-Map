@@ -28,6 +28,7 @@ import {
   AU_PER_LY,
   EARTH_RADIUS_LY,
   PlanetFlag,
+  bodyOffset,
   orbitPoint,
   planetKind,
   planetOffset,
@@ -63,8 +64,21 @@ const KIND_COLORS = {
   gasGiant: '#e2c08f',
 };
 
+/** The larger moons' colours (the others grey). */
+const MOON_COLORS: Record<string, string> = {
+  Moon: '#cfcac2',
+  Io: '#e8d27a',
+  Europa: '#ddd2bd',
+  Ganymede: '#b9ac9a',
+  Callisto: '#8e8579',
+  Titan: '#e0a85a',
+  Enceladus: '#eef2f4',
+  Triton: '#d9c6c2',
+};
+
 /** Colour of a planet: the Solar System's their own, the others by kind; hot ones redder. */
 export function planetColor(p: Planet): string {
+  if (p.flags & PlanetFlag.MOON) return MOON_COLORS[p.name] ?? '#b3aea6';
   if (p.flags & PlanetFlag.SOLAR_SYSTEM && SOLAR_COLORS[p.name]) return SOLAR_COLORS[p.name];
   if (Number.isFinite(p.eqt) && p.eqt > 1300) return '#ff9a6a';
   return KIND_COLORS[planetKind(p)];
@@ -79,6 +93,11 @@ export function planetSymbolFactor(radiusEarth: number): number {
   return 0.014 * Math.pow(r, 0.33);
 }
 
+/** True radius of a planet or moon (ly); unknown ones as a mini-Neptune. */
+export function trueRadius(p: Planet): number {
+  return (Number.isFinite(p.radius) ? p.radius : 2) * EARTH_RADIUS_LY;
+}
+
 /** Drawn radius (ly) of a planet at a visible radius: the symbol, at least its true size, at most a third of its periapsis. */
 export function planetDrawRadius(p: Planet, viewRadius: number): number {
   const trueR = (Number.isFinite(p.radius) ? p.radius : 2) * EARTH_RADIUS_LY;
@@ -91,6 +110,15 @@ function smoothstep(a: number, b: number, x: number): number {
   return t * t * (3 - 2 * t);
 }
 
+/** A planet's moons: their orbits and symbols in a group at the planet. */
+interface MoonView {
+  group: Group;
+  orbits: LineLoop<BufferGeometry, LineBasicMaterial>[];
+  sprites: Sprite[];
+  /** Their indices in the catalogue. */
+  ids: number[];
+}
+
 interface SystemView {
   group: Group;
   orbits: LineLoop<BufferGeometry, LineBasicMaterial>[];
@@ -99,6 +127,8 @@ interface SystemView {
   zones: Mesh<RingGeometry, MeshBasicMaterial>[];
   /** Lines along the inner and outer edge of the wider band. */
   edges: LineLoop<BufferGeometry, LineBasicMaterial>[];
+  /** The moons of its planets, by the planet's place in the system. */
+  moons: Map<number, MoonView>;
   lastUsed: number;
 }
 
@@ -138,6 +168,8 @@ export class PlanetLayer {
   drawn: DrawnPlanet[] = [];
   /** Draw the habitable zones. */
   showZones = true;
+  private readonly tmpPlanet = new Vector3();
+  private readonly tmpMoon = new Vector3();
 
   constructor() {
     this.group.renderOrder = 4;
@@ -154,6 +186,15 @@ export class PlanetLayer {
     this.live.clear();
   }
 
+  /** World position of planet (or moon) i at a date with its star moved `dt` years from the epoch. */
+  positionAt(i: number, jd: number, dt: number, out = new Vector3()): Vector3 {
+    const cat = this.cat!;
+    const host = cat.hosts[cat.planets[i].host];
+    bodyOffset(cat, i, jd, out).add(host.base);
+    if (host.vel) out.addScaledVector(host.vel, dt);
+    return out;
+  }
+
   /** Live world position of planet i (the object labels keep; updated while it is drawn). */
   livePosition(i: number): Vector3 {
     let v = this.live.get(i);
@@ -168,7 +209,7 @@ export class PlanetLayer {
   position(i: number, jd: number, out = new Vector3()): Vector3 {
     const cat = this.cat!;
     const p = cat.planets[i];
-    return planetOffset(p, jd, out).add(cat.hosts[p.host].pos);
+    return bodyOffset(cat, i, jd, out).add(cat.hosts[p.host].pos);
   }
 
   /**
@@ -186,7 +227,8 @@ export class PlanetLayer {
     for (let h = 0; h < cat.hosts.length; h++) {
       const host = cat.hosts[h];
       const d = host.pos.distanceTo(target);
-      if (d > radius) continue;
+      // the star or (close up to a planet and its moons) one of its planets in the visible sphere
+      if (d > radius + host.reach) continue;
       const camD = Math.max(host.pos.distanceTo(camera.position), 1e-12);
       if ((host.reach / camD) * css < 2) continue;
       active.push({ h, camD, fade: 1 - smoothstep(radius * 0.85, radius, d) });
@@ -217,15 +259,23 @@ export class PlanetLayer {
       host.planets.forEach((k, j) => {
         const p = cat.planets[k];
         const orbitPx = (p.a / AU_PER_LY / camD) * css;
-        const orbitAlpha = smoothstep(3, 14, orbitPx) * fade;
-        const alpha = smoothstep(2, 8, orbitPx) * fade;
+        // the planet fades with the star's distance from the view centre, or its own if nearer
+        planetOffset(p, jd, tmp);
+        const pFade = Math.max(fade, 1 - smoothstep(radius * 0.85, radius, this.tmpPlanet.copy(tmp).add(host.pos).distanceTo(target)));
+        const orbitAlpha = smoothstep(3, 14, orbitPx) * pFade;
+        const alpha = smoothstep(2, 8, orbitPx) * pFade;
         const line = view.orbits[j];
         line.material.opacity = 0.45 * orbitAlpha;
         line.visible = orbitAlpha > 0.01;
         const sprite = view.sprites[j];
         planetOffset(p, jd, tmp);
         sprite.position.copy(tmp);
-        const r = planetDrawRadius(p, radius);
+        // its moons around it (their orbits large enough on screen); the planet's symbol stays
+        // inside the innermost one drawn (but never smaller than the planet)
+        const moonView = view.moons.get(j);
+        let inner = Infinity;
+        if (moonView) inner = this.updateMoons(moonView, tmp, host.pos, camera, css, radius, jd, pFade);
+        const r = Math.max(trueRadius(p), Math.min(planetDrawRadius(p, radius), 0.6 * inner));
         // the disk fills 68 % of the symbol (the rest is its glow)
         sprite.scale.setScalar((2 * r) / 0.68);
         (sprite.material as SpriteMaterial).opacity = alpha;
@@ -248,6 +298,41 @@ export class PlanetLayer {
     }
   }
 
+  /**
+   * A planet's moons: their orbits and symbols around it (at `offset` from the star), fading in
+   * with their orbits' size on screen. Returns the periapsis (ly) of the innermost moon drawn.
+   */
+  private updateMoons(view: MoonView, offset: Vector3, star: Vector3, camera: PerspectiveCamera, css: number, radius: number, jd: number, fade: number): number {
+    const cat = this.cat!;
+    view.group.position.copy(offset);
+    const planetPos = this.tmpPlanet.copy(offset).add(star);
+    const camD = Math.max(planetPos.distanceTo(camera.position), 1e-15);
+    let inner = Infinity;
+    view.ids.forEach((k, j) => {
+      const m = cat.planets[k];
+      const orbitPx = (m.a / AU_PER_LY / camD) * css;
+      // orbits far larger than the view (the outer, irregular moons) would only cross it as lines
+      const orbitAlpha = smoothstep(3, 14, orbitPx) * fade * (1 - smoothstep(1.5 * radius, 4 * radius, m.a / AU_PER_LY));
+      const alpha = smoothstep(2, 8, orbitPx) * fade;
+      const line = view.orbits[j];
+      line.material.opacity = 0.4 * orbitAlpha;
+      line.visible = orbitAlpha > 0.01;
+      const sprite = view.sprites[j];
+      sprite.visible = alpha > 0.01;
+      if (!sprite.visible) return;
+      inner = Math.min(inner, (m.a * (1 - m.e)) / AU_PER_LY);
+      planetOffset(m, jd, this.tmpMoon);
+      sprite.position.copy(this.tmpMoon);
+      const r = planetDrawRadius(m, radius);
+      sprite.scale.setScalar((2 * r) / 0.68);
+      (sprite.material as SpriteMaterial).opacity = alpha;
+      const pos = this.livePosition(k).copy(this.tmpMoon).add(planetPos);
+      const dist = Math.max(pos.distanceTo(camera.position), 1e-15);
+      this.drawn.push({ index: k, pos, px: (r / dist) * css, orbitPx, alpha });
+    });
+    return inner;
+  }
+
   private system(h: number): SystemView {
     const existing = this.systems.get(h);
     if (existing) return existing;
@@ -257,6 +342,7 @@ export class PlanetLayer {
     group.position.copy(host.pos);
     const orbits: SystemView['orbits'] = [];
     const sprites: Sprite[] = [];
+    const moons: SystemView['moons'] = new Map();
     const tex = this.symbolTexture();
     const v = new Vector3();
     for (const k of host.planets) {
@@ -280,7 +366,9 @@ export class PlanetLayer {
       group.add(line, sprite);
       orbits.push(line);
       sprites.push(sprite);
+      if (p.moons.length) moons.set(orbits.length - 1, this.moonView(p.moons, tex));
     }
+    for (const mv of moons.values()) group.add(mv.group);
     // the habitable zone: two flat bands in the plane of the planet nearest to it
     const zones: SystemView['zones'] = [];
     const edges: SystemView['edges'] = [];
@@ -320,12 +408,51 @@ export class PlanetLayer {
       }
     }
     this.group.add(group);
-    const view = { group, orbits, sprites, zones, edges, lastUsed: this.frame };
+    const view = { group, orbits, sprites, zones, edges, moons, lastUsed: this.frame };
     this.systems.set(h, view);
     return view;
   }
 
+  /** The orbits and symbols of a planet's moons (in a group that follows the planet). */
+  private moonView(ids: number[], tex: CanvasTexture): MoonView {
+    const cat = this.cat!;
+    const group = new Group();
+    const orbits: MoonView['orbits'] = [];
+    const sprites: Sprite[] = [];
+    const v = new Vector3();
+    for (const k of ids) {
+      const m = cat.planets[k];
+      const pts = new Float32Array(3 * ORBIT_POINTS);
+      for (let n = 0; n < ORBIT_POINTS; n++) {
+        orbitPoint(m, (2 * Math.PI * n) / ORBIT_POINTS, v);
+        pts.set([v.x, v.y, v.z], 3 * n);
+      }
+      const line = new LineLoop(
+        new BufferGeometry().setAttribute('position', new BufferAttribute(pts, 3)),
+        new LineBasicMaterial({ color: planetColor(m), transparent: true, opacity: 0, depthTest: false, depthWrite: false }),
+      );
+      line.frustumCulled = false;
+      line.renderOrder = 4;
+      line.visible = false;
+      const sprite = new Sprite(new SpriteMaterial({ map: tex, color: planetColor(m), transparent: true, depthTest: false, depthWrite: false }));
+      sprite.frustumCulled = false;
+      sprite.renderOrder = 5;
+      sprite.visible = false;
+      group.add(line, sprite);
+      orbits.push(line);
+      sprites.push(sprite);
+    }
+    return { group, orbits, sprites, ids };
+  }
+
   private dispose(view: SystemView): void {
+    for (const mv of view.moons.values()) {
+      for (const l of mv.orbits) {
+        l.geometry.dispose();
+        l.material.dispose();
+      }
+      for (const s of mv.sprites) (s.material as SpriteMaterial).dispose();
+    }
     for (const l of view.orbits) {
       l.geometry.dispose();
       l.material.dispose();

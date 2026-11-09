@@ -29,6 +29,7 @@ from scipy.spatial import cKDTree
 
 from .compare import read_stars
 from .coords import A_G, LY_PER_PC, unit_vectors
+from . import moons
 from .download import CACHE_DIR, tap_sync
 from .sources.exoplanets import SOURCE_INFO, TAP
 
@@ -59,6 +60,7 @@ F_CIRCUMBINARY = 32  # orbits both stars of a binary
 F_HZ = 64  # semi-major axis within the optimistic habitable zone of its star
 F_HZ_CONSERVATIVE = 128  # ... within the conservative one
 F_HABITABLE = 256  # potentially habitable: in the optimistic zone and small (radius <= 2.5, or mass <= 10 Earth)
+F_MOON = 512  # a moon (of the planet in its `parent` field)
 
 # Habitable zone (Kopparapu et al. 2013, ApJ 765, 131, with the erratum ApJ 770, 82; one Earth mass):
 # the stellar flux S_eff = S0 + a t + b t^2 + c t^3 + d t^4 (t = Teff - 5780 K, Teff within
@@ -397,6 +399,25 @@ def solar_rows(sun: int) -> list[dict]:
     return rows
 
 
+def solar_moon_rows(sun: int, refresh: bool = False) -> list[dict]:
+    """The moons of the Solar System's planets (JPL); none if JPL does not answer (a bonus)."""
+    try:
+        elements, radii = moons.load(refresh)
+    except Exception as err:  # the map works without them
+        log.warning("JPL satellite elements unavailable, no moons: %s", err)
+        return []
+    planets = {row[0] for row in SOLAR_SYSTEM}
+    rows = []
+    for m in moons.moon_rows(elements, radii, planets):
+        rows.append({
+            "host": "Sun", "star": sun, "name": m["name"], "de": m["de"], "a": m["a"], "e": m["e"], "period": m["period"],
+            "m0": m["m0"], "P": m["P"], "Q": m["Q"], "incl": m["incl"], "radius": m["radius"], "mass": float("nan"),
+            "eqt": float("nan"), "method": METHODS.index("Solar System"), "year": float("nan"),
+            "flags": F_SOLAR | F_MOON | (0 if m["radius_known"] else F_RADIUS_EST), "hz": None, "parent": m["parent"],
+        })
+    return rows
+
+
 def _r(x: float, digits: int) -> float | None:
     return None if x is None or not np.isfinite(x) else float(round(x, digits))
 
@@ -404,6 +425,8 @@ def _r(x: float, digits: int) -> float | None:
 def write(rows: list[dict], stars: pd.DataFrame, out: Path) -> dict:
     hosts: dict[int, dict] = {}
     planets = []
+    # the Solar System's planets by name: the parents of the moons
+    solar = {}
     for r in rows:
         k = r["star"]
         if k not in hosts:
@@ -415,12 +438,19 @@ def write(rows: list[dict], stars: pd.DataFrame, out: Path) -> dict:
                         "vel": None if "vx" not in s or int(s["vx"]) == -32768 else [int(s["vx"]), int(s["vy"]), int(s["vz"])],
                         "hz": None if r.get("hz") is None else [_r(v, 5) for v in r["hz"]]}
         h = hosts[k]
-        h["planets"] += 1
+        parent = solar.get(r["parent"]) if r.get("parent") else None
+        if r.get("parent") and parent is None:
+            continue
+        if parent is None:
+            h["planets"] += 1
+        if r["flags"] & F_SOLAR and not r.get("parent"):
+            solar[r["name"]] = len(planets)
         planets.append([
             h["i"], r["name"], r["de"], _r(r["a"], 7), _r(r["e"], 5), _r(r["period"], 6), _r(r["m0"], 6),
-            [_r(v, 6) for v in r["P"]], [_r(v, 6) for v in r["Q"]], _r(r["radius"], 3), _r(r["mass"], 3),
+            [_r(v, 6) for v in r["P"]], [_r(v, 6) for v in r["Q"]], _r(r["radius"], 3 if r["radius"] >= 0.1 else 6), _r(r["mass"], 3),
             _r(r["eqt"], 0), r["method"], None if not np.isfinite(r["year"]) else int(r["year"]), r["flags"],
             _r(r["incl"], 2),
+            parent,
         ])
     meta = {
         "format": "galmap-planets",
@@ -429,10 +459,11 @@ def write(rows: list[dict], stars: pd.DataFrame, out: Path) -> dict:
         "epoch": J2000,
         "frame": "galactic-heliocentric",
         "units": {"a": "AU", "period": "d", "m0": "rad", "radius": "Earth radii", "mass": "Earth masses", "eqt": "K"},
-        "fields": ["host", "name", "nameDe", "a", "e", "period", "m0", "P", "Q", "radius", "mass", "eqt", "method", "year", "flags", "incl"],
+        "fields": ["host", "name", "nameDe", "a", "e", "period", "m0", "P", "Q", "radius", "mass", "eqt", "method", "year", "flags", "incl", "parent"],
         "flags": {"radiusEstimated": F_RADIUS_EST, "inclinationAssumed": F_INCL_ASSUMED, "phaseAssumed": F_PHASE_ASSUMED,
                   "eccentricityAssumed": F_ECC_ASSUMED, "solarSystem": F_SOLAR, "circumbinary": F_CIRCUMBINARY,
-                  "habitableZone": F_HZ, "habitableZoneConservative": F_HZ_CONSERVATIVE, "potentiallyHabitable": F_HABITABLE},
+                  "habitableZone": F_HZ, "habitableZoneConservative": F_HZ_CONSERVATIVE, "potentiallyHabitable": F_HABITABLE,
+                  "moon": F_MOON},
         "habitableZone": "Kopparapu et al. 2013 (ApJ 765, 131; erratum ApJ 770, 82): recent Venus, runaway greenhouse, maximum greenhouse, early Mars",
         "methods": METHODS,
         # [node path, index, archive name, position, planets, habitable zone (4 edges, AU) or null]
@@ -442,8 +473,9 @@ def write(rows: list[dict], stars: pd.DataFrame, out: Path) -> dict:
             "key": "jpl-elements",
             "title": "E. M. Standish, Keplerian Elements for Approximate Positions of the Major Planets (JPL)",
             "url": "https://ssd.jpl.nasa.gov/planets/approx_pos.html",
-        }],
-        "stats": {"hosts": len(hosts), "planets": len(planets),
+        }] + ([moons.SOURCE_INFO] if any(p[16] is not None for p in planets) else []),
+        "stats": {"hosts": len(hosts), "planets": sum(1 for p in planets if p[16] is None),
+                  "moons": sum(1 for p in planets if p[16] is not None),
                   "inHabitableZone": sum(1 for p in planets if p[14] & F_HZ),
                   "potentiallyHabitable": sum(1 for p in planets if p[14] & F_HABITABLE)},
     }
@@ -465,6 +497,7 @@ def build(data: Path, refresh: bool = False) -> dict:
     rows = exoplanet_rows(raw, match_hosts(raw, hosts), hosts)
     if len(sun):
         rows += solar_rows(len(hosts))
+        rows += solar_moon_rows(len(hosts), refresh)
     return write(rows, stars_used, data)
 
 

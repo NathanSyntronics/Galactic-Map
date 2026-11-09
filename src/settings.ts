@@ -167,8 +167,8 @@ export const QUALITY_BUDGET: Record<Quality, number> = {
   ultra: 4_000_000,
 };
 
-/** Down to about 0.006 AU: the orbits of the innermost known planets. */
-export const RADIUS_MIN = 1e-7;
+/** Down to about 19,000 km (0.00013 AU): the orbits of the innermost moons (Phobos). */
+export const RADIUS_MIN = 2e-9;
 /** Up to the most distant galaxies (Cosmicflows-4 reaches about 1.5 billion ly). */
 export const RADIUS_MAX = 2_000_000_000;
 

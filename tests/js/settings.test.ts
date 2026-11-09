@@ -179,7 +179,7 @@ describe('radius follows zoom', () => {
   });
 
   it('clamps to the radius range and keeps three significant digits', () => {
-    expect(radiusForDistance(1e-8)).toBe(RADIUS_MIN);
+    expect(radiusForDistance(1e-10)).toBe(RADIUS_MIN);
     expect(radiusForDistance(0.5)).toBe(0.227);
     expect(radiusForDistance(1e10)).toBe(RADIUS_MAX);
     expect(radiusForDistance(1e7)).toBe(4_550_000);
@@ -200,7 +200,7 @@ describe('radius follows zoom', () => {
     expect(followZoom(20, 45)).toBe(20.5);
     expect(followZoom(20, 43)).toBe(19.5);
     // closer than the smallest radius allows: stays at the minimum
-    expect(followZoom(RADIUS_MIN, 1e-8)).toBeNull();
+    expect(followZoom(RADIUS_MIN, 1e-10)).toBeNull();
   });
 
   it('follows a continuous zoom in small, regular steps', () => {

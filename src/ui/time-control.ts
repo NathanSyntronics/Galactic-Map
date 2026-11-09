@@ -60,6 +60,11 @@ export function jdOfPickedDay(value: string, nowMs: number): number | null {
   return Number.isFinite(d.getTime()) ? jdOfMs(d.getTime()) : null;
 }
 
+/** "10.000 Jahre pro Sekunde" -> "10.000 Jahre/s" (the clock's short form of a speed). */
+export function shortSpeed(text: string): string {
+  return text.replace(/ (pro Sekunde|per second)$/, '/s');
+}
+
 const formats = new Map<string, Intl.DateTimeFormat>();
 
 /**
@@ -185,7 +190,9 @@ export class PlanetTimeControl {
   set(speed: number): void {
     const k = planetSpeedStop(speed);
     if (this.input.value !== String(k)) this.input.value = String(k);
-    const text = t(PLANET_SPEED_KEYS[k]);
+    // short ("10.000 Jahre/s"), in a box of fixed width: the slider keeps its size
+    const text = shortSpeed(t(PLANET_SPEED_KEYS[k]));
+    this.value.title = t(PLANET_SPEED_KEYS[k]);
     if (this.value.textContent !== text) this.value.textContent = text;
   }
 

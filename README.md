@@ -48,11 +48,12 @@ push, see *Deployment*).
   get more links than faint ones. Every rule is adjustable.
 * **Route planning** through the jump network, also between distant stars: from the Sun to
   Betelgeuse it takes 114 jumps. A route can be flown, star by star.
-* **Planets.** Zoom into a star down to a hundredth of an AU: all confirmed planets with a known
+* **Planets and moons.** Zoom into a star down to 19,000 km: all confirmed planets with a known
   host distance (6,428 around 4,818 stars; hosts that no star catalogue has, such as the Kepler and
   TESS stars, come from the NASA Exoplanet Archive) and the eight of the Solar System, on their measured
   orbits at their positions for today (or running faster), drawn larger than they are, like the
-  stars. Close pairs such as Alpha Centauri A and B separate ([`docs/PLANETS.md`](docs/PLANETS.md)).
+  stars, and the Solar System's 456 known moons (JPL; no exomoon is confirmed yet). Close pairs such
+  as Alpha Centauri A and B separate ([`docs/PLANETS.md`](docs/PLANETS.md)).
   Below 1 AU distances are written in millions of kilometres. The habitable zone of each planet
   host is drawn as a green band, and potentially habitable planets are marked.
 * **Spacecraft.** Voyager 1 and 2, Pioneer 10 and 11 and New Horizons, the spacecraft leaving the
@@ -73,7 +74,7 @@ push, see *Deployment*).
 | Move | right drag / Shift + left drag | two-finger drag | W A S D, R / F (up/down) |
 | Zoom | wheel | pinch | + / − |
 | Details | click a star, planet or galaxy | tap | |
-| Centre on a star, planet or galaxy | double-click | double-tap | |
+| Centre on a star, planet or galaxy (with a route started: a star becomes its destination) | double-click | double-tap | |
 | The Sun's neighbourhood (10 ly) | | | H |
 | Names / grid / jump network / search | | | L / G / J / / |
 
@@ -107,7 +108,7 @@ wide window gets the normal ones. Each tab writes only the settings it changed, 
 older tab keeps what you set in another.
 
 The settings panel (☰) has five tabs (the last one open is remembered in the browser):
-* **View:** the visible radius (1e-7 ly, a hundredth of an AU, to 2 billion ly), and whether it
+* **View:** the visible radius (2e-9 ly, 19,000 km, to 2 billion ly), and whether it
   follows the zoom (on by default: radius = camera distance / 2.2, the framing of the start view;
   the radius slider then moves the camera; switched off, the radius stays where it is); *Go to*:
   the Earth (the inner Solar System, 2 AU around the Sun) and the Sun (10 ly), both seen straight

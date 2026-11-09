@@ -25,12 +25,14 @@ export const PlanetFlag = {
   HABITABLE_ZONE_CONSERVATIVE: 128,
   /** Potentially habitable: in the optimistic zone and small (radius up to 2.5 R⊕, or mass up to 10 M⊕). */
   POTENTIALLY_HABITABLE: 256,
+  /** A moon (of the planet `parent`). */
+  MOON: 512,
 } as const;
 
 /** [host, name, German name, a (AU), e, period (d), M0 (rad), P, Q, radius (R⊕), mass (M⊕), Teq (K), method, year, flags, inclination (deg)] */
 type PlanetRow = [
   number, string, string | null, number, number, number, number, [number, number, number], [number, number, number],
-  number | null, number | null, number | null, number, number | null, number, number | null,
+  number | null, number | null, number | null, number, number | null, number, number | null, (number | null)?,
 ];
 
 export interface PlanetFile {
@@ -100,6 +102,10 @@ export interface Planet {
   flags: number;
   /** Inclination (deg): to the sky plane for exoplanets, to the ecliptic for the Solar System. */
   incl: number;
+  /** A moon's planet (index; null for a planet): its orbit is around that planet. */
+  parent: number | null;
+  /** A planet's moons (indices), from the innermost. */
+  moons: number[];
 }
 
 export interface PlanetCatalogue {
@@ -132,16 +138,24 @@ export function decodePlanets(file: PlanetFile): PlanetCatalogue {
     };
   });
   const planets: Planet[] = file.planets.map((r, i) => {
-    const [host, name, nameDe, a, e, period, m0, P, Q, radius, mass, eqt, method, year, flags, incl] = r;
+    const [host, name, nameDe, a, e, period, m0, P, Q, radius, mass, eqt, method, year, flags, incl, parent] = r;
     const h = hosts[host];
-    h.planets.push(i);
-    h.reach = Math.max(h.reach, (a * (1 + e)) / AU_PER_LY);
+    const isMoon = typeof parent === 'number';
+    // a moon is not one of its star's planets: it belongs to its planet (below)
+    if (!isMoon) {
+      h.planets.push(i);
+      h.reach = Math.max(h.reach, (a * (1 + e)) / AU_PER_LY);
+    }
     if (flags & PlanetFlag.POTENTIALLY_HABITABLE) h.habitable = true;
     return {
       host, name, nameDe, a, e, period, m0, P: world(P), Q: world(Q), radius: num(radius), mass: num(mass), eqt: num(eqt),
-      method: file.methods[method] ?? '', year, flags, incl: num(incl),
+      method: file.methods[method] ?? '', year, flags, incl: num(incl), parent: isMoon ? parent : null, moons: [],
     };
   });
+  planets.forEach((p, i) => {
+    if (p.parent !== null && planets[p.parent]) planets[p.parent].moons.push(i);
+  });
+  for (const p of planets) p.moons.sort((x, y) => planets[x].a - planets[y].a);
   return { hosts, planets, byStar: new Map(hosts.map((h, i) => [h.key, i])), sources: file.sources ?? [] };
 }
 
@@ -165,6 +179,16 @@ export function eccentricAnomaly(m: number, e: number): number {
 }
 
 /** Position of a planet relative to its star (world frame, ly) at a Julian date. */
+/** A planet's (or moon's) offset from its star at a date (a moon: its planet's plus its own). */
+export function bodyOffset(cat: PlanetCatalogue, i: number, jd: number, out = new Vector3()): Vector3 {
+  const p = cat.planets[i];
+  planetOffset(p, jd, out);
+  if (p.parent !== null) out.add(planetOffset(cat.planets[p.parent], jd, tmpOffset));
+  return out;
+}
+const tmpOffset = new Vector3();
+
+/** A planet's (a moon's: around its planet) offset at a date, world frame, ly. */
 export function planetOffset(p: Planet, jd: number, out = new Vector3()): Vector3 {
   const m = p.m0 + (2 * Math.PI * (jd - J2000)) / p.period;
   return orbitPoint(p, eccentricAnomaly(m, p.e), out);

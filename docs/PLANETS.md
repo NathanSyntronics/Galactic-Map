@@ -111,6 +111,25 @@ counts and the planet catalogue's potentially habitable hosts), so it changes no
 no star. The data layer *Known planets* colours the same way (blue, green, the Sun yellow, the
 others grey); a tap prefers the rimmed and coloured stars over the others nearby.
 
+### Moons (`pipeline/galmap/moons.py`)
+
+No exomoon is confirmed (Kepler-1625 b I and Kepler-1708 b I are disputed candidates). The Solar
+System's planets have 456 known moons (Earth 1, Mars 2, Jupiter 115, Saturn 292, Uranus 30, Neptune
+16; Pluto's 5 are left out with Pluto): JPL's planetary satellite mean elements
+(ssd.jpl.nasa.gov/sats/elem) give a, e, ω, M, i and the node at an epoch, relative to the ecliptic,
+the planet's equator (its IAU pole) or the moon's local Laplace plane (its pole given); the node is
+counted from that plane's ascending node on the ICRF equator. They become P and Q (galactic) and a
+mean anomaly at J2000 like the planets' (no apsidal or nodal precession). Mean radii from JPL's
+physical parameters (46 moons); the others a few km (flag 1, radius estimated).
+
+In `planets.json` a moon is a row of `planets` with flag 512 and its planet's index as a 17th field
+(`parent`); its orbit is around that planet. The app draws a planet's moons in a group at the
+planet, fading in with their orbits' size on screen (orbits far larger than the view, the outer
+irregular moons, are left out); the planet's symbol stays inside the innermost moon orbit drawn
+(never smaller than the planet). Labels after the planets (the larger moons first), the card says
+"Moon of Jupiter", the radius in km and the semi-major axis in km; the search finds them ("Titan",
+"Mond").
+
 ### Close pairs (`pipeline/galmap/binaries.py`, in the star build)
 
 The 20 pc census lists the components of some systems at one common position (Alpha Centauri A and
@@ -128,7 +147,10 @@ from A in 2016 (ORB6, Akeson 2021).
 
 ### Zoom
 
-* The visible radius reaches down to 1e-7 ly (0.006 AU), the camera to 2.2e-7 ly. Distances below
+* The visible radius reaches down to 2e-9 ly (19,000 km: Phobos' orbit), the camera to 4.4e-9 ly.
+  A system is drawn while its star or one of its planets is in the visible sphere (close up to a
+  planet and its moons the star is far outside). The view follows the star, planet or moon it is
+  centred on (or flies to) as the clock runs. Distances below
   0.05 ly (3,162 AU) are written in AU (AE in German), below 1 AU in millions of kilometres
   ("57.9 million km", "1,72 Mio. km"), below a million kilometres in kilometres.
 * Below a visible radius of 2 ly the star symbols shrink a little faster than the view

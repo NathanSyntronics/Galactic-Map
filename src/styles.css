@@ -475,6 +475,39 @@ select {
   flex-wrap: wrap;
 }
 
+/* the star card's tabs: a compact row under the name */
+.card-tabs {
+  display: flex;
+  gap: 2px;
+  margin: 8px 0 2px;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.card-tab {
+  flex: 1 0 auto;
+  padding: 5px 8px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.card-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.info-card .card-tabs + dl,
+.info-card .card-tabs + .attr-box {
+  margin-top: 8px;
+}
+
 /* ---------------------------------------------------------------- status / loading */
 
 .status {
@@ -1135,10 +1168,14 @@ label.check input {
   color: var(--text-dim);
 }
 
+/* a fixed width (the longest: "100.000 Jahre/s"): the slider keeps its size at every speed */
 .time-value {
   flex: none;
-  min-width: 9.5em;
+  width: 8.2em;
   text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-variant-numeric: tabular-nums;
 }
 
@@ -1317,6 +1354,17 @@ label.check input {
     width: auto;
     bottom: max(30px, calc(env(safe-area-inset-bottom) + 22px));
     max-height: 45vh;
+  }
+
+  /* a small card: compact buttons */
+  .info-card .info-actions {
+    gap: 6px;
+  }
+
+  .info-card .info-actions .btn {
+    min-height: 30px;
+    padding: 4px 10px;
+    font-size: 12.5px;
   }
 
   .jump-link {

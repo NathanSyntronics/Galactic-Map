@@ -109,8 +109,9 @@ export class Navigation {
     c.rotateSpeed = 0.6;
     c.zoomSpeed = 1.2;
     c.panSpeed = 1.0;
-    // down to the orbits of the innermost planets (a visible radius of 1e-7 ly, see RADIUS_MIN)
-    c.minDistance = 2.2e-7;
+    // down to the orbits of the innermost moons (a visible radius of 2e-9 ly, 19,000 km: Phobos'
+    // orbit; see RADIUS_MIN)
+    c.minDistance = 4.4e-9;
     c.maxDistance = 5_000_000_000;
     c.zoomToCursor = false;
     c.addEventListener('change', () => this.onChange());

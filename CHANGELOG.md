@@ -2,6 +2,18 @@
 
 Every round of changes that goes live raises the version by 0.01 (README, *Versions*).
 
+## 1.07 (2026-11-09)
+
+* Moons: the Solar System's 456 known moons (JPL), on their orbits around their planets, down to
+  19,000 km (Phobos); in the search, with a card each. The view follows the planet it is centred on.
+* The star card has tabs: *Kurz* (distance, change of distance, luminosity: a small card),
+  *Position* (with speed and change of distance to the Sun, km/s), *Stern*, *Attribute*, *Sprünge*;
+  the last one chosen stays.
+* A route is planned again when the date changes and the stars have moved.
+* With a route started, a double tap on a star makes it the destination.
+* The clock's speed in short ("10.000 Jahre/s"): the slider keeps its size.
+* Spacecraft far out: their distance in light years, the signal time in days or years.
+
 ## 1.06 (2026-11-09)
 
 * The stars move: from their measured velocities (proper motion, distance and, for most stars

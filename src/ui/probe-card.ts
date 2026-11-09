@@ -1,6 +1,6 @@
 import { probePosition, probeSpeed, type ProbeCatalogue } from '../data/probes';
 import { AU_PER_LY } from '../data/planets';
-import { formatNumber, getLang, t, type MessageKey } from '../i18n';
+import { formatLy, formatNumber, getLang, t, type MessageKey } from '../i18n';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -17,6 +17,15 @@ const STORIES: Record<string, { text: MessageKey; url: string }> = {
   voyager2: { text: 'probeVoyager2', url: 'https://science.nasa.gov/mission/voyager/' },
   newhorizons: { text: 'probeNewHorizons', url: 'https://science.nasa.gov/mission/new-horizons/' },
 };
+
+/** The time a radio signal takes, in hours, days or years. */
+export function signalTimeText(hours: number): string {
+  if (hours < 48) return t('hoursN', { n: formatNumber(hours, 1) });
+  const days = hours / 24;
+  if (days < 730) return t('daysN', { n: formatNumber(days, days < 10 ? 1 : 0) });
+  const years = days / 365.25;
+  return t('yearsN', { n: formatNumber(years, years < 10 ? 1 : 0) });
+}
 
 /** Light minutes per AU. */
 const LIGHT_MINUTES_PER_AU = 8.316746;
@@ -74,9 +83,11 @@ export class ProbeCard {
     rows.push([t('launched'), new Date(Date.UTC(y, m - 1, d)).toLocaleDateString(getLang(), { timeZone: 'UTC' })]);
     const pos = probePosition(probe, this.jd);
     if (pos) {
-      const au = pos.length() * AU_PER_LY;
-      rows.push([t('distanceFromSun'), `${formatNumber(au, au < 100 ? 1 : 0)} ${t('au')}`]);
-      rows.push([t('signalTime'), t('hoursN', { n: formatNumber((au * LIGHT_MINUTES_PER_AU) / 60, 1) })]);
+      const ly = pos.length();
+      const au = ly * AU_PER_LY;
+      // far out (after a long flight): light years
+      rows.push([t('distanceFromSun'), ly >= 0.1 ? formatLy(ly) : `${formatNumber(au, au < 100 ? 1 : 0)} ${t('au')}`]);
+      rows.push([t('signalTime'), signalTimeText((au * LIGHT_MINUTES_PER_AU) / 60)]);
       const v = probeSpeed(probe, this.jd);
       if (Number.isFinite(v)) rows.push([t('speedToSun'), `${formatNumber(v, 1)} km/s`]);
     }

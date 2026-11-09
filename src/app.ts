@@ -106,6 +106,9 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: 
 /** Node path and star index of a StarInfo key ("path:index"). */
 /** From this visible radius on, the view is at galaxy scales: centring on a galaxy keeps the zoom. */
 const GALAXY_SCALE_RADIUS = 20_000;
+/** What the view follows: a star (its node data and index) or a planet or moon. */
+type Anchor = { data: NodeData; i: number } | { planet: number };
+
 /** The view follows a star within this fraction of the visible radius of its centre. */
 const ANCHOR_FRACTION = 0.02;
 /** A typical star speed relative to the Sun (ly/yr, about 50 km/s): when to recompute the jump network. */
@@ -279,14 +282,20 @@ export class App {
   private readonly planetLayer = new PlanetLayer();
   /** Years since the positions' epoch the stars were last moved to (NaN: not yet). */
   private motionDt = NaN;
-  /** The star the view is centred on, followed as it moves. */
-  private anchor: { data: NodeData; i: number } | null = null;
+  /** The star or planet the view is centred on, followed as it moves. */
+  private anchor: Anchor | null = null;
+  /** The Julian date of motionDt. */
+  private motionJd = NaN;
+  /** The flight to a followed star or planet ends exactly at it (set by follow). */
+  private anchorSnap = false;
   private anchorChecked = 0;
   private anchorFlights = 0;
   /** When the stars' positions on the CPU were last moved (performance.now()). */
   private lastMove = -Infinity;
   /** Years since the epoch the jump network was last computed for. */
   private jumpDt = 0;
+  /** Years since the epoch the route was last planned for. */
+  private routeDt = NaN;
   /** How far the stars may have drifted at the last node selection (ly). */
   private lodDrift = 0;
   /** The nearest stars at their true size, close up. */
@@ -443,6 +452,9 @@ export class App {
           return { range: s.jumpRange, hub: s.jumpHub, kSun: s.jumpSun, connect: s.jumpConnect, capacity: this.capacityRule(s) };
         },
         style: (data, colors, sizes) => computeStyle(data, this.store.get(), this.stylePlan, colors, sizes),
+        fresh: (data) => {
+          if (data.vel && Number.isFinite(this.motionDt) && data.movedTo !== this.motionDt) moveTo(data, this.motionDt);
+        },
         nodeKey: (path) => this.nodeKey(path),
         // an exact lookup (find() would also take other spellings); a failed index load is reported
         find: async (designation) => {
@@ -1446,11 +1458,14 @@ export class App {
    * precision. The view follows the star it is centred on.
    */
   private updateMotion(s: Settings): void {
-    const dt = yearsSinceEpoch(this.planetJd());
+    const jd = this.planetJd();
+    const dt = yearsSinceEpoch(jd);
     this.starfield.setTime(dt);
     const prev = this.motionDt;
+    const prevJd = this.motionJd;
     if (dt === prev) return;
     this.motionDt = dt;
+    this.motionJd = jd;
     // a new flight: the star at its destination (where the star is right now) is followed
     if (this.nav.flights !== this.anchorFlights) {
       this.anchorFlights = this.nav.flights;
@@ -1458,11 +1473,16 @@ export class App {
       this.findAnchor(s, Number.isFinite(prev) ? prev : dt, true);
     }
     const a = this.anchor;
-    if (a && Number.isFinite(prev) && !this.nav.touring) {
-      const before = starPosition(a.data, a.i, prev, new Vector3());
+    if (a && this.anchorSnap) {
+      // a flight to it just started: its destination exactly where it is now
+      this.anchorSnap = false;
+      const now = this.anchorPosition(a, jd, dt, new Vector3());
+      if (now) this.nav.translate(now.sub(this.nav.destination));
+    } else if (a && Number.isFinite(prev) && !this.nav.touring) {
+      const before = this.anchorPosition(a, prevJd, prev, new Vector3());
       // the user moved away from it: the view stays
-      if (before.distanceTo(this.nav.destination) > this.anchorReach(s, before)) this.anchor = null;
-      else this.nav.translate(starPosition(a.data, a.i, dt, new Vector3()).sub(before));
+      if (!before || before.distanceTo(this.nav.destination) > this.anchorReach(s, before)) this.anchor = null;
+      else this.nav.translate(this.anchorPosition(a, jd, dt, new Vector3())!.sub(before));
     }
     // (a few times a second at most: the GPU moves the stars smoothly, the labels follow below)
     const tol = Math.max(s.radius * 2e-4, 1e-10);
@@ -1493,6 +1513,13 @@ export class App {
         this.selMarker.show(sel.pos, this.renderer.getPixelRatio());
       }
     }
+    // a route is planned again once its stars have moved by a few percent of the jump range (while
+    // the clock races, once it slows down: each new call restarts the delay)
+    if (!Number.isFinite(this.routeDt)) this.routeDt = dt;
+    if ((this.planner.from || this.planner.to) && Math.abs(dt - this.routeDt) * TYPICAL_SPEED > 0.05 * s.jumpRange) {
+      this.routeDt = dt;
+      this.planner.invalidate(400);
+    }
     // the nodes to load: farther out the farther the stars may have come
     if (Math.abs(DRIFT_SPEED * Math.abs(dt) - this.lodDrift) > 0.1 * s.radius) this.lodDirty = true;
     if (moved) {
@@ -1504,6 +1531,12 @@ export class App {
       }
     }
     this.findAnchor(s, dt);
+  }
+
+  /** Where a followed star or planet is at a date (dt: years since the epoch); null if gone. */
+  private anchorPosition(a: Anchor, jd: number, dt: number, out: Vector3): Vector3 | null {
+    if ('planet' in a) return this.planetLayer.catalogue ? this.planetLayer.positionAt(a.planet, jd, dt, out) : null;
+    return starPosition(a.data, a.i, dt, out);
   }
 
   /** How close to the view centre (or a flight's destination) a star is followed. */
@@ -1519,9 +1552,17 @@ export class App {
     this.anchorChecked = t;
     const target = this.nav.destination;
     const r = this.anchorReach(s, target);
-    let best: { data: NodeData; i: number } | null = null;
+    let best: Anchor | null = null;
     let bestD = r;
     const v = new Vector3();
+    // a planet or moon at the centre, or (below) a star: the nearest
+    for (const d of this.planetLayer.drawn) {
+      const dist = d.pos.distanceTo(target);
+      if (dist < bestD) {
+        bestD = dist;
+        best = { planet: d.index };
+      }
+    }
     for (const rn of this.starfield.visibleNodes()) {
       const d = rn.data;
       if (!d.vel || rn.node.box.distanceToPoint(target) > r + d.vmax * Math.abs(dt) + 1e-9) continue;
@@ -1596,7 +1637,9 @@ export class App {
     for (const d of this.planetLayer.drawn) {
       if ((d.orbitPx < 16 || d.alpha < 0.5) && d.index !== this.selectedPlanet) continue;
       const p = cat.planets[d.index];
-      cands.push({ key: `p:${d.index}`, pos: d.pos, text: planetName(p, lang), rank: 0, logL: 3, planet: d.index });
+      // moons after the planets, the larger first
+      const logL = p.parent !== null ? 1 + Math.log10(Math.max(p.radius * 6371, 1)) / 2 : 3;
+      cands.push({ key: `p:${d.index}`, pos: d.pos, text: planetName(p, lang), rank: 0, logL, planet: d.index });
     }
   }
 
@@ -1659,7 +1702,20 @@ export class App {
     const cat = this.planetLayer.catalogue;
     if (!cat) return;
     const p = cat.planets[i];
+    // a moon: to its planet, close enough for its orbit; the view follows the planet
+    if (p.parent !== null) {
+      this.nav.flyTo(this.planetLayer.position(p.parent, this.planetJd()), distanceForRadius((1.6 * p.a * (1 + p.e)) / AU_PER_LY));
+      this.follow({ planet: p.parent });
+      return;
+    }
     this.nav.flyTo(cat.hosts[p.host].pos, distanceForRadius((1.6 * p.a * (1 + p.e)) / AU_PER_LY));
+  }
+
+  /** Follows a star or planet from the flight just started (it may move fast on the way). */
+  private follow(a: Anchor): void {
+    this.anchor = a;
+    this.anchorFlights = this.nav.flights;
+    this.anchorSnap = true;
   }
 
   /** Flies to a star with planets, close enough to show all their orbits. */
@@ -1904,10 +1960,13 @@ export class App {
         if (isDouble) this.nav.flyTo(this.probeLayer.position(probe).clone());
       } else if (planet !== null) {
         this.selectPlanet(planet);
-        if (isDouble) this.nav.flyTo(this.planetLayer.livePosition(planet).clone());
+        if (isDouble) {
+          this.nav.flyTo(this.planetLayer.livePosition(planet).clone());
+          this.follow({ planet });
+        }
       } else if (hit) {
         this.select(hit);
-        if (isDouble) this.nav.flyTo(hit.pos);
+        if (isDouble) this.doubleTapStar(hit);
       } else if (galaxy !== null) {
         this.selectGalaxy(galaxy);
         if (isDouble) this.flyToGalaxy(galaxy);
@@ -1950,9 +2009,12 @@ export class App {
         e.preventDefault();
         e.stopPropagation();
         this.lastTap = { time: 0, x: 0, y: 0 };
-        if (this.selected) this.nav.flyTo(this.selected.pos);
+        if (this.selected) this.doubleTapStar(this.selected);
         else if (this.selectedGalaxy !== null) this.flyToGalaxy(this.selectedGalaxy);
-        else if (this.selectedPlanet !== null) this.nav.flyTo(this.planetLayer.livePosition(this.selectedPlanet).clone());
+        else if (this.selectedPlanet !== null) {
+          this.nav.flyTo(this.planetLayer.livePosition(this.selectedPlanet).clone());
+          this.follow({ planet: this.selectedPlanet });
+        }
         else if (this.selectedProbe !== null) this.nav.flyTo(this.probeLayer.position(this.selectedProbe).clone());
       },
       { capture: true },
@@ -2063,6 +2125,7 @@ export class App {
       designation: designationOf(d, i),
       alt: name?.alt ?? [],
       pos: new Vector3(d.positions[3 * i], d.positions[3 * i + 1], d.positions[3 * i + 2]),
+      vel: d.vel ? new Vector3(d.vel[3 * i], d.vel[3 * i + 1], d.vel[3 * i + 2]) : null,
       absMag: d.absMag[i],
       logL: d.logL[i],
       teff: d.teff[i],
@@ -2325,6 +2388,16 @@ export class App {
   // ------------------------------------------------------------------ route
 
   /** A star of the info card as a route end. */
+  /**
+   * A double tap (or click) on a star: with a route started, it becomes the destination; else the
+   * view centres on it.
+   */
+  private doubleTapStar(info: StarInfo): void {
+    const from = this.planner.from;
+    if (from && `${from.path}:${from.index}` !== info.key) this.planner.setEnd('to', this.routeEnd(info));
+    else this.nav.flyTo(info.pos);
+  }
+
   private routeEnd(info: StarInfo): RouteEnd {
     const { path, i } = parseStarKey(info.key);
     return {
@@ -2378,6 +2451,8 @@ export class App {
       // a flyby follows the route it started on
       this.nav.stopTour();
       this.route = p.route;
+      // planned for the date drawn
+      if (Number.isFinite(this.motionDt)) this.routeDt = this.motionDt;
       // a partial route: the destination it did not reach gets its own marker
       this.routeLine.set(this.route ? this.route.waypoints.map((w) => w.pos) : null, this.route?.found ?? true, p.to?.pos ?? null);
       this.updateLegend();

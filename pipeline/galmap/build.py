@@ -298,6 +298,8 @@ def build(
     derive.place(s, systems.common_distances(s))
     # members of a system move together (their own velocities differ by their orbits)
     systems.common_velocities(s)
+    if "rv_known" in s:
+        s["flags"] = s["flags"].to_numpy(np.int64) | np.where(s["rv_known"].fillna(False).to_numpy(bool), Flag.RV_KNOWN, 0)
     # components at one position: separated by their orbits where ORB6 has them
     try:
         binaries.separate(s, binaries.load(refresh))

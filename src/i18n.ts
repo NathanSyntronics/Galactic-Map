@@ -143,6 +143,19 @@ const en = {
   distanceToCentre: 'Distance to its centre',
   distanceMethod: 'Distance measured via',
   distanceSource: 'Distance from',
+  moonOf: 'Moon of {planet}',
+  inclinationMoon: 'Inclination (to its reference plane)',
+  cardBasics: 'Basics',
+  cardPosition: 'Position',
+  cardProperties: 'Star',
+  cardAttributes: 'Attributes',
+  cardJumps: 'Jumps',
+  distanceChange: 'Change of distance to the Sun',
+  approaching: 'approaching',
+  receding: 'receding',
+  passing: 'passing',
+  speedAtLeast: 'at least {v} km/s (no radial velocity)',
+  distanceChangeUnknown: 'unknown (no radial velocity)',
   methodTRGB: 'its brightest red giant stars',
   methodCep: 'pulsating stars (Cepheids)',
   methodMaser: 'gas clouds near its centre, geometrically',
@@ -183,13 +196,13 @@ const en = {
 <li><b>Left drag</b>: rotate</li>
 <li><b>Right drag</b> or <b>Shift + left drag</b>: move</li>
 <li><b>Wheel</b>: zoom</li>
-<li><b>Click</b> a star: details · <b>double-click</b>: centre view on it</li>
+<li><b>Click</b> a star: details · <b>double-click</b>: centre view on it (with a route started: make it the destination)</li>
 </ul>
 <h3>Touch</h3>
 <ul>
 <li><b>One finger</b>: rotate</li>
 <li><b>Two fingers</b>: pinch to zoom, drag to move</li>
-<li><b>Tap</b> a star: details · <b>double-tap</b>: centre view on it</li>
+<li><b>Tap</b> a star: details · <b>double-tap</b>: centre view on it (with a route started: make it the destination)</li>
 </ul>
 <h3>Keyboard</h3>
 <ul>
@@ -205,6 +218,7 @@ const en = {
 <p>The search knows the stars, the planets and the galaxies. The empty search field lists the last five you picked from the search. A press anywhere beside the open settings only closes them (it selects no star); a click beside a dialog closes the dialog.</p>
 <p>A click on a star's name selects that star; where many stars crowd together, labelled stars are preferred.</p>
 <p>Time: a small clock shows the date the map is drawn for. Its slider sets how fast the time runs, from real time (one second per second) to 100,000 years per second (also under Space in the settings); “Now” goes back to the present date, the calendar button sets a day, and a tap on the date lets you type a year, up to two million years in the past or the future (e.g. −50000). The stars move with their measured velocities in straight lines (the Sun stays in the centre), the planets on their orbits, the spacecraft on their paths; the view follows the star it is centred on. The View tab takes you to the Earth, the Sun or the whole Galaxy.</p>
+<p>The Solar System's planets show their 456 known moons when you zoom in (down to 19,000 km); no moon of another planet is confirmed yet. A star's card has tabs: the basics (a small card), the position and motion, the star's properties, attributes and jump links.</p>
 <p>Around stars with planets a green band shows the habitable zone: the region around a star where a rocky planet could have liquid water on its surface (Kopparapu et al. 2013). The stronger band lies between the narrower limits, the fainter one reaches out to the wider limits. A planet counts as potentially habitable when it is in the zone and at most 2.5 Earth radii (or, without a measured radius, 10 Earth masses). Under Space in the settings, a thin rim can mark the stars with known planets on the map: blue, green with a potentially habitable planet. Under Layers, the stars can also be coloured by their planets. The spacecraft Voyager 1 and 2, Pioneer 10 and 11 and New Horizons are shown on their paths out of the Solar System, and the search finds them.</p>
 <p>Sharing: the share button at the top (beside the search) sends or copies a link to what is on screen: the view, the selected star, planet or galaxy, and the route. The address in the browser always holds that link too.</p>`,
   aboutText: `
@@ -555,6 +569,19 @@ const de: Record<MessageKey, string> = {
   distanceToCentre: 'Entfernung zum Zentrum',
   distanceMethod: 'Entfernung gemessen über',
   distanceSource: 'Entfernung aus',
+  moonOf: 'Mond von {planet}',
+  inclinationMoon: 'Bahnneigung (zur Bezugsebene)',
+  cardBasics: 'Kurz',
+  cardPosition: 'Position',
+  cardProperties: 'Stern',
+  cardAttributes: 'Attribute',
+  cardJumps: 'Sprünge',
+  distanceChange: 'Distanzveränderung zur Sonne',
+  approaching: 'nähert sich',
+  receding: 'entfernt sich',
+  passing: 'zieht vorbei',
+  speedAtLeast: 'mindestens {v} km/s (ohne Radialgeschwindigkeit)',
+  distanceChangeUnknown: 'unbekannt (ohne Radialgeschwindigkeit)',
   methodTRGB: 'ihre hellsten Roten Riesen',
   methodCep: 'pulsierende Sterne (Cepheiden)',
   methodMaser: 'Gaswolken nahe ihrem Zentrum, geometrisch',
@@ -595,13 +622,13 @@ const de: Record<MessageKey, string> = {
 <li><b>Linke Maustaste ziehen</b>: drehen</li>
 <li><b>Rechte Maustaste ziehen</b> oder <b>Umschalt + links ziehen</b>: verschieben</li>
 <li><b>Mausrad</b>: zoomen</li>
-<li><b>Klick</b> auf einen Stern: Details · <b>Doppelklick</b>: Blickpunkt dorthin</li>
+<li><b>Klick</b> auf einen Stern: Details · <b>Doppelklick</b>: Blickpunkt dorthin (mit begonnener Route: als Ziel)</li>
 </ul>
 <h3>Touch</h3>
 <ul>
 <li><b>Ein Finger</b>: drehen</li>
 <li><b>Zwei Finger</b>: spreizen zum Zoomen, ziehen zum Verschieben</li>
-<li><b>Tippen</b> auf einen Stern: Details · <b>Doppeltippen</b>: Blickpunkt dorthin</li>
+<li><b>Tippen</b> auf einen Stern: Details · <b>Doppeltippen</b>: Blickpunkt dorthin (mit begonnener Route: als Ziel)</li>
 </ul>
 <h3>Tastatur</h3>
 <ul>
@@ -617,6 +644,7 @@ const de: Record<MessageKey, string> = {
 <p>Die Suche kennt Sterne, Planeten und Galaxien. Das leere Suchfeld zeigt die fünf zuletzt über die Suche gewählten. Ein Druck irgendwo neben die offenen Einstellungen schließt nur diese (es wird kein Stern gewählt); ein Klick neben einen Dialog schließt den Dialog.</p>
 <p>Ein Klick auf den Namen eines Sterns wählt diesen Stern; wo sich viele Sterne drängen, haben beschriftete Sterne Vorrang.</p>
 <p>Zeit: Eine kleine Uhr zeigt das Datum, für das die Karte gezeichnet ist. Ihr Regler stellt ein, wie schnell die Zeit läuft, von Echtzeit (eine Sekunde pro Sekunde) bis 100.000 Jahre pro Sekunde (auch unter „Weltall“ in den Einstellungen); „Jetzt“ springt zurück zum heutigen Datum, der Kalender-Knopf stellt einen Tag ein, und ein Tipp auf das Datum lässt dich ein Jahr eingeben, bis zu zwei Millionen Jahre in der Vergangenheit oder Zukunft (z. B. −50000). Die Sterne bewegen sich mit ihren gemessenen Geschwindigkeiten auf geraden Bahnen (die Sonne bleibt in der Mitte), die Planeten auf ihren Umlaufbahnen, die Raumsonden auf ihren Wegen; die Ansicht folgt dem Stern, auf den sie zentriert ist. Der Reiter „Ansicht“ bringt dich zur Erde, zur Sonne oder zur ganzen Galaxis.</p>
+<p>Die Planeten des Sonnensystems zeigen beim Hineinzoomen (bis 19.000 km) ihre 456 bekannten Monde; ein Mond eines anderen Planeten ist noch nicht bestätigt. Die Karte eines Sterns hat Reiter: das Wichtigste kurz (eine kleine Karte), Position und Bewegung, die Eigenschaften des Sterns, Attribute und Sprungverbindungen.</p>
 <p>Um Sterne mit Planeten zeigt ein grünes Band die habitable Zone: den Bereich um einen Stern, in dem ein Gesteinsplanet flüssiges Wasser auf seiner Oberfläche haben könnte (Kopparapu et al. 2013). Das kräftigere Band liegt zwischen den engeren Grenzen, das blassere reicht bis zu den weiter gefassten. Als möglicherweise lebensfreundlich gilt ein Planet in der Zone mit höchstens 2,5 Erdradien (oder, ohne gemessenen Radius, 10 Erdmassen). Unter „Weltall“ in den Einstellungen kann ein dünner Rand die Sterne mit bekannten Planeten auf der Karte markieren: blau, grün mit einem möglicherweise lebensfreundlichen Planeten. Unter „Ebenen“ lassen sich die Sterne auch nach ihren Planeten einfärben. Die Raumsonden Voyager 1 und 2, Pioneer 10 und 11 und New Horizons sind auf ihren Bahnen aus dem Sonnensystem zu sehen, und die Suche findet sie.</p>
 <p>Teilen: Der Teilen-Knopf oben (neben der Suche) verschickt oder kopiert einen Link zu dem, was zu sehen ist: Ansicht, ausgewählter Stern, Planet oder Galaxie und Route. Auch die Adresse im Browser enthält immer diesen Link.</p>`,
   aboutText: `

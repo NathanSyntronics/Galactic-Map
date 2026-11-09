@@ -269,9 +269,12 @@ def common_velocities(s: pd.DataFrame) -> int:
     flags = s["flags"].to_numpy(np.int64)
     rows = np.nonzero(sid >= 0)[0]
     if not len(rows):
+        s["rv_known"] = np.isfinite(s["rv"].to_numpy(float)) if "rv" in s else False
         return 0
     rv = s["rv"].to_numpy(float) if "rv" in s else np.full(len(s), np.nan)
     rv_gaia = s["rv_gaia"].fillna(False).to_numpy(bool) if "rv_gaia" in s else np.zeros(len(s), bool)
+    # whether a star's velocity includes a measured radial velocity (its own, or its system's)
+    rv_known = np.isfinite(rv)
     df = pd.DataFrame(
         {
             "sid": sid[rows],
@@ -288,12 +291,14 @@ def common_velocities(s: pd.DataFrame) -> int:
         if len(ok):
             best = ok.sort_values(["quality", "prim"], ascending=[False, False]).iloc[0]
             v = vel[best.row]
+            rv_known[g.row.to_numpy()] = best.quality > 0
         else:
             continue
         r = g.row.to_numpy()
         changed += int((~np.isclose(vel[r], v).all(axis=1)).sum())
         vel[r] = v
     s["vx"], s["vy"], s["vz"] = vel[:, 0], vel[:, 1], vel[:, 2]
+    s["rv_known"] = rv_known
     log.info("systems: %d members take their system's velocity", changed)
     return changed
 
