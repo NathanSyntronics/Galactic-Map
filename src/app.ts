@@ -38,7 +38,8 @@ import {
   type JumpNetwork,
   type NetworkOptions,
 } from './network/places';
-import { boxIntersectsCapsule } from './network/capsule';
+import { boxIntersectsCapsule, segmentDistance } from './network/capsule';
+import type { PlaceLink } from './network/jumps';
 import { ROUTE_STORAGE_KEY, RoutePlanner, parseStoredRoute, type RouteEnd, type RouteResult, type StoredRoute, type Waypoint } from './network/planner';
 import { JumpLines } from './render/links';
 import { DropLines, Marker, PolarGrid } from './render/overlays';
@@ -73,7 +74,7 @@ import {
   starCloseScale,
 } from './settings';
 import { AttributesDialog } from './ui/attributes-dialog';
-import { InfoPanel, displayName, type JumpListing, type StarInfo } from './ui/info';
+import { InfoPanel, displayName, type JumpGap, type JumpListing, type StarInfo } from './ui/info';
 import { GalaxyCard } from './ui/galaxy-card';
 import { PlanetCard } from './ui/planet-card';
 import { PlanetLayer } from './render/planets';
@@ -88,7 +89,7 @@ import { CLOCK_MAX_JD, CLOCK_MIN_JD, PlanetTimeControl, formatClockDate, yearOfJ
 import { ProbeCard } from './ui/probe-card';
 import { ProbeLayer } from './render/probes';
 import { scaleClipSpace } from './render/clip';
-import { MAX_DISCS, StarDiscLayer, starRadiusLy, type StarDisc } from './render/star-discs';
+import { MAX_DISCS, MAX_STAR_RADIUS_LY, StarDiscLayer, starRadiusLy, type StarDisc } from './render/star-discs';
 import { loadProbes, probePosition, type ProbeCatalogue } from './data/probes';
 import { SearchBox, SearchIndex, hitOf, type SearchHit, type SearchTuple } from './ui/search';
 
@@ -212,6 +213,8 @@ export class App {
    * drawn, the jump network is neither drawn nor computed (docs/ROUTES.md).
    */
   private routeOnly = false;
+  /** The route end a double tap chooses: the other one than the route was begun with (null: the missing one). */
+  private routeTapEnd: 'from' | 'to' | null = null;
   /** The jump network needs to be recomputed. */
   private jumpDirty = true;
   /** The radius changed or the selection lost nodes: recomputed only if the network no longer serves. */
@@ -399,7 +402,7 @@ export class App {
     this.planetCard = new PlanetCard(container);
     this.catchSecondTap(this.planetCard.root);
     this.planetCard.onClose = () => this.select(null);
-    this.planetCard.onFlyTo = (i) => this.flyToPlanet(i);
+    this.planetCard.onFlyTo = (i) => this.centrePlanet(i);
     this.probeCard = new ProbeCard(container);
     this.catchSecondTap(this.probeCard.root);
     this.probeCard.onClose = () => this.select(null);
@@ -411,7 +414,13 @@ export class App {
       void this.ensurePlanets().then(() => this.flyToSystem(info.key));
     };
     this.info.jumpsOf = (info) => this.jumpListing(info);
-    this.info.onRoute = (info, end) => this.planner.setEnd(end, this.routeEnd(info));
+    this.info.onJumpGap = (info, gap) => this.jumpGap(info, gap);
+    this.info.onRoute = (info, end) => {
+      // a route begun with this end: double taps choose the other one (see doubleTapStar)
+      const other = end === 'from' ? 'to' : 'from';
+      if (!this.planner[other]) this.routeTapEnd = other;
+      this.planner.setEnd(end, this.routeEnd(info));
+    };
 
     // bottom left: the route box above the legend
     const stack = el('div', 'bottom-left');
@@ -467,9 +476,15 @@ export class App {
       readStoredRoute(),
     );
     this.planner.onChange = () => this.routeChanged();
-    this.routeBox.onSwap = () => this.planner.swap();
+    this.routeBox.onSwap = () => {
+      if (this.routeTapEnd) this.routeTapEnd = this.routeTapEnd === 'from' ? 'to' : 'from';
+      this.planner.swap();
+    };
     this.routeBox.onMode = (mode) => this.planner.setMode(mode);
-    this.routeBox.onRemove = () => this.planner.clear();
+    this.routeBox.onRemove = () => {
+      this.routeTapEnd = null;
+      this.planner.clear();
+    };
     this.routeBox.onRetry = () => this.planner.retry();
     this.routeBox.onShowAll = () => this.showWholeRoute();
     this.routeBox.onPick = (k) => this.pickWaypoint(k);
@@ -1263,15 +1278,16 @@ export class App {
       const cam = this.camera.position;
       const v = new Vector3();
       for (const rn of this.starfield.visibleNodes()) {
-        if (rn.node.box.distanceToPoint(target) > s.radius + rn.data.vmax * Math.abs(rn.data.movedTo)) continue;
+        if (rn.node.box.distanceToPoint(target) > s.radius + MAX_STAR_RADIUS_LY + rn.data.vmax * Math.abs(rn.data.movedTo)) continue;
         const d = rn.data;
         for (let i = 0; i < d.count; i++) {
           if (rn.sizes[i] <= 0) continue;
           this.starAt(d, i, v);
-          const fromTarget = v.distanceTo(target);
+          const radius = starRadiusLy(d, i);
+          // in the visible sphere as long as any of it is (Betelgeuse is several AU across)
+          const fromTarget = Math.max(v.distanceTo(target) - radius, 0);
           if (fromTarget > s.radius) continue;
           const depth = Math.max(v.distanceTo(cam), 1e-12);
-          const radius = starRadiusLy(d, i);
           const px = (2 * radius * scale) / depth;
           const core = SPRITE_CORE * spritePx(rn.sizes[i], sizeMul, scale, depth, minPx, maxPx);
           const ratio = px / Math.max(core, 1e-6);
@@ -1612,6 +1628,8 @@ export class App {
   private updatePlanets(s: Settings, scale: number): void {
     if (s.planets && s.radius < 2) void this.ensurePlanets();
     this.planetLayer.showZones = s.habitableZones;
+    this.planetLayer.showUnknownMoons = s.unknownMoons;
+    this.planetLayer.selected = this.selectedPlanet;
     this.planetLayer.update(this.nav.target, s.radius, this.camera, scale, this.renderer.getPixelRatio(), this.planetJd(), s.planets);
     if (s.probes && s.radius < 2) void this.ensureProbes();
     const jd = this.planetJd();
@@ -1720,6 +1738,13 @@ export class App {
     this.nav.flyTo(cat.hosts[p.host].pos, distanceForRadius((1.6 * p.a * (1 + p.e)) / AU_PER_LY));
   }
 
+  /** Centres the view on a planet or moon (where it is now) and follows it. */
+  private centrePlanet(i: number): void {
+    if (!this.planetLayer.catalogue) return;
+    this.nav.flyTo(this.planetLayer.position(i, this.planetJd()));
+    this.follow({ planet: i });
+  }
+
   /** Follows a star or planet from the flight just started (it may move fast on the way). */
   private follow(a: Anchor): void {
     this.anchor = a;
@@ -1758,10 +1783,13 @@ export class App {
     const cy = camPos.y;
     const cz = camPos.z;
     const dt = this.drawDt;
+    // close up, a star drawn at its true size keeps its label while any of it is in the sphere
+    const closeUp = s.radius < DISC_RADIUS;
+    const reach = closeUp ? MAX_STAR_RADIUS_LY : 0;
     for (const rn of starsHidden(s.radius) ? [] : this.starfield.visibleNodes()) {
       const d = rn.data;
       // quick reject: node entirely outside the sphere
-      if (rn.node.box.distanceToPoint(target) > s.radius + rn.data.vmax * Math.abs(rn.data.movedTo)) continue;
+      if (rn.node.box.distanceToPoint(target) > s.radius + reach + rn.data.vmax * Math.abs(rn.data.movedTo)) continue;
       for (let i = 0; i < d.count; i++) {
         const x = starCoord(d, 3 * i, dt);
         const y = starCoord(d, 3 * i + 1, dt);
@@ -1769,7 +1797,8 @@ export class App {
         const dx = x - tx;
         const dy = y - ty;
         const dz = z - tz;
-        if (dx * dx + dy * dy + dz * dz > r2) continue;
+        const dd = dx * dx + dy * dy + dz * dz;
+        if (dd > r2 && !(closeUp && Math.sqrt(dd) - starRadiusLy(d, i) <= s.radius)) continue;
         if (rn.sizes[i] <= 0) continue;
         inView++;
         if (labelMode === 'none') continue;
@@ -2274,12 +2303,29 @@ export class App {
   }
 
   /** The info card's list of the links of a star's place. */
-  private jumpListing(info: StarInfo): JumpListing | null {
-    const net = this.jumpLines.network;
-    if (!this.store.get().jumps || this.routeOnly || !net || net.overflow) return null;
+  /**
+   * The jump links of a star for its card: from the view's network, else (zoomed out with a route
+   * shown) from the route's corridor; otherwise why there are none to list.
+   */
+  private jumpListing(info: StarInfo): JumpListing | JumpGap | null {
+    const s = this.store.get();
+    if (!s.jumps) return { gap: 'off' };
     const { path, i } = parseStarKey(info.key);
-    const found = linksOfStar(net, path, i);
-    if (!found) return null;
+    const net = this.jumpLines.network;
+    if (net && !this.routeOnly && !net.overflow) {
+      const found = linksOfStar(net, path, i);
+      if (found) return this.listingOf(net, found, info, path, i);
+    }
+    // a star near the route: its links in the corridor's network are those of the full network
+    const c = this.planner.corridor;
+    if (c && c.net.range === s.jumpRange && segmentDistance(info.pos, c.from, c.to) <= c.width) {
+      const found = linksOfStar(c.net, path, i);
+      if (found) return this.listingOf(c.net, found, info, path, i);
+    }
+    return { gap: 'zoom' };
+  }
+
+  private listingOf(net: JumpNetwork, found: { place: number; links: PlaceLink[] }, info: StarInfo, path: string, i: number): JumpListing {
     const { places } = net;
     const rep = places.sources[places.repSource[found.place]].data;
     const repIndex = places.repIndex[found.place];
@@ -2298,6 +2344,19 @@ export class App {
         return { name: this.starName(d, k), distance: l.length, kind: l.kind, pick: () => this.pickJump(d, k) };
       }),
     };
+  }
+
+  /** The button on a card without jump links: switches the network on, or zooms in to the star. */
+  private jumpGap(info: StarInfo, gap: JumpGap['gap']): void {
+    const s = this.store.get();
+    if (gap === 'off') {
+      this.store.set({ jumps: true });
+      return;
+    }
+    // close enough for the network (a route alone is drawn beyond three jump ranges)
+    const r = Math.min(20, 2.5 * s.jumpRange);
+    if (!s.autoRadius && s.radius > r) this.store.set({ radius: r });
+    this.nav.flyTo(info.pos, Math.min(this.nav.distance, distanceForRadius(r)));
   }
 
   /** A star picked in the info card's jump list: select it and centre the view on it. */
@@ -2395,14 +2454,18 @@ export class App {
 
   /** A star of the info card as a route end. */
   /**
-   * A double tap on a star: with a route begun, the star becomes its missing end (with a start,
-   * its destination; with only a destination, its start); otherwise the view flies to it.
+   * A double tap on a star: with a route begun, the star becomes the end the route was not begun
+   * with (begun with "To here": every double tap chooses a new start; with "From here": a new
+   * destination); otherwise, or on one of its ends, the view flies to it.
    */
   private doubleTapStar(info: StarInfo): void {
     const { from, to } = this.planner;
     const is = (e: RouteEnd | null) => !!e && `${e.path}:${e.index}` === info.key;
-    if (from && !is(from)) this.planner.setEnd('to', this.routeEnd(info));
-    else if (!from && to && !is(to)) this.planner.setEnd('from', this.routeEnd(info));
+    let end = this.routeTapEnd;
+    // the end the route was begun with is gone: the missing one (a start: the destination)
+    if (end && !(end === 'from' ? to : from)) end = null;
+    end ??= from ? 'to' : to ? 'from' : null;
+    if (end && !is(from) && !is(to)) this.planner.setEnd(end, this.routeEnd(info));
     else this.nav.flyTo(info.pos);
   }
 
@@ -2464,7 +2527,10 @@ export class App {
       // a partial route: the destination it did not reach gets its own marker
       this.routeLine.set(this.route ? this.route.waypoints.map((w) => w.pos) : null, this.route?.found ?? true, p.to?.pos ?? null);
       this.updateLegend();
+      // the card's jump links may come from the route's corridor
+      this.info.updateJumps();
     }
+    if (!p.from && !p.to) this.routeTapEnd = null;
     // start and destination labels
     this.candidatesDirty = true;
     this.scheduleHash();

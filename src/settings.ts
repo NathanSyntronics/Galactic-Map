@@ -38,6 +38,8 @@ export interface Settings {
   habitableZones: boolean;
   /** A thin rim around the stars with known planets: blue, green with a potentially habitable one. */
   planetMarks: boolean;
+  /** The moons of unknown radius (most of the giant planets' small outer moons). */
+  unknownMoons: boolean;
   quality: Quality;
   /** Attribute that sets the star colours ('' natural temperature colour). */
   colorBy: string;
@@ -88,6 +90,7 @@ export const DEFAULT_SETTINGS: Settings = {
   probes: true,
   habitableZones: true,
   planetMarks: false,
+  unknownMoons: false,
   quality: 'medium',
   colorBy: '',
   sizeBy: '',

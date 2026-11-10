@@ -67,6 +67,11 @@ export interface JumpListing {
   links: { name: string; distance: number; kind: number; pick: () => void }[];
 }
 
+/** Why a star's jump links are not listed: the network is switched off, or not computed this far out. */
+export interface JumpGap {
+  gap: 'off' | 'zoom';
+}
+
 const KIND_TITLES = ['jumpKindCapacity', 'jumpKindAlone', 'jumpKindConnect'] as const;
 
 function valueText(def: AttributeDef, v: AttrValue): string {
@@ -118,7 +123,9 @@ export class InfoPanel {
   /** "From here" / "To here" (route start / destination). */
   onRoute: (info: StarInfo, end: 'from' | 'to') => void = () => {};
   /** Jump links of a star (null: the network is off or the star is not part of it). */
-  jumpsOf: (info: StarInfo) => JumpListing | null = () => null;
+  jumpsOf: (info: StarInfo) => JumpListing | JumpGap | null = () => null;
+  /** The button under a gap: switch the network on, or zoom in to the star. */
+  onJumpGap: (info: StarInfo, gap: JumpGap['gap']) => void = () => {};
   /** True while the attribute form is open (the card is then not rebuilt by data changes). */
   editing = false;
   private jumpBox: HTMLElement | null = null;
@@ -201,14 +208,25 @@ export class InfoPanel {
   }
 
   private renderJumps(info: StarInfo, box: HTMLElement): void {
-    const listing = this.jumpsOf(info);
+    const found = this.jumpsOf(info);
+    const listing = found && !('gap' in found) ? found : null;
+    const gap = found && 'gap' in found ? found.gap : null;
     const key = listing
       ? [listing.via, listing.range, ...listing.links.map((l) => `${l.name}@${formatLy(l.distance)}/${l.kind}`)].join('|')
-      : '';
+      : gap ? `gap:${gap}` : '';
     if (key === this.jumpKey) return;
     this.jumpKey = key;
     box.replaceChildren();
-    box.hidden = !listing;
+    box.hidden = !listing && !gap;
+    if (gap) {
+      // no list here: why, and the way to one
+      box.appendChild(el('p', 'hint', t(gap === 'off' ? 'jumpGapOff' : 'jumpGapZoom')));
+      const btn = el('button', 'btn', t(gap === 'off' ? 'jumpGapOn' : 'jumpGapZoomIn'));
+      btn.type = 'button';
+      btn.addEventListener('click', () => this.onJumpGap(info, gap));
+      box.appendChild(btn);
+      return;
+    }
     if (!listing) return;
     const head = el('div', 'attr-head');
     head.appendChild(el('h3', '', t('jumpLinks', { n: listing.links.length })));

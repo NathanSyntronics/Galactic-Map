@@ -39,6 +39,8 @@ import {
 } from '../data/planets';
 
 const ORBIT_POINTS = 256;
+/** Opacity of a moon's orbit (fainter than a planet's: there are many). */
+const MOON_ORBIT_OPACITY = 0.3;
 const HZ_COLOR = 0x3fcf7a;
 /** Opacity of the wider (optimistic) band; the narrower one is drawn on top of it. */
 const HZ_OPACITY = 0.12;
@@ -93,6 +95,14 @@ export function planetColor(p: Planet): string {
 export function planetSymbolFactor(radiusEarth: number): number {
   const r = Number.isFinite(radiusEarth) ? Math.min(Math.max(radiusEarth, 0.3), 25) : 2;
   return 0.014 * Math.pow(r, 0.33);
+}
+
+/**
+ * Radius (ly) of a planet's symbol at a visible radius, without the true size it never falls
+ * below: its share of the view, at most a third of its periapsis.
+ */
+export function symbolRadius(p: Planet, viewRadius: number): number {
+  return Math.min(viewRadius * planetSymbolFactor(p.radius), ((p.a * (1 - p.e)) / AU_PER_LY) / 3);
 }
 
 /** True radius of a planet or moon (ly); unknown ones as a mini-Neptune. */
@@ -174,6 +184,10 @@ export class PlanetLayer {
   drawn: DrawnPlanet[] = [];
   /** Draw the habitable zones. */
   showZones = true;
+  /** Draw the moons whose radius is unknown (the many small outer moons of the giant planets). */
+  showUnknownMoons = false;
+  /** The planet or moon selected (drawn also when it is one of the moons hidden). */
+  selected: number | null = null;
   private readonly tmpPlanet = new Vector3();
   private readonly tmpMoon = new Vector3();
   private readonly tmpVec = new Vector3();
@@ -277,12 +291,11 @@ export class PlanetLayer {
         if (line.visible) this.keepOnOrbit(line, view.orbitE, j, p, jd, this.tmpPlanet.distanceTo(camera.position) / css);
         const sprite = view.sprites[j];
         sprite.position.copy(tmp);
-        // its moons around it (their orbits large enough on screen); the planet's symbol stays
-        // inside the innermost one drawn (but never smaller than the planet)
+        // the symbol keeps its share of the view until the true size is larger (like the stars);
+        // its moons appear around it once their orbits lie well outside it
+        const r = planetDrawRadius(p, radius);
         const moonView = view.moons.get(j);
-        let inner = Infinity;
-        if (moonView) inner = this.updateMoons(moonView, tmp, host.pos, camera, css, radius, jd, pFade);
-        const r = Math.max(trueRadius(p), Math.min(planetDrawRadius(p, radius), 0.6 * inner));
+        if (moonView) this.updateMoons(moonView, tmp, host.pos, camera, css, radius, jd, pFade, symbolRadius(p, radius));
         // the disk fills 68 % of the symbol (the rest is its glow)
         sprite.scale.setScalar((2 * r) / 0.68);
         (sprite.material as SpriteMaterial).opacity = alpha;
@@ -307,24 +320,30 @@ export class PlanetLayer {
 
   /**
    * A planet's moons: their orbits and symbols around it (at `offset` from the star), fading in
-   * with their orbits' size on screen. Returns the periapsis (ly) of the innermost moon drawn.
+   * with their orbits' size on screen and once they lie well outside the planet's symbol
+   * (`planetSymbol`, ly: its share of the view), so that zoomed out they do not cover it.
    */
-  private updateMoons(view: MoonView, offset: Vector3, star: Vector3, camera: PerspectiveCamera, css: number, radius: number, jd: number, fade: number): number {
+  private updateMoons(view: MoonView, offset: Vector3, star: Vector3, camera: PerspectiveCamera, css: number, radius: number, jd: number, fade: number, planetSymbol: number): void {
     const cat = this.cat!;
     view.group.position.copy(offset);
     const planetPos = this.tmpPlanet.copy(offset).add(star);
     const camD = Math.max(planetPos.distanceTo(camera.position), 1e-15);
-    let inner = Infinity;
     view.ids.forEach((k, j) => {
       const m = cat.planets[k];
-      const orbitPx = (m.a / AU_PER_LY / camD) * css;
-      // orbits far larger than the view (the outer, irregular moons) would only cross it as lines
-      const orbitAlpha = smoothstep(3, 14, orbitPx) * fade * (1 - smoothstep(1.5 * radius, 4 * radius, m.a / AU_PER_LY));
-      const alpha = smoothstep(2, 8, orbitPx) * fade;
       const line = view.orbits[j];
-      line.material.opacity = 0.4 * orbitAlpha;
-      line.visible = orbitAlpha > 0.01;
       const sprite = view.sprites[j];
+      // the many small moons of unknown size only on request (or the one selected)
+      if (!this.showUnknownMoons && m.flags & PlanetFlag.RADIUS_ESTIMATED && k !== this.selected) {
+        line.visible = sprite.visible = false;
+        return;
+      }
+      const orbitPx = (m.a / AU_PER_LY / camD) * css;
+      const outside = k === this.selected ? 1 : smoothstep(1.5, 3, (m.a * (1 - m.e)) / AU_PER_LY / planetSymbol);
+      // orbits far larger than the view (the outer, irregular moons) would only cross it as lines
+      const orbitAlpha = smoothstep(3, 14, orbitPx) * fade * outside * (1 - smoothstep(1.5 * radius, 4 * radius, m.a / AU_PER_LY));
+      const alpha = smoothstep(2, 8, orbitPx) * fade * outside;
+      line.material.opacity = MOON_ORBIT_OPACITY * orbitAlpha;
+      line.visible = orbitAlpha > 0.01;
       sprite.visible = alpha > 0.01;
       if (!line.visible && !sprite.visible) return;
       planetOffset(m, jd, this.tmpMoon);
@@ -333,7 +352,6 @@ export class PlanetLayer {
         this.keepOnOrbit(line, view.orbitE, j, m, jd, d / css);
       }
       if (!sprite.visible) return;
-      inner = Math.min(inner, (m.a * (1 - m.e)) / AU_PER_LY);
       sprite.position.copy(this.tmpMoon);
       const r = planetDrawRadius(m, radius);
       sprite.scale.setScalar((2 * r) / 0.68);
@@ -342,7 +360,6 @@ export class PlanetLayer {
       const dist = Math.max(pos.distanceTo(camera.position), 1e-15);
       this.drawn.push({ index: k, pos, px: (r / dist) * css, orbitPx, alpha });
     });
-    return inner;
   }
 
   /**

@@ -146,8 +146,11 @@ them apart.
 * Keyboard: **J** toggles the network.
 * While a route is shown (`ROUTES.md`) and the visible radius is larger than `3 · range`, the
   network is neither drawn nor computed, and its margin is not loaded; the legend and the status
-  line in the settings say so, and the info card lists no links. Zoomed in again, it is computed
-  for the current view.
+  line in the settings say so. The info card then lists the links of a star near the route from
+  the route's corridor network (the links of places within the search width of the segment are
+  those of the full network); for other stars it says that the network is not computed this far
+  out, with a button that zooms in to the star (and, with the network switched off, one that
+  switches it on). Zoomed in again, it is computed for the current view.
 
 ## Settings
 

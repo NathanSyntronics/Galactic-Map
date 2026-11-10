@@ -13,9 +13,11 @@ This document is the specification the implementation follows.
   system counts as one place, as in the network).
 * The info card has the buttons **Start** and **Ziel** (English: *From here*, *To here*; the
   long text as a tooltip). Setting one end shows the route box; once both are set the route is
-  computed. Choosing the star of the other end clears that end. With one end set, a double tap on
-  another star makes it the missing end (with a start: the destination; with only a destination:
-  the start).
+  computed. Choosing the star of the other end clears that end. A double tap on another star
+  sets the end the route was not begun with: begun with *Ziel*, every double tap chooses a new
+  start; begun with *Start*, a new destination (swapping the ends swaps this too; without such a
+  beginning, e.g. after a reload, the missing end, else the destination). A double tap on one of
+  the ends centres the view on it.
 * Start, destination and mode are stored in the browser (designations and names, plus the node
   and index of the star) and the route is computed again after a reload, once the data is there.
   The node and index are checked against the designation first. If the star data was rebuilt,

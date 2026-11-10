@@ -16,7 +16,7 @@ import {
   type PlanetFile,
 } from '../../src/data/planets';
 import { distanceUnit, distanceUnitScale, formatLy, setLang } from '../../src/i18n';
-import { planetDrawRadius, planetSymbolFactor, zonePlaneNormal } from '../../src/render/planets';
+import { planetDrawRadius, planetSymbolFactor, symbolRadius, zonePlaneNormal } from '../../src/render/planets';
 
 (globalThis as { document?: unknown }).document ??= { documentElement: {} };
 
@@ -92,6 +92,19 @@ describe('planets', () => {
         expect(E - e * Math.sin(E)).toBeCloseTo(mm, 10);
       }
     }
+  });
+
+  it("keeps a planet's symbol size until its true size is larger", () => {
+    // Jupiter-like: 11.2 Earth radii at 5.2 AU
+    const p = { ...cat.planets[0], a: 5.2, e: 0.048, radius: 11.2 };
+    const trueR = 11.2 * EARTH_RADIUS_LY;
+    for (const view of [1e-3, 1e-4, 1e-5, 1e-6, 1e-7]) {
+      // drawn: the symbol or the true size, whichever is larger (never smaller than either)
+      expect(planetDrawRadius(p, view)).toBeCloseTo(Math.max(trueR, symbolRadius(p, view)), 15);
+    }
+    // the symbol is a share of the view, at most a third of the periapsis
+    expect(symbolRadius(p, 1e-5) / 1e-5).toBeCloseTo(planetSymbolFactor(11.2), 12);
+    expect(symbolRadius(p, 10)).toBeCloseTo((5.2 * (1 - 0.048)) / AU_PER_LY / 3, 12);
   });
 
   it('draws an orbit through the planet, its points crowded around it', () => {

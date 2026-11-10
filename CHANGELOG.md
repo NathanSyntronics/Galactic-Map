@@ -2,6 +2,23 @@
 
 Every round of changes that goes live raises the version by 0.01 (README, *Versions*).
 
+## 1.09 (2026-11-10)
+
+* Planets keep the size of their symbol while zooming in until their true size is larger (Jupiter
+  no longer jumps to a small disc when its moons appear); the moons appear only once their orbits
+  lie well outside the planet's symbol, and their orbits are fainter.
+* *Monde mit unbekanntem Radius anzeigen* (settings, *Space*, off by default): the many small
+  outer moons of Jupiter and Saturn only on request (41 of the 456 moons have a known radius).
+* Large stars close up (Betelgeuse) no longer turn half transparent or vanish when the view centre
+  moves off their middle: they stay while any part of them is in the visible sphere.
+* *Zentrieren* on a planet's or moon's card centres the view on it and follows it (it used to fly
+  to its star).
+* A route begun with *Ziel*: every double tap chooses a new start; begun with *Start*: a new
+  destination.
+* The *Sprünge* tab is no longer empty: zoomed out with a route shown, the stars near the route
+  list their links from the route's corridor; otherwise it says why there are none, with a button
+  to zoom in (or to switch the jump network on).
+
 ## 1.08 (2026-11-10)
 
 * Close to a planet, it stays on its orbit line: the line was a polygon whose corners lay up to

@@ -10,6 +10,8 @@ import { Flag, UNKNOWN_I16, type NodeData } from '../data/format';
 /** The Sun's radius in light years. */
 export const SOLAR_RADIUS_LY = 6.957e8 / 9.4607304725808e15;
 const SUN_TEFF = 5772;
+/** No star is larger than this (2,000 solar radii, 9 AU; the largest known reach about 1,500). */
+export const MAX_STAR_RADIUS_LY = 2000 * SOLAR_RADIUS_LY;
 
 /**
  * True radius (ly) of star i: from its luminosity and temperature (Stefan–Boltzmann: R ∝ √L / T²),
@@ -17,6 +19,10 @@ const SUN_TEFF = 5772;
  * dwarfs at their typical sizes.
  */
 export function starRadiusLy(node: NodeData, i: number): number {
+  return Math.min(starRadiusRaw(node, i), MAX_STAR_RADIUS_LY);
+}
+
+function starRadiusRaw(node: NodeData, i: number): number {
   const f = node.flags[i];
   if (f & Flag.SUN) return SOLAR_RADIUS_LY;
   const l = node.logL[i];

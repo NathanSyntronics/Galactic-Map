@@ -5,7 +5,7 @@
  */
 import { designationOf, type NodeData } from '../data/format';
 import { nodesInCapsule, type Aabb, type Vec3 } from './capsule';
-import { MAX_PAIRS, MAX_PLACES, computeNetwork, placeOfStar, type CapacityRule, type PlaceSource, type PlaceSet } from './places';
+import { MAX_PAIRS, MAX_PLACES, computeNetwork, placeOfStar, type CapacityRule, type JumpNetwork, type PlaceSource, type PlaceSet } from './places';
 import { planRoute, type CorridorGraph, type RouteMode, type RouteTry } from './route';
 
 /** A corridor whose nodes hold more data than this is refused before loading (Sun–Betelgeuse at w = 128: 25 MB). */
@@ -199,6 +199,15 @@ export function sameStar(a: RouteEnd | null, b: RouteEnd | null): boolean {
 /** A network of a corridor, kept for the waypoints of the route. */
 interface CorridorNet extends CorridorGraph {
   places: PlaceSet;
+  net: JumpNetwork;
+}
+
+/** The jump network of a route's corridor: the links of places within `width` of the segment are those of the full network. */
+export interface RouteCorridor {
+  net: JumpNetwork;
+  from: Vec3;
+  to: Vec3;
+  width: number;
 }
 
 /** A corridor node's data and its own sizes (computed with the current settings). */
@@ -246,6 +255,8 @@ export class RoutePlanner<N extends CorridorNode> {
   status: RouteStatus = { kind: 'empty' };
   /** The route shown: the last result for the current ends (kept while a recomputation runs). */
   route: RouteResult | null = null;
+  /** The network of the route's corridor (its stars' jump links while the view has no network). */
+  corridor: RouteCorridor | null = null;
   /** Called after any change of the ends, mode, status or route. */
   onChange: () => void = () => {};
 
@@ -287,6 +298,7 @@ export class RoutePlanner<N extends CorridorNode> {
     if (end && sameStar(end, this[other])) this[other] = null;
     this[which] = end;
     this.route = null;
+    this.corridor = null;
     this.save();
     this.run();
   }
@@ -297,6 +309,7 @@ export class RoutePlanner<N extends CorridorNode> {
     this.to = to && !sameStar(from, to) ? to : null;
     this.mode = mode;
     this.route = null;
+    this.corridor = null;
     this.save();
     this.run();
   }
@@ -318,6 +331,7 @@ export class RoutePlanner<N extends CorridorNode> {
   clear(): void {
     this.from = this.to = null;
     this.route = null;
+    this.corridor = null;
     this.cache.clear();
     this.save();
     this.run();
@@ -371,6 +385,7 @@ export class RoutePlanner<N extends CorridorNode> {
     if (!this.from || !this.to) {
       this.host.want([]);
       this.route = null;
+      this.corridor = null;
       this.setStatus({ kind: this.from || this.to ? 'incomplete' : 'empty' });
       return;
     }
@@ -387,6 +402,7 @@ export class RoutePlanner<N extends CorridorNode> {
       if (ctl.signal.aborted) return;
       this.host.want([]);
       this.route = null;
+      this.corridor = null;
       if (err instanceof LoadFailed) return this.setStatus({ kind: 'failed', tiles: err.tiles });
       if (err instanceof LookupFailed) return this.setStatus({ kind: 'lookupFailed', end: err.end });
       console.error('route planning failed', err);
@@ -456,6 +472,7 @@ export class RoutePlanner<N extends CorridorNode> {
         start: placeOfStar(places, from.path, from.index),
         goal: placeOfStar(places, to.path, to.index),
         places,
+        net,
       };
     });
     if (signal.aborted || plan.status === 'cancelled') return;
@@ -465,6 +482,7 @@ export class RoutePlanner<N extends CorridorNode> {
     const keep = new Set(corridor.map((n) => n.path));
     for (const p of [...this.cache.keys()]) if (!keep.has(p)) this.cache.delete(p);
 
+    if ('route' in plan && plan.route) this.corridor = { net: plan.route.graph.net, from: from.pos, to: to.pos, width: plan.route.width };
     const straight = distance(from.pos, to.pos);
     const result = (t: RouteTry<CorridorNet>): RouteResult => routeResult(t, mode, opt.range, straight, stats);
     switch (plan.status) {

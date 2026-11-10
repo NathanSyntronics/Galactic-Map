@@ -52,7 +52,8 @@ push, see *Deployment*).
   host distance (6,428 around 4,818 stars; hosts that no star catalogue has, such as the Kepler and
   TESS stars, come from the NASA Exoplanet Archive) and the eight of the Solar System, on their measured
   orbits at their positions for today (or running faster), drawn larger than they are, like the
-  stars, and the Solar System's 456 known moons (JPL; no exomoon is confirmed yet). Close pairs such
+  stars, and the Solar System's 456 known moons (JPL; no exomoon is confirmed yet; the 415 small
+  ones of unknown radius only on request, settings *Space*). Close pairs such
   as Alpha Centauri A and B separate ([`docs/PLANETS.md`](docs/PLANETS.md)).
   Below 1 AU distances are written in millions of kilometres. The habitable zone of each planet
   host is drawn as a green band, and potentially habitable planets are marked.
@@ -171,7 +172,8 @@ Star colours follow the effective temperature. Symbol sizes follow the luminosit
 stellar diameters would be invisibly small. Only close up, once a star's real disc would look at
 least as large as its symbol, it is drawn at its true size (from luminosity and temperature:
 R ∝ √L / T²), limb darkened, for the eight largest on screen (`src/render/star-discs.ts`):
-Betelgeuse some 800 solar radii (almost 4 AU), the Sun within a few million kilometres.
+Betelgeuse some 800 solar radii (almost 4 AU), the Sun within a few million kilometres. Such a
+star stays in the visible sphere as long as any part of it does (its surface, not its centre).
 
 ### Data layers and your own attributes
 

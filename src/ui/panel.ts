@@ -392,6 +392,7 @@ export class SettingsPanel {
     space.appendChild(this.checkbox('probesSetting', () => s().probes, (v) => this.store.set({ probes: v })));
     space.appendChild(this.checkbox('habitableZones', () => s().habitableZones, (v) => this.store.set({ habitableZones: v })));
     space.appendChild(this.checkbox('planetMarks', () => s().planetMarks, (v) => this.store.set({ planetMarks: v })));
+    space.appendChild(this.checkbox('unknownMoons', () => s().unknownMoons, (v) => this.store.set({ unknownMoons: v })));
     space.appendChild(el('h3', '', t('galaxiesSection')));
     space.appendChild(this.checkbox('galaxies', () => s().galaxies, (v) => this.store.set({ galaxies: v })));
     space.appendChild(this.checkbox('milkyWay', () => s().milkyWay, (v) => this.store.set({ milkyWay: v })));

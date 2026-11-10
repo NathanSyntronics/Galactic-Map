@@ -120,13 +120,17 @@ System's planets have 456 known moons (Earth 1, Mars 2, Jupiter 115, Saturn 292,
 the planet's equator (its IAU pole) or the moon's local Laplace plane (its pole given); the node is
 counted from that plane's ascending node on the ICRF equator. They become P and Q (galactic) and a
 mean anomaly at J2000 like the planets' (no apsidal or nodal precession). Mean radii from JPL's
-physical parameters (46 moons); the others a few km (flag 1, radius estimated).
+physical parameters (41 of the moons on the map); the others a few km (flag 1, radius estimated).
 
 In `planets.json` a moon is a row of `planets` with flag 512 and its planet's index as a 17th field
 (`parent`); its orbit is around that planet. The app draws a planet's moons in a group at the
-planet, fading in with their orbits' size on screen (orbits far larger than the view, the outer
-irregular moons, are left out); the planet's symbol stays inside the innermost moon orbit drawn
-(never smaller than the planet). Labels after the planets (the larger moons first), the card says
+planet, fading in with their orbits' size on screen and once their periapsis lies 1.5 to 3 times
+outside the planet's symbol (its share of the view: zoomed out they do not cover it); orbits far
+larger than the view, the outer irregular moons, are left out. Moon orbits are fainter than the
+planets' (30 % instead of 45 %). The planet's symbol keeps its share of the view until its true
+size is larger, like the stars. The moons of unknown radius (415 of 456: most of Jupiter's and
+Saturn's small outer moons) are drawn only with *Show moons of unknown radius* (settings, *Space*,
+off by default), or the one selected. Labels after the planets (the larger moons first), the card says
 "Moon of Jupiter", the radius in km and the semi-major axis in km; the search finds them ("Titan",
 "Mond").
 
@@ -197,8 +201,9 @@ from A in 2016 (ORB6, Akeson 2021).
   A double click centres the view on it.
 * The planet card: name, star, kind, semi-major axis (below 1 AU also in kilometres), eccentricity, period, radius (marked when
   estimated), mass, equilibrium temperature, inclination (when measured), discovery (method,
-  year), what the map chose, the date drawn (it follows the clock); *Centre* (flies to
-  the star, close enough for the orbit) and a link to the NASA Exoplanet Archive.
+  year), what the map chose, the date drawn (it follows the clock); *Centre* (centres the view
+  on the planet or moon and follows it, like a double tap) and a link to the NASA Exoplanet
+  Archive.
 * The star card of a planet host (and of the Sun) has *Planets*: it flies to the star, close
   enough to show all orbits.
 * The search knows every planet ("Proxima Cen b", "Erde"); picking one flies to its star close
