@@ -137,6 +137,7 @@ export class ProbeCard {
 
     const actions = el('div', 'info-actions');
     const fly = el('button', 'btn', t('flyTo'));
+    fly.title = t('flyToHint');
     fly.addEventListener('click', () => this.onFlyTo(i));
     actions.appendChild(fly);
     if (story) {

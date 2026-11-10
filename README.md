@@ -74,7 +74,7 @@ push, see *Deployment*).
 | Move | right drag / Shift + left drag | two-finger drag | W A S D, R / F (up/down) |
 | Zoom | wheel | pinch | + / − |
 | Details | click a star, planet or galaxy | tap | |
-| Centre on a star, planet or galaxy (with a route started: a star becomes its destination) | double-click | double-tap | |
+| Centre on a star, planet or galaxy (with a route begun: a star becomes its missing start or destination) | double-click | double-tap | |
 | The Sun's neighbourhood (10 ly) | | | H |
 | Names / grid / jump network / search | | | L / G / J / / |
 
@@ -155,9 +155,10 @@ million years either way; `−50000` or `50000 v. Chr.`). The stars move from th
 positions in straight lines with their heliocentric space velocities (proper motion and distance;
 the radial velocity where known, for 225,000 of the 243,000 stars within 200 pc from Gaia DR3, else
 0); members of a system move together. The Sun stays at the origin. The GPU moves the stars every
-frame (velocity × time in the shader); labels, the selection marker and the planets' host stars
-follow in double precision, the positions used for picking and the jump network a few times a
-second, and the nodes loaded reach as far as the stars may have come (100 km/s). The view follows
+frame (velocity × time in the shader); labels, picking, the selection marker, the stars drawn at
+their true size, the jump network's ends and the planets' host stars use double precision (the
+float32 positions are off by up to a millionth of a light year far out, more than a close view's
+width); the float32 positions follow a few times a second, and the nodes loaded reach as far as the stars may have come (100 km/s). The view follows
 the star it is centred on (or flies to). Straight lines ignore the stars' orbits around the
 Galactic Centre (some 230 million years): over a few million years the paths stay close.
 Examples: Alpha Centauri comes closest (about 3.1 ly) some 28,000 years from now, and Ross 248 is
@@ -310,7 +311,8 @@ everything in range, line colour and opacity.
 
 A route leads from one star to another through the jump network with the current settings. It is
 specified in [`docs/ROUTES.md`](docs/ROUTES.md):
-* **Start and destination.** *Route from here* and *Route to here* on a star's info card set them;
+* **Start and destination.** *Start* and *Ziel* (*From here*, *To here*) on a star's info card set
+  them, or, with one end set, a double tap on another star;
   the route box (bottom left, above the legend; full width on phones) shows them, the status and
   the result. Start, destination and mode are kept in the browser and the route is computed again
   after a reload. If the star data was rebuilt, each end is looked for by its designation near its

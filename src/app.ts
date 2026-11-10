@@ -5,7 +5,7 @@ import { LABELLED_RADIUS, PRECISE_PX, SPRITE_CORE, labelledWins, pickScore } fro
 import { TapDetector } from './controls/tap';
 import { AttributeStore, type ChangeKind } from './data/attributes';
 import { Flag, designationOf, setVelocityScale, type NodeData } from './data/format';
-import { DEFAULT_VELOCITY_SCALE, moveTo, starPosition, yearsSinceEpoch } from './data/motion';
+import { DEFAULT_VELOCITY_SCALE, moveTo, starCoord, starPosition, yearsSinceEpoch } from './data/motion';
 import { decodeCsv } from './data/csv';
 import { NO_LOOKUP, csvNeedsLookup, exportCsv, importCsvAsync, type ImportReport, type StarResolver } from './data/importer';
 import { ECLIPTIC_NORTH, galacticToWorld, worldToGalactic } from './data/galactic';
@@ -1265,10 +1265,9 @@ export class App {
       for (const rn of this.starfield.visibleNodes()) {
         if (rn.node.box.distanceToPoint(target) > s.radius + rn.data.vmax * Math.abs(rn.data.movedTo)) continue;
         const d = rn.data;
-        const p = d.positions;
         for (let i = 0; i < d.count; i++) {
           if (rn.sizes[i] <= 0) continue;
-          v.set(p[3 * i], p[3 * i + 1], p[3 * i + 2]);
+          this.starAt(d, i, v);
           const fromTarget = v.distanceTo(target);
           if (fromTarget > s.radius) continue;
           const depth = Math.max(v.distanceTo(cam), 1e-12);
@@ -1533,6 +1532,16 @@ export class App {
     this.findAnchor(s, dt);
   }
 
+  /** Years since the epoch of the date drawn (as the shader has it). */
+  private get drawDt(): number {
+    return Number.isFinite(this.motionDt) ? this.motionDt : 0;
+  }
+
+  /** Where star i of a node is drawn now, in double precision (labels, picking, true-size discs). */
+  private starAt(d: NodeData, i: number, out = new Vector3()): Vector3 {
+    return starPosition(d, i, this.drawDt, out);
+  }
+
   /** Where a followed star or planet is at a date (dt: years since the epoch); null if gone. */
   private anchorPosition(a: Anchor, jd: number, dt: number, out: Vector3): Vector3 | null {
     if ('planet' in a) return this.planetLayer.catalogue ? this.planetLayer.positionAt(a.planet, jd, dt, out) : null;
@@ -1748,15 +1757,15 @@ export class App {
     const cx = camPos.x;
     const cy = camPos.y;
     const cz = camPos.z;
+    const dt = this.drawDt;
     for (const rn of starsHidden(s.radius) ? [] : this.starfield.visibleNodes()) {
       const d = rn.data;
-      const p = d.positions;
       // quick reject: node entirely outside the sphere
       if (rn.node.box.distanceToPoint(target) > s.radius + rn.data.vmax * Math.abs(rn.data.movedTo)) continue;
       for (let i = 0; i < d.count; i++) {
-        const x = p[3 * i];
-        const y = p[3 * i + 1];
-        const z = p[3 * i + 2];
+        const x = starCoord(d, 3 * i, dt);
+        const y = starCoord(d, 3 * i + 1, dt);
+        const z = starCoord(d, 3 * i + 2, dt);
         const dx = x - tx;
         const dy = y - ty;
         const dz = z - tz;
@@ -1791,11 +1800,10 @@ export class App {
       const sun = (d.flags[i] & Flag.SUN) !== 0;
       const sys = d.systems.get(i);
       const sysInfo = sys !== undefined ? d.systemInfo.get(sys) : undefined;
-      const p = d.positions;
       cands.push({
         key: `${d.path}:${i}`,
         ref: { data: d, index: i },
-        pos: new Vector3(p[3 * i], p[3 * i + 1], p[3 * i + 2]),
+        pos: this.starAt(d, i),
         text: sun ? t('theSun') : localName(name!.en, name!.de),
         rank: sun ? 0 : name!.rank,
         logL: starLogL(d, i),
@@ -1808,11 +1816,10 @@ export class App {
       });
     }
     for (const { d, i, size } of unnamed.items()) {
-      const p = d.positions;
       cands.push({
         key: `${d.path}:${i}`,
         ref: { data: d, index: i },
-        pos: new Vector3(p[3 * i], p[3 * i + 1], p[3 * i + 2]),
+        pos: this.starAt(d, i),
         text: designationOf(d, i),
         rank: 99,
         logL: starLogL(d, i),
@@ -1891,11 +1898,10 @@ export class App {
     const sun = (d.flags[i] & Flag.SUN) !== 0;
     const sys = d.systems.get(i);
     const sysInfo = sys !== undefined ? d.systemInfo.get(sys) : undefined;
-    const p = d.positions;
     return {
       key: `${d.path}:${i}`,
       ref: { data: d, index: i },
-      pos: new Vector3(p[3 * i], p[3 * i + 1], p[3 * i + 2]),
+      pos: this.starAt(d, i),
       text: this.starName(d, i),
       rank: sun ? 0 : (name?.rank ?? 99),
       logL: starLogL(d, i),
@@ -2055,15 +2061,15 @@ export class App {
     const prefer = (rn: RenderedNode, i: number) => (layer && !rn.missing[i]) || (s.planetMarks && rn.marks[i] > 0);
     // stars within the pick radius (a crowded view lets labelled stars win)
     let nearby = 0;
+    const dt = this.drawDt;
     for (const rn of this.starfield.visibleNodes()) {
       const d = rn.data;
-      const p = d.positions;
       if (rn.node.box.distanceToPoint(target) > s.radius + rn.data.vmax * Math.abs(rn.data.movedTo)) continue;
       for (let i = 0; i < d.count; i++) {
         if (rn.sizes[i] <= 0) continue;
-        const x = p[3 * i];
-        const y = p[3 * i + 1];
-        const z = p[3 * i + 2];
+        const x = starCoord(d, 3 * i, dt);
+        const y = starCoord(d, 3 * i + 1, dt);
+        const z = starCoord(d, 3 * i + 2, dt);
         const ddx = x - target.x;
         const ddy = y - target.y;
         const ddz = z - target.z;
@@ -2124,7 +2130,7 @@ export class App {
       nameDe: name?.de ?? null,
       designation: designationOf(d, i),
       alt: name?.alt ?? [],
-      pos: new Vector3(d.positions[3 * i], d.positions[3 * i + 1], d.positions[3 * i + 2]),
+      pos: this.starAt(d, i),
       vel: d.vel ? new Vector3(d.vel[3 * i], d.vel[3 * i + 1], d.vel[3 * i + 2]) : null,
       absMag: d.absMag[i],
       logL: d.logL[i],
@@ -2389,12 +2395,14 @@ export class App {
 
   /** A star of the info card as a route end. */
   /**
-   * A double tap (or click) on a star: with a route started, it becomes the destination; else the
-   * view centres on it.
+   * A double tap on a star: with a route begun, the star becomes its missing end (with a start,
+   * its destination; with only a destination, its start); otherwise the view flies to it.
    */
   private doubleTapStar(info: StarInfo): void {
-    const from = this.planner.from;
-    if (from && `${from.path}:${from.index}` !== info.key) this.planner.setEnd('to', this.routeEnd(info));
+    const { from, to } = this.planner;
+    const is = (e: RouteEnd | null) => !!e && `${e.path}:${e.index}` === info.key;
+    if (from && !is(from)) this.planner.setEnd('to', this.routeEnd(info));
+    else if (!from && to && !is(to)) this.planner.setEnd('from', this.routeEnd(info));
     else this.nav.flyTo(info.pos);
   }
 

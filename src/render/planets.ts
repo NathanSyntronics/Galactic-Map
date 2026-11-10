@@ -29,7 +29,9 @@ import {
   EARTH_RADIUS_LY,
   PlanetFlag,
   bodyOffset,
-  orbitPoint,
+  orbitSamples,
+  orbitStale,
+  planetAnomaly,
   planetKind,
   planetOffset,
   type Planet,
@@ -114,6 +116,8 @@ function smoothstep(a: number, b: number, x: number): number {
 interface MoonView {
   group: Group;
   orbits: LineLoop<BufferGeometry, LineBasicMaterial>[];
+  /** The eccentric anomaly each orbit is drawn around (see orbitSamples). */
+  orbitE: Float64Array;
   sprites: Sprite[];
   /** Their indices in the catalogue. */
   ids: number[];
@@ -122,6 +126,8 @@ interface MoonView {
 interface SystemView {
   group: Group;
   orbits: LineLoop<BufferGeometry, LineBasicMaterial>[];
+  /** The eccentric anomaly each orbit is drawn around (see orbitSamples). */
+  orbitE: Float64Array;
   sprites: Sprite[];
   /** The habitable zone: the wider and the narrower band (none when the star's values are unknown). */
   zones: Mesh<RingGeometry, MeshBasicMaterial>[];
@@ -170,6 +176,7 @@ export class PlanetLayer {
   showZones = true;
   private readonly tmpPlanet = new Vector3();
   private readonly tmpMoon = new Vector3();
+  private readonly tmpVec = new Vector3();
 
   constructor() {
     this.group.renderOrder = 4;
@@ -267,8 +274,8 @@ export class PlanetLayer {
         const line = view.orbits[j];
         line.material.opacity = 0.45 * orbitAlpha;
         line.visible = orbitAlpha > 0.01;
+        if (line.visible) this.keepOnOrbit(line, view.orbitE, j, p, jd, this.tmpPlanet.distanceTo(camera.position) / css);
         const sprite = view.sprites[j];
-        planetOffset(p, jd, tmp);
         sprite.position.copy(tmp);
         // its moons around it (their orbits large enough on screen); the planet's symbol stays
         // inside the innermost one drawn (but never smaller than the planet)
@@ -319,9 +326,14 @@ export class PlanetLayer {
       line.visible = orbitAlpha > 0.01;
       const sprite = view.sprites[j];
       sprite.visible = alpha > 0.01;
+      if (!line.visible && !sprite.visible) return;
+      planetOffset(m, jd, this.tmpMoon);
+      if (line.visible) {
+        const d = this.tmpVec.copy(this.tmpMoon).add(planetPos).distanceTo(camera.position);
+        this.keepOnOrbit(line, view.orbitE, j, m, jd, d / css);
+      }
       if (!sprite.visible) return;
       inner = Math.min(inner, (m.a * (1 - m.e)) / AU_PER_LY);
-      planetOffset(m, jd, this.tmpMoon);
       sprite.position.copy(this.tmpMoon);
       const r = planetDrawRadius(m, radius);
       sprite.scale.setScalar((2 * r) / 0.68);
@@ -331,6 +343,19 @@ export class PlanetLayer {
       this.drawn.push({ index: k, pos, px: (r / dist) * css, orbitPx, alpha });
     });
     return inner;
+  }
+
+  /**
+   * Draws orbit j of a view again around the body's place (see orbitSamples) once it would lie off
+   * its line by about half a pixel (`pixel`: ly per CSS pixel at the body).
+   */
+  private keepOnOrbit(line: LineLoop<BufferGeometry, LineBasicMaterial>, orbitE: Float64Array, j: number, p: Planet, jd: number, pixel: number): void {
+    const E = planetAnomaly(p, jd);
+    if (!orbitStale(p, orbitE[j], E, ORBIT_POINTS, pixel)) return;
+    orbitE[j] = E;
+    const attr = line.geometry.getAttribute('position') as BufferAttribute;
+    orbitSamples(p, E, attr.array as Float32Array, this.tmpVec);
+    attr.needsUpdate = true;
   }
 
   private system(h: number): SystemView {
@@ -345,13 +370,10 @@ export class PlanetLayer {
     const moons: SystemView['moons'] = new Map();
     const tex = this.symbolTexture();
     const v = new Vector3();
+    const orbitE = new Float64Array(host.planets.length);
     for (const k of host.planets) {
       const p = cat.planets[k];
-      const pts = new Float32Array(3 * ORBIT_POINTS);
-      for (let n = 0; n < ORBIT_POINTS; n++) {
-        orbitPoint(p, (2 * Math.PI * n) / ORBIT_POINTS, v);
-        pts.set([v.x, v.y, v.z], 3 * n);
-      }
+      const pts = orbitSamples(p, 0, new Float32Array(3 * ORBIT_POINTS), v);
       const geo = new BufferGeometry();
       geo.setAttribute('position', new BufferAttribute(pts, 3));
       const line = new LineLoop(
@@ -408,7 +430,7 @@ export class PlanetLayer {
       }
     }
     this.group.add(group);
-    const view = { group, orbits, sprites, zones, edges, moons, lastUsed: this.frame };
+    const view = { group, orbits, orbitE, sprites, zones, edges, moons, lastUsed: this.frame };
     this.systems.set(h, view);
     return view;
   }
@@ -422,11 +444,7 @@ export class PlanetLayer {
     const v = new Vector3();
     for (const k of ids) {
       const m = cat.planets[k];
-      const pts = new Float32Array(3 * ORBIT_POINTS);
-      for (let n = 0; n < ORBIT_POINTS; n++) {
-        orbitPoint(m, (2 * Math.PI * n) / ORBIT_POINTS, v);
-        pts.set([v.x, v.y, v.z], 3 * n);
-      }
+      const pts = orbitSamples(m, 0, new Float32Array(3 * ORBIT_POINTS), v);
       const line = new LineLoop(
         new BufferGeometry().setAttribute('position', new BufferAttribute(pts, 3)),
         new LineBasicMaterial({ color: planetColor(m), transparent: true, opacity: 0, depthTest: false, depthWrite: false }),
@@ -442,7 +460,7 @@ export class PlanetLayer {
       orbits.push(line);
       sprites.push(sprite);
     }
-    return { group, orbits, sprites, ids };
+    return { group, orbits, orbitE: new Float64Array(ids.length), sprites, ids };
   }
 
   private dispose(view: SystemView): void {

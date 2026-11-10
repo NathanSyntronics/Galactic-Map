@@ -167,6 +167,12 @@ from A in 2016 (ORB6, Akeson 2021).
 * Systems whose star lies in the visible sphere and whose largest orbit is at least 2 px on screen
   are drawn (the 16 nearest to the camera): each orbit as an ellipse in the planet's colour, fading
   in from 3 to 14 px, each planet as a shaded disk at its position, fading in from 2 to 8 px.
+* **Orbit lines** are polygons of 256 points. With even steps their corners would lie up to
+  a/40,000 off the ellipse (17,000 km for Mars), and close up the planet would drift off its line
+  and back. The first point lies exactly at the planet and the others crowd around it (eccentric
+  anomaly E₀ + u − 0.95 sin u for even steps of u: twenty times denser at the planet); the line is
+  drawn again around the planet once it would be half a pixel off (close up, every frame while the
+  clock runs fast). The same for the moons.
 * **Symbols:** a planet is drawn with a radius of 1.4 % of the visible radius times its radius in
   Earth radii^0.33 (Jupiter 3.1 %), at least its true size, at most a third of its periapsis.
 * **Colours:** the Solar System's planets their own; the others by kind (rocky below 1.6 R⊕, mini-
@@ -191,9 +197,9 @@ from A in 2016 (ORB6, Akeson 2021).
   A double click centres the view on it.
 * The planet card: name, star, kind, semi-major axis (below 1 AU also in kilometres), eccentricity, period, radius (marked when
   estimated), mass, equilibrium temperature, inclination (when measured), discovery (method,
-  year), what the map chose, the date drawn (it follows the clock); *Centre view here* (flies to
+  year), what the map chose, the date drawn (it follows the clock); *Centre* (flies to
   the star, close enough for the orbit) and a link to the NASA Exoplanet Archive.
-* The star card of a planet host (and of the Sun) has *Show planets*: it flies to the star, close
+* The star card of a planet host (and of the Sun) has *Planets*: it flies to the star, close
   enough to show all orbits.
 * The search knows every planet ("Proxima Cen b", "Erde"); picking one flies to its star close
   enough to show its orbit.

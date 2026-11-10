@@ -50,6 +50,16 @@ export function moveTo(d: Moving, dt: number): void {
   for (let k = 0; k < 3 * d.count; k++) p[k] = b[k] + v[k] * dt;
 }
 
+/**
+ * Coordinate k (3 per star) at `dt` years after the epoch, in double precision: where the shader
+ * draws it (the float32 `positions` are off by up to a millionth of a light year far out, more
+ * than a close view's width).
+ */
+export function starCoord(d: Moving, k: number, dt: number): number {
+  const v = d.vel;
+  return v ? d.base[k] + v[k] * dt : d.base[k];
+}
+
 /** Position of star i at `dt` years after the epoch, in double precision (labels, planets, close views). */
 export function starPosition(d: Moving, i: number, dt: number, out: Vector3): Vector3 {
   const b = d.base;

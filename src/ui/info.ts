@@ -115,7 +115,7 @@ export class InfoPanel {
   /** Flies close to a star with planets (null: the planets are not known). */
   onShowPlanets: ((info: StarInfo) => void) | null = null;
   onManageAttributes: () => void = () => {};
-  /** "Route from here" / "Route to here". */
+  /** "From here" / "To here" (route start / destination). */
   onRoute: (info: StarInfo, end: 'from' | 'to') => void = () => {};
   /** Jump links of a star (null: the network is off or the star is not part of it). */
   jumpsOf: (info: StarInfo) => JumpListing | null = () => null;
@@ -357,23 +357,28 @@ export class InfoPanel {
     }
     this.updateView(target);
 
-    const actions = el('div', 'info-actions');
+    // short labels, all in one row (the long text as a tooltip)
+    const actions = el('div', 'info-actions one-row');
     const fly = el('button', 'btn', t('flyTo'));
+    fly.title = t('flyToHint');
     fly.addEventListener('click', () => this.onFlyTo(info));
     actions.appendChild(fly);
     const showPlanets = this.onShowPlanets;
     if (showPlanets && (info.planets > 0 || info.flags & Flag.SUN)) {
       const btn = el('button', 'btn', t('showPlanets'));
+      btn.title = t('showPlanetsHint');
       btn.addEventListener('click', () => showPlanets(info));
       actions.appendChild(btn);
     }
     for (const end of ['from', 'to'] as const) {
       const btn = el('button', 'btn route-btn', t(end === 'from' ? 'routeFromHere' : 'routeToHere'));
+      btn.title = t(end === 'from' ? 'routeFromHint' : 'routeToHint');
       btn.addEventListener('click', () => this.onRoute(info, end));
       actions.appendChild(btn);
     }
     if (!(info.flags & Flag.SUN)) {
       const a = el('a', 'btn subtle', t('openSimbad'));
+      a.title = t('openSimbadHint');
       a.href = `https://simbad.cds.unistra.fr/simbad/sim-id?Ident=${encodeURIComponent(info.designation)}`;
       a.target = '_blank';
       a.rel = 'noopener';

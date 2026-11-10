@@ -11,9 +11,11 @@ This document is the specification the implementation follows.
 
 * Any shown star can be start or destination; the route connects their **places** (a multiple
   system counts as one place, as in the network).
-* The info card has the buttons **Route from here** and **Route to here**. Setting one end shows
-  the route box; once both are set the route is computed. Choosing the star of the other end
-  clears that end.
+* The info card has the buttons **Start** and **Ziel** (English: *From here*, *To here*; the
+  long text as a tooltip). Setting one end shows the route box; once both are set the route is
+  computed. Choosing the star of the other end clears that end. With one end set, a double tap on
+  another star makes it the missing end (with a start: the destination; with only a destination:
+  the start).
 * Start, destination and mode are stored in the browser (designations and names, plus the node
   and index of the star) and the route is computed again after a reload, once the data is there.
   The node and index are checked against the designation first. If the star data was rebuilt,
@@ -110,7 +112,7 @@ around the straight line from start to destination:
     follows smoothly, so the view turns gently where the route zigzags.
   * The user may zoom and pan during the flight (a pan stays as an offset from the route); once
     they turn the view, the camera no longer turns with the route. Any other flight (a search, a
-    waypoint, *show whole route*, *Centre view here*), a new route and *Stop* end it.
+    waypoint, *show whole route*, *Centre*), a new route and *Stop* end it.
   * The box shows the waypoint the flight is at ("Star 12 of 115: Gliese 250"), whose label is
     always shown. On phones an open star card is closed and the waypoint list folded at the start.
 

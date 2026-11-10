@@ -475,6 +475,22 @@ select {
   flex-wrap: wrap;
 }
 
+/* the star card's buttons: short labels in one row (squeezed rather than wrapped) */
+.info-actions.one-row {
+  flex-wrap: nowrap;
+  gap: 4px;
+}
+
+.info-actions.one-row .btn {
+  padding: 6px 6px;
+  font-size: 12.5px;
+  flex: 0 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* the star card's tabs: a compact row under the name */
 .card-tabs {
   display: flex;
@@ -1365,6 +1381,15 @@ label.check input {
     min-height: 30px;
     padding: 4px 10px;
     font-size: 12.5px;
+  }
+
+  .info-card .info-actions.one-row {
+    gap: 4px;
+  }
+
+  .info-card .info-actions.one-row .btn {
+    padding: 4px 5px;
+    font-size: 12px;
   }
 
   .jump-link {

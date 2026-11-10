@@ -188,10 +188,47 @@ export function bodyOffset(cat: PlanetCatalogue, i: number, jd: number, out = ne
 }
 const tmpOffset = new Vector3();
 
+/** A planet's (or moon's) eccentric anomaly at a date. */
+export function planetAnomaly(p: Planet, jd: number): number {
+  return eccentricAnomaly(p.m0 + (2 * Math.PI * (jd - J2000)) / p.period, p.e);
+}
+
 /** A planet's (a moon's: around its planet) offset at a date, world frame, ly. */
 export function planetOffset(p: Planet, jd: number, out = new Vector3()): Vector3 {
-  const m = p.m0 + (2 * Math.PI * (jd - J2000)) / p.period;
-  return orbitPoint(p, eccentricAnomaly(m, p.e), out);
+  return orbitPoint(p, planetAnomaly(p, jd), out);
+}
+
+/** How much denser than even the points of a drawn orbit lie at the planet (see orbitSamples). */
+export const ORBIT_CROWDING = 0.95;
+
+/**
+ * Points of a planet's orbit for a line through them (3 per point, relative to the star), the
+ * first one exactly at eccentric anomaly E0 (the planet) and the others crowded around it: the
+ * line is a polygon, and close up its corners would lie up to a/40,000 off the ellipse (17,000 km
+ * for Mars), the planet moving off its line and back. Eccentric anomaly E0 + u − c·sin u for even
+ * steps of u: the steps at the planet (1 − c) times, on the far side (1 + c) times the even step.
+ */
+export function orbitSamples(p: Planet, E0: number, out: Float32Array, v = new Vector3()): Float32Array {
+  const n = out.length / 3;
+  for (let k = 0; k < n; k++) {
+    const u = (2 * Math.PI * k) / n;
+    orbitPoint(p, E0 + u - ORBIT_CROWDING * Math.sin(u), v);
+    out[3 * k] = v.x;
+    out[3 * k + 1] = v.y;
+    out[3 * k + 2] = v.z;
+  }
+  return out;
+}
+
+/**
+ * Whether an orbit drawn by orbitSamples around E0 must be drawn again for a planet at E: when the
+ * planet would lie more than about half a pixel (`pixel`: ly per pixel at the planet) off its line.
+ */
+export function orbitStale(p: Planet, E0: number, E: number, points: number, pixel: number): boolean {
+  let dE = Math.abs(E - E0) % (2 * Math.PI);
+  if (dE > Math.PI) dE = 2 * Math.PI - dE;
+  const step = ((1 - ORBIT_CROWDING) * 2 * Math.PI) / points;
+  return (p.a / AU_PER_LY) * dE * step > 0.5 * pixel;
 }
 
 /** The point of a planet's orbit at eccentric anomaly E (world frame, ly, relative to the star). */

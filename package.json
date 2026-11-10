@@ -1,7 +1,7 @@
 {
   "name": "galactic-map",
   "private": true,
-  "version": "1.7.0",
+  "version": "1.8.0",
   "description": "Interactive 3D map of the solar neighbourhood built from real star catalogs",
   "type": "module",
   "scripts": {

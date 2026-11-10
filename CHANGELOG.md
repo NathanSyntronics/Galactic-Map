@@ -2,6 +2,17 @@
 
 Every round of changes that goes live raises the version by 0.01 (README, *Versions*).
 
+## 1.08 (2026-11-10)
+
+* Close to a planet, it stays on its orbit line: the line was a polygon whose corners lay up to
+  17,000 km off the ellipse (Mars); now it runs exactly through the planet (and each moon).
+* Close to a far star (Barnard's Star, say), the star is no longer drawn twice and its label no
+  longer jumps: discs, labels, picking and the jump lines use the star's exact position, not one
+  rounded by up to a millionth of a light year.
+* With only a destination set, a double tap on a star makes it the start.
+* The star card's buttons have short labels (*Zentrieren*, *Planeten*, *Start*, *Ziel*, *SIMBAD*)
+  and fit in one row; the long text shows as a tooltip.
+
 ## 1.07 (2026-11-09)
 
 * Moons: the Solar System's 456 known moons (JPL), on their orbits around their planets, down to

@@ -161,7 +161,7 @@ designations leave out the primary one). A galaxy without an entry is called "PG
 * The search knows the names and designations of all galaxies (PGC numbers too); a name followed
   only by a generic word (*Galaxy*, *-galaxie*, *Dwarf*, …) counts as an exact match, so
   "Andromeda" finds the Andromeda Galaxy first.
-* Picking a galaxy in the search, double-clicking it or *Centre view here* on its card centres the
+* Picking a galaxy in the search, double-clicking it or *Centre* on its card centres the
   view on it. At galaxy scales (a visible radius of 20,000 ly and more) like a star: the zoom and
   the direction of view stay. From the stars' scales the view flies out to a distance that shows
   the whole galaxy, turning to look from the Sun's side, so that it looks as it does on the sky;

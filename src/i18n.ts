@@ -78,8 +78,10 @@ const en = {
   giant: 'Giant / supergiant',
   variable: 'Variable star',
   theSun: 'Sun',
-  flyTo: 'Centre view here',
-  openSimbad: 'Look up in SIMBAD',
+  flyTo: 'Centre',
+  flyToHint: 'Centre view here',
+  openSimbad: 'SIMBAD',
+  openSimbadHint: 'Look up in SIMBAD',
   galaxies: 'Galaxies',
   planets: 'Planets',
   planetSpeed: 'Planet motion',
@@ -126,7 +128,8 @@ const en = {
   km: 'km',
   kmMillion: '{n} million km',
   openExoplanetArchive: 'NASA Exoplanet Archive',
-  showPlanets: 'Show planets',
+  showPlanets: 'Planets',
+  showPlanetsHint: 'Show planets',
   planetDate: 'Positions on {date}',
   timeNow: 'Now',
   timeNowHint: 'Back to the present date (the speed stays)',
@@ -196,13 +199,13 @@ const en = {
 <li><b>Left drag</b>: rotate</li>
 <li><b>Right drag</b> or <b>Shift + left drag</b>: move</li>
 <li><b>Wheel</b>: zoom</li>
-<li><b>Click</b> a star: details · <b>double-click</b>: centre view on it (with a route started: make it the destination)</li>
+<li><b>Click</b> a star: details · <b>double-click</b>: centre view on it (with a route begun: its missing start or destination)</li>
 </ul>
 <h3>Touch</h3>
 <ul>
 <li><b>One finger</b>: rotate</li>
 <li><b>Two fingers</b>: pinch to zoom, drag to move</li>
-<li><b>Tap</b> a star: details · <b>double-tap</b>: centre view on it (with a route started: make it the destination)</li>
+<li><b>Tap</b> a star: details · <b>double-tap</b>: centre view on it (with a route begun: its missing start or destination)</li>
 </ul>
 <h3>Keyboard</h3>
 <ul>
@@ -214,7 +217,7 @@ const en = {
 <p>The view centre is the point the camera orbits around. Only stars inside the visible radius around it are shown; move the centre to explore further. The radius follows the zoom: zooming out shows a larger region (this can be switched off in the settings).</p>
 <p>The grid lies parallel to the galactic plane. 0° points towards the Galactic Centre, 90° in the direction of Galactic rotation.</p>
 <p>The jump network links stars up to the jump range apart (9 ly by default); brighter stars get more links. A star's info card lists its links; click one to go there.</p>
-<p>Routes: “Route from here” and “Route to here” on a star’s info card plan a route through the jump network, also between distant stars (the Sun and Betelgeuse, say). The route box lists the waypoints; zoomed out, only the route is drawn.</p>
+<p>Routes: “From here” and “To here” on a star’s info card (or, with one end chosen, a double tap on a star) plan a route through the jump network, also between distant stars (the Sun and Betelgeuse, say). The route box lists the waypoints; zoomed out, only the route is drawn.</p>
 <p>The search knows the stars, the planets and the galaxies. The empty search field lists the last five you picked from the search. A press anywhere beside the open settings only closes them (it selects no star); a click beside a dialog closes the dialog.</p>
 <p>A click on a star's name selects that star; where many stars crowd together, labelled stars are preferred.</p>
 <p>Time: a small clock shows the date the map is drawn for. Its slider sets how fast the time runs, from real time (one second per second) to 100,000 years per second (also under Space in the settings); “Now” goes back to the present date, the calendar button sets a day, and a tap on the date lets you type a year, up to two million years in the past or the future (e.g. −50000). The stars move with their measured velocities in straight lines (the Sun stays in the centre), the planets on their orbits, the spacecraft on their paths; the view follows the star it is centred on. The View tab takes you to the Earth, the Sun or the whole Galaxy.</p>
@@ -348,12 +351,14 @@ const en = {
   legendRoute: 'Route',
   jumpRouteOnly: 'While a route is shown and the visible radius is larger than {r} (three jump ranges), only the route is drawn. Zoom in to see the jump network.',
   routeTitle: 'Route',
-  routeFromHere: 'Route from here',
-  routeToHere: 'Route to here',
+  routeFromHere: 'From here',
+  routeToHere: 'To here',
+  routeFromHint: 'Route from here',
+  routeToHint: 'Route to here',
   routeNoStart: 'start?',
   routeNoGoal: 'destination?',
-  routeChooseFrom: 'Choose a start: “Route from here” on a star’s info card.',
-  routeChooseTo: 'Choose a destination: “Route to here” on a star’s info card.',
+  routeChooseFrom: 'Choose a start: “From here” on a star’s info card, or double-tap a star.',
+  routeChooseTo: 'Choose a destination: “To here” on a star’s info card, or double-tap a star.',
   routeSwap: 'Swap start and destination',
   routeMode: 'Best route',
   routeModeJumps: 'Fewest jumps',
@@ -504,8 +509,10 @@ const de: Record<MessageKey, string> = {
   giant: 'Riese / Überriese',
   variable: 'Veränderlicher Stern',
   theSun: 'Sonne',
-  flyTo: 'Blickpunkt hierher',
-  openSimbad: 'In SIMBAD nachschlagen',
+  flyTo: 'Zentrieren',
+  flyToHint: 'Blickpunkt hierher',
+  openSimbad: 'SIMBAD',
+  openSimbadHint: 'In SIMBAD nachschlagen',
   galaxies: 'Galaxien',
   planets: 'Planeten',
   planetSpeed: 'Planetenbewegung',
@@ -552,7 +559,8 @@ const de: Record<MessageKey, string> = {
   km: 'km',
   kmMillion: '{n} Mio. km',
   openExoplanetArchive: 'NASA Exoplanet Archive',
-  showPlanets: 'Planeten zeigen',
+  showPlanets: 'Planeten',
+  showPlanetsHint: 'Planeten zeigen',
   planetDate: 'Positionen am {date}',
   timeNow: 'Jetzt',
   timeNowHint: 'Zurück zum heutigen Datum (die Geschwindigkeit bleibt)',
@@ -622,13 +630,13 @@ const de: Record<MessageKey, string> = {
 <li><b>Linke Maustaste ziehen</b>: drehen</li>
 <li><b>Rechte Maustaste ziehen</b> oder <b>Umschalt + links ziehen</b>: verschieben</li>
 <li><b>Mausrad</b>: zoomen</li>
-<li><b>Klick</b> auf einen Stern: Details · <b>Doppelklick</b>: Blickpunkt dorthin (mit begonnener Route: als Ziel)</li>
+<li><b>Klick</b> auf einen Stern: Details · <b>Doppelklick</b>: Blickpunkt dorthin (mit begonnener Route: als fehlender Start oder fehlendes Ziel)</li>
 </ul>
 <h3>Touch</h3>
 <ul>
 <li><b>Ein Finger</b>: drehen</li>
 <li><b>Zwei Finger</b>: spreizen zum Zoomen, ziehen zum Verschieben</li>
-<li><b>Tippen</b> auf einen Stern: Details · <b>Doppeltippen</b>: Blickpunkt dorthin (mit begonnener Route: als Ziel)</li>
+<li><b>Tippen</b> auf einen Stern: Details · <b>Doppeltippen</b>: Blickpunkt dorthin (mit begonnener Route: als fehlender Start oder fehlendes Ziel)</li>
 </ul>
 <h3>Tastatur</h3>
 <ul>
@@ -640,7 +648,7 @@ const de: Record<MessageKey, string> = {
 <p>Der Blickpunkt ist der Punkt, um den sich die Kamera dreht. Angezeigt werden nur Sterne innerhalb des sichtbaren Radius um ihn; verschiebe den Blickpunkt, um weiter zu erkunden. Der Radius folgt dem Zoom: Herauszoomen zeigt einen größeren Bereich (abschaltbar in den Einstellungen).</p>
 <p>Das Gitter liegt parallel zur galaktischen Ebene. 0° zeigt zum Galaktischen Zentrum, 90° in Richtung der galaktischen Rotation.</p>
 <p>Das Sprungnetz verbindet Sterne bis zur Sprungweite (standardmäßig 9 Lj); hellere Sterne bekommen mehr Verbindungen. Die Infokarte eines Sterns listet seine Verbindungen auf; ein Klick darauf führt dorthin.</p>
-<p>Routen: „Route von hier“ und „Route hierher“ in der Infokarte eines Sterns planen eine Route durch das Sprungnetz, auch zwischen weit entfernten Sternen (etwa der Sonne und Beteigeuze). Das Routenfeld listet die Wegpunkte; herausgezoomt wird nur die Route gezeichnet.</p>
+<p>Routen: „Start“ und „Ziel“ in der Infokarte eines Sterns (oder, ist ein Ende gewählt, Doppeltippen auf einen Stern) planen eine Route durch das Sprungnetz, auch zwischen weit entfernten Sternen (etwa der Sonne und Beteigeuze). Das Routenfeld listet die Wegpunkte; herausgezoomt wird nur die Route gezeichnet.</p>
 <p>Die Suche kennt Sterne, Planeten und Galaxien. Das leere Suchfeld zeigt die fünf zuletzt über die Suche gewählten. Ein Druck irgendwo neben die offenen Einstellungen schließt nur diese (es wird kein Stern gewählt); ein Klick neben einen Dialog schließt den Dialog.</p>
 <p>Ein Klick auf den Namen eines Sterns wählt diesen Stern; wo sich viele Sterne drängen, haben beschriftete Sterne Vorrang.</p>
 <p>Zeit: Eine kleine Uhr zeigt das Datum, für das die Karte gezeichnet ist. Ihr Regler stellt ein, wie schnell die Zeit läuft, von Echtzeit (eine Sekunde pro Sekunde) bis 100.000 Jahre pro Sekunde (auch unter „Weltall“ in den Einstellungen); „Jetzt“ springt zurück zum heutigen Datum, der Kalender-Knopf stellt einen Tag ein, und ein Tipp auf das Datum lässt dich ein Jahr eingeben, bis zu zwei Millionen Jahre in der Vergangenheit oder Zukunft (z. B. −50000). Die Sterne bewegen sich mit ihren gemessenen Geschwindigkeiten auf geraden Bahnen (die Sonne bleibt in der Mitte), die Planeten auf ihren Umlaufbahnen, die Raumsonden auf ihren Wegen; die Ansicht folgt dem Stern, auf den sie zentriert ist. Der Reiter „Ansicht“ bringt dich zur Erde, zur Sonne oder zur ganzen Galaxis.</p>
@@ -774,12 +782,14 @@ const de: Record<MessageKey, string> = {
   legendRoute: 'Route',
   jumpRouteOnly: 'Solange eine Route gezeigt wird und der sichtbare Radius größer als {r} (drei Sprungweiten) ist, wird nur die Route gezeichnet. Hineinzoomen zeigt das Sprungnetz.',
   routeTitle: 'Route',
-  routeFromHere: 'Route von hier',
-  routeToHere: 'Route hierher',
+  routeFromHere: 'Start',
+  routeToHere: 'Ziel',
+  routeFromHint: 'Route von hier',
+  routeToHint: 'Route hierher',
   routeNoStart: 'Start?',
   routeNoGoal: 'Ziel?',
-  routeChooseFrom: 'Start wählen: „Route von hier“ in der Infokarte eines Sterns.',
-  routeChooseTo: 'Ziel wählen: „Route hierher“ in der Infokarte eines Sterns.',
+  routeChooseFrom: 'Start wählen: „Start“ in der Infokarte eines Sterns oder Doppeltippen auf einen Stern.',
+  routeChooseTo: 'Ziel wählen: „Ziel“ in der Infokarte eines Sterns oder Doppeltippen auf einen Stern.',
   routeSwap: 'Start und Ziel tauschen',
   routeMode: 'Beste Route',
   routeModeJumps: 'Wenigste Sprünge',

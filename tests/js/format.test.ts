@@ -188,6 +188,10 @@ describe('star velocities', () => {
     expect(data.positions[3 * i]).toBeCloseTo(x0 + data.vel![3 * i] * 10_000, 4);
     const p = starPosition(data, i, 10_000, new Vector3());
     expect(p.x).toBeCloseTo(x0 + data.vel![3 * i] * 10_000, 9);
+    // coordinate by coordinate, as the shader draws them (not rounded to float32)
+    const { starCoord } = await import('../../src/data/motion');
+    expect(starCoord(data, 3 * i, 10_000)).toBe(p.x);
+    expect(starCoord(data, 3 * i + 2, 10_000)).toBe(p.z);
     moveTo(data, 0);
     expect(data.positions[3 * i]).toBe(x0);
   });

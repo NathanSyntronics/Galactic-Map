@@ -7,6 +7,9 @@ import {
   decodePlanets,
   eccentricAnomaly,
   julianDate,
+  orbitSamples,
+  orbitStale,
+  planetAnomaly,
   planetKind,
   planetName,
   planetOffset,
@@ -89,6 +92,34 @@ describe('planets', () => {
         expect(E - e * Math.sin(E)).toBeCloseTo(mm, 10);
       }
     }
+  });
+
+  it('draws an orbit through the planet, its points crowded around it', () => {
+    // Mars-like: the line's first point is the planet, the others on the ellipse
+    const p = { ...cat.planets[0], a: 1.524, e: 0.0934 };
+    const jd = J2000 + 1234.5;
+    const E = planetAnomaly(p, jd);
+    const pts = orbitSamples(p, E, new Float32Array(3 * 256));
+    const at = planetOffset(p, jd);
+    expect(Math.hypot(pts[0] - at.x, pts[1] - at.y, pts[2] - at.z)).toBeLessThan(at.length() * 1e-7);
+    // the next point is twenty times closer than with even steps
+    const step = Math.hypot(pts[3] - pts[0], pts[4] - pts[1], pts[5] - pts[2]) / at.length();
+    expect(step).toBeGreaterThan(0.04 * ((2 * Math.PI) / 256));
+    expect(step).toBeLessThan(0.06 * ((2 * Math.PI) / 256));
+  });
+
+  it('draws an orbit again once the planet would be off its line by half a pixel', () => {
+    const p = { ...cat.planets[0], a: 1.524, e: 0.0934 };
+    const a = 1.524 / AU_PER_LY;
+    // zoomed out (the orbit 200 px across): only after a long way round
+    expect(orbitStale(p, 0, 1, 256, a / 200)).toBe(false);
+    expect(orbitStale(p, 0, 3, 256, a / 200)).toBe(true);
+    // close up (a pixel of 250 km): after a few ten-thousandths of a radian
+    const pixel = 250 / 9.4607304725808e12;
+    expect(orbitStale(p, 1, 1 + 1e-4, 256, pixel)).toBe(false);
+    expect(orbitStale(p, 1, 1 + 1e-3, 256, pixel)).toBe(true);
+    // across the full turn
+    expect(orbitStale(p, 0.0001, 2 * Math.PI - 0.0001, 256, a / 200)).toBe(false);
   });
 
   it('moves a planet along its orbit', () => {

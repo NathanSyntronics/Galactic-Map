@@ -4,6 +4,7 @@
  * objects or DOM; the star sources are plain arrays (Starfield's rendered nodes fit).
  */
 import type { NodeData } from '../data/format';
+import { starCoord } from '../data/motion';
 import { NODE_KEY_SHIFT } from '../data/octree';
 import { starLogL } from '../render/starfield';
 import { scalePosition } from '../render/style';
@@ -200,11 +201,12 @@ export function buildPlaces(sources: PlaceSource[], opt: PlaceOptions): PlaceSet
   const repPositions = (): Float64Array => {
     const out = new Float64Array(3 * n);
     for (let k = 0; k < n; k++) {
-      const p = sources[repSource[k]].data.positions;
+      // in double precision (the float32 positions are off by more than a close view far out)
+      const d = sources[repSource[k]].data;
       const i = repIndex[k];
-      out[3 * k] = p[3 * i];
-      out[3 * k + 1] = p[3 * i + 1];
-      out[3 * k + 2] = p[3 * i + 2];
+      out[3 * k] = starCoord(d, 3 * i, d.movedTo);
+      out[3 * k + 1] = starCoord(d, 3 * i + 1, d.movedTo);
+      out[3 * k + 2] = starCoord(d, 3 * i + 2, d.movedTo);
     }
     return out;
   };
