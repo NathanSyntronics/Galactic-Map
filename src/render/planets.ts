@@ -98,6 +98,15 @@ export function planetSymbolFactor(radiusEarth: number): number {
 }
 
 /**
+ * How much a planet or moon is drawn (0..1) whose surface lies `fromTarget` (ly) from the view
+ * centre: fully up to 1.275 visible radii, none beyond 1.5 (about the screen's height), so that
+ * zoomed in to a moon its planet stays drawn behind it while it is on screen.
+ */
+export function bodyFade(fromTarget: number, viewRadius: number): number {
+  return 1 - smoothstep(1.275 * viewRadius, 1.5 * viewRadius, Math.max(fromTarget, 0));
+}
+
+/**
  * Radius (ly) of a planet's symbol at a visible radius, without the true size it never falls
  * below: its share of the view, at most a third of its periapsis.
  */
@@ -282,7 +291,7 @@ export class PlanetLayer {
         const orbitPx = (p.a / AU_PER_LY / camD) * css;
         // the planet fades with the star's distance from the view centre, or its own if nearer
         planetOffset(p, jd, tmp);
-        const pFade = Math.max(fade, 1 - smoothstep(radius * 0.85, radius, this.tmpPlanet.copy(tmp).add(host.pos).distanceTo(target)));
+        const pFade = Math.max(fade, bodyFade(this.tmpPlanet.copy(tmp).add(host.pos).distanceTo(target) - trueRadius(p), radius));
         const orbitAlpha = smoothstep(3, 14, orbitPx) * pFade;
         const alpha = smoothstep(2, 8, orbitPx) * pFade;
         const line = view.orbits[j];
@@ -295,7 +304,7 @@ export class PlanetLayer {
         // its moons appear around it once their orbits lie well outside it
         const r = planetDrawRadius(p, radius);
         const moonView = view.moons.get(j);
-        if (moonView) this.updateMoons(moonView, tmp, host.pos, camera, css, radius, jd, pFade, symbolRadius(p, radius));
+        if (moonView) this.updateMoons(moonView, tmp, host.pos, target, camera, css, radius, jd, pFade, symbolRadius(p, radius));
         // the disk fills 68 % of the symbol (the rest is its glow)
         sprite.scale.setScalar((2 * r) / 0.68);
         (sprite.material as SpriteMaterial).opacity = alpha;
@@ -323,11 +332,14 @@ export class PlanetLayer {
    * with their orbits' size on screen and once they lie well outside the planet's symbol
    * (`planetSymbol`, ly: its share of the view), so that zoomed out they do not cover it.
    */
-  private updateMoons(view: MoonView, offset: Vector3, star: Vector3, camera: PerspectiveCamera, css: number, radius: number, jd: number, fade: number, planetSymbol: number): void {
+  private updateMoons(
+    view: MoonView, offset: Vector3, star: Vector3, target: Vector3, camera: PerspectiveCamera, css: number, radius: number, jd: number, planetFade: number, planetSymbol: number,
+  ): void {
     const cat = this.cat!;
     view.group.position.copy(offset);
     const planetPos = this.tmpPlanet.copy(offset).add(star);
     const camD = Math.max(planetPos.distanceTo(camera.position), 1e-15);
+    const fromTarget = planetPos.distanceTo(target);
     view.ids.forEach((k, j) => {
       const m = cat.planets[k];
       const line = view.orbits[j];
@@ -336,6 +348,15 @@ export class PlanetLayer {
       if (!this.showUnknownMoons && m.flags & PlanetFlag.RADIUS_ESTIMATED && k !== this.selected) {
         line.visible = sprite.visible = false;
         return;
+      }
+      // drawn while the planet is, or while it is itself near the view centre (zoomed in to a moon,
+      // its planet may lie outside the visible sphere)
+      let fade = planetFade;
+      let placed = false;
+      if (fade < 1 && fromTarget - (m.a * (1 + m.e)) / AU_PER_LY <= 1.5 * radius) {
+        planetOffset(m, jd, this.tmpMoon);
+        placed = true;
+        fade = Math.max(fade, bodyFade(this.tmpVec.copy(this.tmpMoon).add(planetPos).distanceTo(target) - trueRadius(m), radius));
       }
       const orbitPx = (m.a / AU_PER_LY / camD) * css;
       const outside = k === this.selected ? 1 : smoothstep(1.5, 3, (m.a * (1 - m.e)) / AU_PER_LY / planetSymbol);
@@ -346,7 +367,7 @@ export class PlanetLayer {
       line.visible = orbitAlpha > 0.01;
       sprite.visible = alpha > 0.01;
       if (!line.visible && !sprite.visible) return;
-      planetOffset(m, jd, this.tmpMoon);
+      if (!placed) planetOffset(m, jd, this.tmpMoon);
       if (line.visible) {
         const d = this.tmpVec.copy(this.tmpMoon).add(planetPos).distanceTo(camera.position);
         this.keepOnOrbit(line, view.orbitE, j, m, jd, d / css);

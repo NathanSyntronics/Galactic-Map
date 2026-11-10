@@ -153,7 +153,9 @@ from A in 2016 (ORB6, Akeson 2021).
 
 * The visible radius reaches down to 2e-9 ly (19,000 km: Phobos' orbit), the camera to 4.4e-9 ly.
   A system is drawn while its star or one of its planets is in the visible sphere (close up to a
-  planet and its moons the star is far outside). The view follows the star, planet or moon it is
+  planet and its moons the star is far outside). A planet or moon is drawn while its surface lies
+  within 1.5 visible radii of the view centre (about the screen's height; fading from 1.275), a
+  moon also while its planet is: zoomed in to Naiad, Neptune (48,000 km away) stays drawn behind it. The view follows the star, planet or moon it is
   centred on (or flies to) as the clock runs. Distances below
   0.05 ly (3,162 AU) are written in AU (AE in German), below 1 AU in millions of kilometres
   ("57.9 million km", "1,72 Mio. km"), below a million kilometres in kilometres.

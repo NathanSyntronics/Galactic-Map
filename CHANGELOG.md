@@ -2,6 +2,16 @@
 
 Every round of changes that goes live raises the version by 0.01 (README, *Versions*).
 
+## 1.11 (2026-11-10)
+
+* Zoomed in to a moon (Naiad, say), its planet and the moons no longer vanish once the planet lies
+  outside the visible sphere: a planet or moon is drawn while its surface lies within about the
+  screen's height of the view centre.
+* A tap on a galaxy picks that galaxy also far out with another galaxy at the view centre (the
+  sizes on screen were computed with a scaled depth, so that every galaxy seemed to cover the
+  screen); the galaxy under the finger wins, else the nearest. Star picking close up (a star drawn
+  at its true size) had the same fault.
+
 ## 1.10 (2026-11-10)
 
 * Galaxies from NED-D, the NASA/IPAC Extragalactic Database's list of redshift-independent

@@ -88,7 +88,7 @@ import { RouteBox, type RouteNames } from './ui/route-box';
 import { CLOCK_MAX_JD, CLOCK_MIN_JD, PlanetTimeControl, formatClockDate, yearOfJd } from './ui/time-control';
 import { ProbeCard } from './ui/probe-card';
 import { ProbeLayer } from './render/probes';
-import { scaleClipSpace } from './render/clip';
+import { depthOfClipW, scaleClipSpace } from './render/clip';
 import { MAX_DISCS, MAX_STAR_RADIUS_LY, StarDiscLayer, starRadiusLy, type StarDisc } from './render/star-discs';
 import { loadProbes, probePosition, type ProbeCatalogue } from './data/probes';
 import { SearchBox, SearchIndex, hitOf, type SearchHit, type SearchTuple } from './ui/search';
@@ -1187,8 +1187,8 @@ export class App {
   }
 
   /**
-   * The galaxy under the pointer: whose ellipse on screen (its diameter, at least radiusPx around
-   * small ones) contains it, the smallest of several. The Milky Way model counts while it is shown.
+   * The galaxy under the pointer: whose ellipse on screen (as drawn) contains it, the smallest of
+   * several; else the nearest within radiusPx. The Milky Way model counts while it is shown.
    */
   private pickGalaxy(clientX: number, clientY: number, radiusPx: number): number | null {
     const cat = this.galaxyLayer.catalogue;
@@ -1204,8 +1204,10 @@ export class App {
     const target = this.nav.target;
     const r2 = s.radius * s.radius;
     const mwShown = s.milkyWay && milkyWayOpacity(s.radius) > 0.3;
+    // a galaxy whose drawn ellipse holds the pointer wins (the smallest of several); else the
+    // nearest within the pointer's reach (small, point-like galaxies)
     let best: number | null = null;
-    let bestSize = Infinity;
+    let bestScore = Infinity;
     const p = cat.pos;
     for (let i = 0; i < cat.count; i++) {
       const x = p[3 * i], y = p[3 * i + 1], z = p[3 * i + 2];
@@ -1216,13 +1218,14 @@ export class App {
       if (cw <= 0) continue;
       const sx = ((m[0] * x + m[4] * y + m[8] * z + m[12]) / cw * 0.5 + 0.5) * w;
       const sy = (1 - ((m[1] * x + m[5] * y + m[9] * z + m[13]) / cw * 0.5 + 0.5)) * h;
-      // as drawn: larger than the galaxy at large scales
-      const size = ((cat.diam[i] / 2) * this.galaxyLayer.displayScale(i) / cw) * pxPerUnit;
-      const reach = Math.max(size, radiusPx);
-      if (Math.hypot(sx - mx, sy - my) > reach) continue;
-      if (size < bestSize) {
+      // as drawn: larger than the galaxy at large scales (its size on screen at its view depth)
+      const size = ((cat.diam[i] / 2) * this.galaxyLayer.displayScale(i) / depthOfClipW(this.camera, cw)) * pxPerUnit;
+      const d = Math.hypot(sx - mx, sy - my);
+      if (d > Math.max(size, radiusPx)) continue;
+      const score = d <= size ? -1e9 + size : d;
+      if (score < bestScore) {
         best = i;
-        bestSize = size;
+        bestScore = score;
       }
     }
     return best;
@@ -2108,11 +2111,13 @@ export class App {
         const sx = ((m[0] * x + m[4] * y + m[8] * z + m[12]) / cw + 1) * 0.5 * w;
         const sy = (1 - (m[1] * x + m[5] * y + m[9] * z + m[13]) / cw) * 0.5 * h;
         const dist = Math.hypot(sx - mx, sy - my);
-        if (dist > radiusPx && dist > (SPRITE_CORE * maxPx) / (2 * pr)) continue;
-        // clip w is the view depth
-        let core = (SPRITE_CORE * spritePx(rn.sizes[i], s.starSize * starCloseScale(s.radius), scale, cw, minPx, maxPx)) / (2 * pr);
+        // the view depth (clip w is scaled, see render/clip.ts)
+        const depth = depthOfClipW(this.camera, cw);
         // close up, a star drawn at its true size is hit anywhere on its disc
-        if (s.radius < DISC_RADIUS) core = Math.max(core, (starRadiusLy(d, i) * scale) / (cw * pr));
+        const disc = s.radius < DISC_RADIUS ? (starRadiusLy(d, i) * scale) / (depth * pr) : 0;
+        if (dist > radiusPx && dist > (SPRITE_CORE * maxPx) / (2 * pr) && dist > disc) continue;
+        let core = (SPRITE_CORE * spritePx(rn.sizes[i], s.starSize * starCloseScale(s.radius), scale, depth, minPx, maxPx)) / (2 * pr);
+        core = Math.max(core, disc);
         if (dist <= radiusPx) nearby++;
         const preferred = prefer(rn, i);
         const score = pickScore({ dist, core, named: d.names.has(i), logL: starLogL(d, i), preferred }, radiusPx);

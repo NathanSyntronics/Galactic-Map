@@ -16,7 +16,7 @@ import {
   type PlanetFile,
 } from '../../src/data/planets';
 import { distanceUnit, distanceUnitScale, formatLy, setLang } from '../../src/i18n';
-import { planetDrawRadius, planetSymbolFactor, symbolRadius, zonePlaneNormal } from '../../src/render/planets';
+import { bodyFade, planetDrawRadius, planetSymbolFactor, symbolRadius, zonePlaneNormal } from '../../src/render/planets';
 
 (globalThis as { document?: unknown }).document ??= { documentElement: {} };
 
@@ -92,6 +92,14 @@ describe('planets', () => {
         expect(E - e * Math.sin(E)).toBeCloseTo(mm, 10);
       }
     }
+  });
+
+  it('draws a planet or moon while its surface is within about the screen height of the view centre', () => {
+    // Neptune's surface 23,600 km from Naiad at the view centre
+    expect(bodyFade(23_600, 45_500)).toBe(1);
+    expect(bodyFade(23_600, 19_000)).toBe(1);
+    expect(bodyFade(23_600, 15_000)).toBe(0);
+    expect(bodyFade(-5, 1)).toBe(1);
   });
 
   it("keeps a planet's symbol size until its true size is larger", () => {

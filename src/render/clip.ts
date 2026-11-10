@@ -15,6 +15,16 @@ export function scaleClipSpace(camera: PerspectiveCamera, distance: number): voi
   const k = 1 / Math.max(distance, 1e-12);
   camera.projectionMatrix.multiplyScalar(k);
   camera.projectionMatrixInverse.multiplyScalar(1 / k);
+  camera.userData.clipScale = k;
+}
+
+/**
+ * The view depth of a point from its clip coordinate w (with the projection scaled by
+ * scaleClipSpace, w is the depth times the scale; sizes on screen need the depth itself).
+ */
+export function depthOfClipW(camera: PerspectiveCamera, w: number): number {
+  const k = camera.userData.clipScale as number | undefined;
+  return k ? w / k : w;
 }
 
 /** The perspective test of three.js's LineMaterial, which expects an entry of exactly -1. */

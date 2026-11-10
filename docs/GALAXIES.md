@@ -177,8 +177,8 @@ designations leave out the primary one). A galaxy without an entry is called "PG
   centre, or, with the centre off screen, as far towards it from the view centre as the screen
   reaches (also with *Galaxies* off).
 * A click picks a star first (as before); otherwise the galaxy whose ellipse on screen (as drawn,
-  enlarged at large scales) contains
-  the pointer (or within 6 px of a small one), the smallest of several.
+  enlarged at large scales, at its view depth: the projection is scaled, `src/render/clip.ts`)
+  contains the pointer, the smallest of several; else the nearest within 12 px (22 px by touch).
 * The galaxy card shows name (and German name), class, distance with error and method (in plain
   words: "its brightest red giant stars" for the tip of the red giant branch, "how grainy its light
   looks" for surface brightness fluctuations, ...), the catalogues, diameter, luminosity, Local Group membership and the designations; *Centre view

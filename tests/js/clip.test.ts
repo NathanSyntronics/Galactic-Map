@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { PerspectiveCamera, Vector3 } from 'three';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
-import { LINE_PERSPECTIVE_TEST, scaleClipSpace } from '../../src/render/clip';
+import { LINE_PERSPECTIVE_TEST, depthOfClipW, scaleClipSpace } from '../../src/render/clip';
 
 describe('clip coordinates scaled to the camera distance', () => {
   const camera = (d: number) => {
@@ -28,6 +28,21 @@ describe('clip coordinates scaled to the camera distance', () => {
     // unprojecting stays consistent
     const back = p.clone().project(b).unproject(b);
     expect(back.distanceTo(p)).toBeLessThan(1e-12);
+  });
+
+  it('gives back the view depth from the scaled clip w (picking: sizes on screen)', () => {
+    const cam = new PerspectiveCamera(60, 1, 1e-3, 1e12);
+    cam.position.set(0, 0, 5e8);
+    cam.updateMatrixWorld();
+    cam.updateProjectionMatrix();
+    scaleClipSpace(cam, 5e8);
+    // clip w of a point 5e8 ahead (row 4 of the projection times its view position): 1 after the scaling
+    const view = new Vector3(1e7, 0, 0).applyMatrix4(cam.matrixWorldInverse);
+    const e = cam.projectionMatrix.elements;
+    const w = e[3] * view.x + e[7] * view.y + e[11] * view.z + e[15];
+    expect(w).toBeCloseTo(1, 9);
+    // its depth is 5e8
+    expect(depthOfClipW(cam, w)).toBeCloseTo(5e8, 0);
   });
 
   it('finds the perspective test in three.js line shader', () => {
