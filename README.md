@@ -60,8 +60,8 @@ push, see *Deployment*).
 * **Spacecraft.** Voyager 1 and 2, Pioneer 10 and 11 and New Horizons, the spacecraft leaving the
   Solar System, on their real trajectories from JPL Horizons ([`docs/PROBES.md`](docs/PROBES.md)).
 * **Galaxies.** Zoom out past the Milky Way (a stylised model with bar and spiral arms) to the
-  Local Group, the Local Volume and the 55,877 galaxies of Cosmicflows-4, out to about 1.5 billion
-  light years: every galaxy whose distance is measured independently of its redshift, in its
+  Local Group, the Local Volume and some 159,000 galaxies of Cosmicflows-4 and NED-D, out to 3
+  billion light years: every galaxy whose distance is measured independently of its redshift, in its
   true orientation and, like the stars, drawn larger than it is when zoomed out (the more
   luminous, the larger), with English and German names ([`docs/GALAXIES.md`](docs/GALAXIES.md)).
   At these scales the stars fade and only the Sun keeps its label.
@@ -375,6 +375,8 @@ Galaxies ([`docs/GALAXIES.md`](docs/GALAXIES.md)):
 | [Cosmicflows-4](https://doi.org/10.3847/1538-4357/ac94d8) (Tully et al. 2023, ApJ 944, 94) | distances of 55,877 galaxies (TRGB, Cepheids, SN Ia, SBF, fundamental plane, Tully-Fisher, …) |
 | [Updated Nearby Galaxy Catalog](https://doi.org/10.1088/0004-6256/145/4/101) (Karachentsev, Makarov & Kaisina 2013, AJ 145, 101) | galaxies within about 11 Mpc: distances, Holmberg diameters, types, luminosities |
 | [Local Volume Database](https://github.com/apace7/local_volume_database) (Pace 2025, v1.1.1) | dwarf galaxies of the Local Group and the Local Volume |
+| [NED-D](https://ned.ipac.caltech.edu/Library/Distances/) (NED Redshift-Independent Distances v17.1, Steer et al. 2017, AJ 153, 37) | 293,568 distances of 150,802 galaxies from the literature: 102,350 galaxies more, and better distances for some listed ones |
+| [HyperLEDA](http://atlas.obs-hp.fr/hyperleda/) (Makarov et al. 2014, A&A 570, A13) | positions and PGC numbers of the NED-D galaxies (by their names) |
 | [2MASS Extended Source Catalog](https://irsa.ipac.caltech.edu/Missions/2mass.html) (Jarrett et al. 2000, IRSA) | sizes, axis ratios and position angles |
 | [Wikidata](https://www.wikidata.org/) (CC0) | English and German names, catalogue numbers |
 

@@ -36,6 +36,7 @@ import pandas as pd
 from scipy.spatial import cKDTree
 
 from .coords import A_G, LY_PER_PC, unit_vectors
+from . import nedd as nedd_mod
 from .download import CACHE_DIR, fetch, request, tap_sync
 
 log = logging.getLogger("galmap.galaxies")
@@ -67,6 +68,12 @@ SOURCES = [
         "url": "https://doi.org/10.3847/1538-4357/ac94d8",
     },
     {
+        "key": "nedd",
+        "title": "NED-D: NED Redshift-Independent Distances (v17.1)",
+        "citation": "Steer I. et al. 2017, AJ 153, 37 (positions and PGC numbers from HyperLEDA, Makarov D. et al. 2014, A&A 570, A13)",
+        "url": "https://ned.ipac.caltech.edu/Library/Distances/",
+    },
+    {
         "key": "2mass_xsc",
         "title": "2MASS Extended Source Catalog",
         "citation": "Jarrett T. H. et al. 2000, AJ 119, 2498 (sizes, axis ratios and position angles)",
@@ -91,7 +98,7 @@ CLASSES = ["spiral", "lenticular", "elliptical", "irregular", "spheroidal", "mil
 # distance methods (index = code in the records)
 METHODS = ["", "TRGB", "Cep", "maser", "SBF", "SNIa", "SNII", "FP", "TF", "RR", "HB", "CMD", "BS", "PNLF", "mem", "txt", "geom", "model", "other"]
 # flags
-F_LVDB, F_UNGC, F_CF4, F_LOCAL_GROUP, F_NAMED, F_MODEL = 1, 2, 4, 8, 16, 32
+F_LVDB, F_UNGC, F_CF4, F_LOCAL_GROUP, F_NAMED, F_MODEL, F_NEDD = 1, 2, 4, 8, 16, 32, 64
 
 #: intrinsic thickness of a disk (axis ratio seen edge-on)
 Q0 = 0.2
@@ -407,6 +414,7 @@ def merged(cf4: pd.DataFrame, ungc: pd.DataFrame, lvdb: pd.DataFrame) -> pd.Data
             "cf4": np.arange(len(cf4)),
             "ungc": -1,
             "lvdb": -1,
+            "nedd": -1,
         }
     )
 
@@ -437,7 +445,7 @@ def merged(cf4: pd.DataFrame, ungc: pd.DataFrame, lvdb: pd.DataFrame) -> pd.Data
         col = g[key].to_numpy().copy()
         col[idx[hit]] = np.nonzero(hit)[0]
         g[key] = col
-        new = pd.DataFrame({"ra": cat["ra"].to_numpy()[~hit], "dec": cat["dec"].to_numpy()[~hit], "pgc": 0, "cf4": -1, "ungc": -1, "lvdb": -1})
+        new = pd.DataFrame({"ra": cat["ra"].to_numpy()[~hit], "dec": cat["dec"].to_numpy()[~hit], "pgc": 0, "cf4": -1, "ungc": -1, "lvdb": -1, "nedd": -1})
         new[key] = np.nonzero(~hit)[0]
         log.info("%s: %d matched, %d added", key, int(hit.sum()), int((~hit).sum()))
         g = pd.concat([g, new], ignore_index=True)
@@ -556,17 +564,117 @@ def best_dm_so_far(g: pd.DataFrame, cf4: pd.DataFrame, ungc: pd.DataFrame) -> np
     return dm
 
 
+#: NED-D adds galaxies from 6.3 Mpc (20 million ly) on ...
+NEDD_MIN_DM = 29.0
+#: ... to 3 billion ly (its distances are luminosity distances: farther out they grow ever larger
+#: than the distance the map would need)
+NEDD_MAX_LY = 3e9
+
+
+def attach_nedd(g: pd.DataFrame, nd: pd.DataFrame, cf4: pd.DataFrame, ungc: pd.DataFrame, lvdb: pd.DataFrame) -> pd.DataFrame:
+    """NED-D's galaxies: the same as a galaxy listed already by PGC number, else by position (within
+    1.5', the distances within 1 mag, not two different PGC numbers), else added. One NED-D galaxy
+    per listed one (the most precise); NED-D galaxies that are one galaxy under two names (the same
+    PGC number, or one without a number within 5" of another) count once."""
+    g = g.reset_index(drop=True)
+    gpgc = g["pgc"].to_numpy()
+    row_of = {int(p): k for k, p in enumerate(gpgc) if p}
+    dm = best_dm_so_far(g, cf4, ungc)
+    lcol = g["lvdb"].to_numpy()
+    lv = np.full(len(g), np.nan)
+    lv[lcol >= 0] = lvdb["dm"].to_numpy(dtype=float)[lcol[lcol >= 0]]
+    dm = np.where(np.isfinite(dm), dm, lv)
+    npgc = nd["pgc"].to_numpy()
+    ndm = nd["dm"].to_numpy(dtype=float)
+    hit = np.array([row_of.get(int(p), -1) if p else -1 for p in npgc], dtype=np.int64)
+    # the same galaxy, but a distance that disagrees by more than 1 mag: the listed one stays alone
+    bad = (hit >= 0) & (np.abs(ndm - dm[np.maximum(hit, 0)]) > 1.0)
+    disagree = int(bad.sum())
+    hit[bad] = -2
+    rest = np.flatnonzero(hit == -1)
+    near = match(nd["ra"].to_numpy()[rest], nd["dec"].to_numpy()[rest], np.full(len(rest), 1.5), g["ra"].to_numpy(), g["dec"].to_numpy())
+    u, ug = unit_vectors(nd["ra"].to_numpy(), nd["dec"].to_numpy()), unit_vectors(g["ra"].to_numpy(), g["dec"].to_numpy())
+    for i, j in zip(rest, near):
+        if j < 0 or (npgc[i] and gpgc[j] and npgc[i] != gpgc[j]):
+            continue
+        agree = abs(ndm[i] - dm[j]) <= 1.0 or not np.isfinite(dm[j])
+        # within 5" the same galaxy whatever the distances say (the listed one's stays); farther, if they agree
+        close = np.degrees(2 * np.arcsin(min(1.0, np.linalg.norm(u[i] - ug[j]) / 2))) * 3600 <= 5
+        if agree:
+            hit[i] = j
+        elif close:
+            hit[i] = -2
+            disagree += 1
+    col = np.full(len(g), -1, dtype=np.int64)
+    dropped = 0
+    for i in np.argsort(nd["e_dm"].to_numpy(), kind="stable"):
+        j = hit[i]
+        if j < 0:
+            continue
+        if col[j] < 0:
+            col[j] = i
+        else:
+            dropped += 1
+    g["nedd"] = col
+    # the others are new: one per PGC number (the most precise), those without one unless 5" from another;
+    # only between NEDD_MIN_DM (nearer, the UNGC and the LVDB are complete: what NED-D adds there are
+    # globular clusters and stars of the Milky Way) and NEDD_MAX_LY
+    far_ok = (ndm >= NEDD_MIN_DM) & (10 ** (ndm / 5 + 1) * LY_PER_PC <= NEDD_MAX_LY)
+    new = [i for i in np.argsort(nd["e_dm"].to_numpy(), kind="stable") if hit[i] == -1 and far_ok[i]]
+    dropped_range = int(((hit == -1) & ~far_ok).sum())
+    seen: set[int] = set()
+    keep = []
+    for i in new:
+        p = int(npgc[i])
+        if p and p in seen:
+            dropped += 1
+            continue
+        if p:
+            seen.add(p)
+        keep.append(i)
+    keep = np.array(keep, dtype=np.int64)
+    no_pgc = keep[npgc[keep] == 0]
+    with_pgc = keep[npgc[keep] != 0]
+    if len(no_pgc) and len(with_pgc):
+        twin = match(nd["ra"].to_numpy()[no_pgc], nd["dec"].to_numpy()[no_pgc], np.full(len(no_pgc), 5 / 60), nd["ra"].to_numpy()[with_pgc], nd["dec"].to_numpy()[with_pgc])
+        dropped += int((twin >= 0).sum())
+        keep = np.concatenate([with_pgc, no_pgc[twin < 0]])
+    add = pd.DataFrame({"ra": nd["ra"].to_numpy()[keep], "dec": nd["dec"].to_numpy()[keep], "pgc": npgc[keep], "cf4": -1, "ungc": -1, "lvdb": -1, "nedd": keep})
+    log.info("NED-D: %d matched to listed galaxies, %d added, %d counted once (another name of one of them), %d out of range, %d left out (the distance disagrees with the listed galaxy's)",
+             int((col >= 0).sum()), len(add), dropped, dropped_range, disagree)
+    return pd.concat([g, add], ignore_index=True)
+
+
+#: NED's spelling of designations as the map writes them
+def nice_name(name: str) -> str:
+    """'MESSIER 031' -> 'M 31', 'UGC 03657' -> 'UGC 3657', 'ESO 563- G 028' -> 'ESO 563-28'."""
+    s = re.sub(r"\s+", " ", str(name).strip())
+    m = re.match(r"^MESSIER\s*0*(\d+)$", s)
+    if m:
+        return f"M {m.group(1)}"
+    m = re.match(r"^ESO\s*0*(\d+)\s*-\s*[A-Z]*\s*0*(\d+)(.*)$", s)
+    if m:
+        return f"ESO {m.group(1)}-{m.group(2)}{m.group(3)}"
+    return re.sub(r"^(NGC|IC|UGCA?|PGC|DDO|MRK|VCC|FCC|FGC|KUG|ARK|AGC|UGCA) 0*(\d)", r"\1 \2", s)
+
+
 def calibrate(a: np.ndarray, b: np.ndarray, default: float) -> float:
     """Median ratio a / b over the pairs where both are known."""
     ok = np.isfinite(a) & np.isfinite(b) & (a > 0) & (b > 0)
     return float(np.median(a[ok] / b[ok])) if ok.sum() >= 10 else default
 
 
-def galaxy_table(cf4, ungc, lvdb, xsc, labels, codes, wpos) -> pd.DataFrame:
+def galaxy_table(cf4, ungc, lvdb, xsc, labels, codes, wpos, nd=None) -> pd.DataFrame:
     """Every galaxy with position, distance, size, shape, class, luminosity and names."""
-    g = adopt_pgc(merged(cf4, ungc, lvdb), cf4, ungc, lvdb, labels, codes, wpos)
+    if nd is None:
+        nd = pd.DataFrame({"name": [], "pgc": [], "ra": [], "dec": [], "dm": [], "e_dm": [], "method": [], "ref": [], "early": []})
+    nd = nd.copy()
+    for c in nedd_mod.LEDA_FIELDS:
+        if c not in nd:
+            nd[c] = np.nan
+    g = attach_nedd(adopt_pgc(merged(cf4, ungc, lvdb), cf4, ungc, lvdb, labels, codes, wpos), nd, cf4, ungc, lvdb)
     n = len(g)
-    ci, ui, li = g["cf4"].to_numpy(), g["ungc"].to_numpy(), g["lvdb"].to_numpy()
+    ci, ui, li, ni = g["cf4"].to_numpy(), g["ungc"].to_numpy(), g["lvdb"].to_numpy(), g["nedd"].to_numpy()
 
     def take(cat: pd.DataFrame, idx: np.ndarray, col: str, fill=np.nan) -> np.ndarray:
         v = cat[col].to_numpy()
@@ -580,17 +688,24 @@ def galaxy_table(cf4, ungc, lvdb, xsc, labels, codes, wpos) -> pd.DataFrame:
         (take(lvdb, li, "dm"), take(lvdb, li, "e_dm"), take(lvdb, li, "method", ""), take(lvdb, li, "ref", "") if "ref" in lvdb else no_ref, F_LVDB),
         (take(ungc, ui, "dm"), take(ungc, ui, "e_dm"), take(ungc, ui, "method", ""), no_ref, F_UNGC),
         (take(cf4, ci, "dm"), take(cf4, ci, "e_dm"), take(cf4, ci, "method", ""), no_ref, F_CF4),
+        # NED-D last: on equal errors the catalogues above keep their distance
+        (take(nd, ni, "dm"), take(nd, ni, "e_dm"), take(nd, ni, "method", ""), take(nd, ni, "ref", ""), F_NEDD),
     ]
     dm = np.full(n, np.nan)
-    edm = np.full(n, np.inf)
+    edm = np.full(n, np.nan)
+    ecmp = np.full(n, np.inf)
     method = np.full(n, "", dtype=object)
     ref = np.full(n, "", dtype=object)
     flags = np.zeros(n, np.int64)
     for d, e, m, r, f in cand:
         ok = np.isfinite(d)
-        better = ok & (np.nan_to_num(e, nan=0.5) < edm)
-        dm[better], edm[better], method[better], ref[better] = d[better], np.nan_to_num(e[better], nan=0.5), m[better], r[better]
-    flags |= np.where(li >= 0, F_LVDB, 0) | np.where(ui >= 0, F_UNGC, 0) | np.where(ci >= 0, F_CF4, 0)
+        e = np.nan_to_num(e.astype(float), nan=0.5)
+        # NED-D against the other catalogues: by its method's typical error (and a margin), not by the
+        # errors its papers quote, so that it replaces a distance only with a better method
+        cmp = e if f != F_NEDD else np.array([max(x, nedd_mod.METHOD_ERR.get(mm, 0.5)) + 0.05 for x, mm in zip(e, m)])
+        better = ok & (cmp < ecmp)
+        dm[better], edm[better], ecmp[better], method[better], ref[better] = d[better], e[better], cmp[better], m[better], r[better]
+    flags |= np.where(li >= 0, F_LVDB, 0) | np.where(ui >= 0, F_UNGC, 0) | np.where(ci >= 0, F_CF4, 0) | np.where(ni >= 0, F_NEDD, 0)
     keep = np.isfinite(dm)
     log.info("galaxies: %d in all, %d without a redshift-independent distance left out", n, int((~keep).sum()))
     dist_ly = 10 ** (dm / 5 + 1) * LY_PER_PC
@@ -603,13 +718,19 @@ def galaxy_table(cf4, ungc, lvdb, xsc, labels, codes, wpos) -> pd.DataFrame:
     x_pa = np.where(np.isfinite(take(xsc, xi, "sup_phi")), take(xsc, xi, "sup_phi"), take(xsc, xi, "k_phi"))
     kmag_x = take(xsc, xi, "k_m_ext")
 
-    # --- size (diameter in arcmin): UNGC Holmberg diameter, else 2MASS or LVDB scaled to it
+    # --- size (diameter in arcmin): UNGC Holmberg diameter, else HyperLEDA's D25 (NED-D galaxies),
+    # 2MASS or LVDB scaled to it
     a26 = take(ungc, ui, "a26")
     rhalf = take(lvdb, li, "rhalf")
+    d25 = 0.1 * 10 ** take(nd, ni, "logd25").astype(float)
     k_x = calibrate(a26 * 60, 2 * r_ext, 2.0)
     k_l = calibrate(a26, 2 * rhalf, 2.0)
-    log.info("sizes: Holmberg diameter = %.2f x 2MASS total diameter = %.2f x LVDB half-light diameter", k_x, k_l)
-    diam_arcmin = np.where(np.isfinite(a26), a26, np.where(np.isfinite(r_ext), k_x * 2 * r_ext / 60, k_l * 2 * rhalf))
+    k_d = calibrate(a26, d25, 1.3)
+    log.info("sizes: Holmberg diameter = %.2f x 2MASS total diameter = %.2f x LVDB half-light diameter = %.2f x D25", k_x, k_l, k_d)
+    diam_arcmin = np.where(
+        np.isfinite(a26), a26,
+        np.where(np.isfinite(d25), k_d * d25, np.where(np.isfinite(r_ext), k_x * 2 * r_ext / 60, k_l * 2 * rhalf)),
+    )
     diam_ly = np.radians(diam_arcmin / 60) * dist_ly
 
     # --- luminosity (log L_sun, near infrared where possible)
@@ -620,6 +741,9 @@ def galaxy_table(cf4, ungc, lvdb, xsc, labels, codes, wpos) -> pd.DataFrame:
     logl = np.where(np.isfinite(logl), logl, from_v)
     from_b = (5.48 - take(ungc, ui, "absb")) / 2.5
     logl = np.where(np.isfinite(logl), logl, from_b)
+    # HyperLEDA's total B magnitude (NED-D galaxies)
+    from_bt = (5.48 - (take(nd, ni, "bt").astype(float) - dm)) / 2.5
+    logl = np.where(np.isfinite(logl), logl, from_bt)
     # galaxies without a size: from their luminosity (fit over those with both), else 30,000 ly
     ok = np.isfinite(diam_ly) & np.isfinite(logl) & (diam_ly > 0)
     if ok.sum() > 50:
@@ -636,6 +760,8 @@ def galaxy_table(cf4, ungc, lvdb, xsc, labels, codes, wpos) -> pd.DataFrame:
     q = np.where(np.isfinite(q), q, x_ba)
     pa = np.where(np.isfinite(pa), pa, x_pa)
     q = np.where(np.isfinite(q), q, take(ungc, ui, "ba"))
+    q = np.where(np.isfinite(q), q, 10 ** -take(nd, ni, "logr25").astype(float))
+    pa = np.where(np.isfinite(pa), pa, take(nd, ni, "pa").astype(float))
     # unknown position angles: fixed pseudo-random ones
     seed = np.array([_hash(f"{p}:{r:.4f}:{d:.4f}") for p, r, d in zip(g["pgc"], ra, dec)], dtype=np.uint64)
     pa = np.where(np.isfinite(pa), pa, (seed % 18000) / 100.0)
@@ -643,9 +769,13 @@ def galaxy_table(cf4, ungc, lvdb, xsc, labels, codes, wpos) -> pd.DataFrame:
 
     # --- class
     ttype = take(ungc, ui, "ttype")
+    # without one from the UNGC: HyperLEDA's (NED-D galaxies)
+    ttype = np.where(np.isfinite(ttype), ttype, take(nd, ni, "t").astype(float))
     tdw = take(ungc, ui, "tdw", "")
     cls = np.full(n, SPIRAL, np.int64)
     early = take(cf4, ci, "early", False).astype(bool)
+    # NED-D's own galaxies: likewise by their methods
+    early |= (ci < 0) & take(nd, ni, "early", False).astype(bool)
     cls[early] = ELLIPTICAL
     has_t = np.isfinite(ttype)
     cls[has_t & (ttype <= -4)] = ELLIPTICAL
@@ -686,6 +816,7 @@ def galaxy_table(cf4, ungc, lvdb, xsc, labels, codes, wpos) -> pd.DataFrame:
             "flags": flags,
             "ungc_name": take(ungc, ui, "name", None),
             "lvdb_name": take(lvdb, li, "name", None),
+            "nedd_name": take(nd, ni, "name", None),
         }
     )
     out[["mx", "my", "mz"]] = major
@@ -765,11 +896,15 @@ def add_names(g: pd.DataFrame, labels: pd.DataFrame, codes: pd.DataFrame) -> pd.
         elif cat == "European Southern Observatory Catalog":
             d.setdefault("ESO", code)
     en, de, rank, alt = [], [], [], []
-    for pgc, un, ln, flag in zip(g["pgc"], g["ungc_name"], g["lvdb_name"], g["flags"]):
+    nn_col = g["nedd_name"] if "nedd_name" in g else pd.Series([None] * len(g))
+    for pgc, un, ln, nn, flag in zip(g["pgc"], g["ungc_name"], g["lvdb_name"], nn_col, g["flags"]):
         pgc = int(pgc)
         row = lab.loc[pgc] if pgc and pgc in lab.index else None
         cats = cat_of.get(pgc, {})
         own = [v for v in (ln, un) if isinstance(v, str) and v and v != "nan"]
+        # NED's name: a catalogue designation; one with coordinates (2MASX J…) only without a PGC number
+        if isinstance(nn, str) and nn and (not pgc or not nedd_mod.J_RE.search(nn)):
+            own.append(nice_name(nn))
         designations = []
         for v in (
             [cats[k] for k in ("M", "NGC", "IC") if k in cats]
@@ -791,7 +926,10 @@ def add_names(g: pd.DataFrame, labels: pd.DataFrame, codes: pd.DataFrame) -> pd.
         elif designations and not designations[0].startswith("PGC"):
             # the best catalogue designation; the LVDB / UNGC names ("Bootes I", "WLM") count as names
             best = designations[0]
-            r = catalogue_rank(best) if best in cats.values() else 4
+            r = catalogue_rank(best) if best in cats.values() or CATALOGUE_RE.match(best) else 4
+            # a designation with coordinates (2MASX J…, SDSS J…) is no name to label it with
+            if nedd_mod.J_RE.search(best):
+                r = 99
             if e is None or CATALOGUE_RE.match(e) or MESSIER_RE.match(e):
                 e = best
         elif e is None:
@@ -892,6 +1030,10 @@ def distance_reference(ref) -> tuple[str, str] | None:
     year, ADS bibcode): ("Pietrzynski 2019", "2019Natur.567..200P")."""
     if not isinstance(ref, str):
         return None
+    # a bare bibcode (NED-D's): the journal and the year ("2018PASP..130f4002S" -> "PASP 2018")
+    b = re.fullmatch(r"(\d{4})([A-Za-z&]+)\.*\S{9,13}[A-Z.]", ref.strip())
+    if b and len(ref.strip()) == 19:
+        return f"{b.group(2)} {b.group(1)}", ref.strip()
     m = re.fullmatch(r"([A-Za-z][A-Za-z'\-]*?)((\d{4})[A-Za-z&.]\S{14})", ref.strip())
     if not m:
         return None
@@ -962,6 +1104,7 @@ def write(g: pd.DataFrame, out: Path) -> dict:
             "cf4": int(sum(1 for r in rows if r["flags"] & F_CF4)),
             "ungc": int(sum(1 for r in rows if r["flags"] & F_UNGC)),
             "lvdb": int(sum(1 for r in rows if r["flags"] & F_LVDB)),
+            "nedd": int(sum(1 for r in rows if r["flags"] & F_NEDD)),
             "maxDistanceLy": float(max(r["dist_ly"] for r in rows)),
         },
     }
@@ -978,7 +1121,8 @@ def build(out: Path, refresh: bool = False) -> dict:
     labels, codes, wpos = load_wikidata(refresh)
     names = [v for v in pd.concat([ungc["name"], lvdb["name"]]) if isinstance(v, str) and v and not CATALOGUE_RE.match(v)]
     found = load_wikidata_by_label(names, refresh)
-    return write(wikipedia_names(galaxy_table(cf4, ungc, lvdb, xsc, labels, codes, wpos), found), out)
+    nd = nedd_mod.galaxies(refresh)
+    return write(wikipedia_names(galaxy_table(cf4, ungc, lvdb, xsc, labels, codes, wpos, nd), found), out)
 
 
 def main() -> None:

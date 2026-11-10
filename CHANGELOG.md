@@ -2,6 +2,15 @@
 
 Every round of changes that goes live raises the version by 0.01 (README, *Versions*).
 
+## 1.10 (2026-11-10)
+
+* Galaxies from NED-D, the NASA/IPAC Extragalactic Database's list of redshift-independent
+  distances: 158,881 galaxies instead of 56,521, out to 3 billion light years (102,350 more, among
+  them 1,234 NGC and 429 IC galaxies and 7 Messier objects that had no distance on the map so far).
+  Positions and PGC numbers come from HyperLEDA. Cosmicflows-4 stays the reference for its
+  galaxies; NED-D replaces a distance only with a better method (supernovae or Cepheids for a
+  Tully-Fisher distance, say). The galaxy card names NED-D among its sources.
+
 ## 1.09 (2026-11-10)
 
 * Planets keep the size of their symbol while zooming in until their true size is larger (Jupiter

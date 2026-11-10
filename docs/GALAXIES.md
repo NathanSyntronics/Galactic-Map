@@ -1,9 +1,9 @@
 # Galaxies
 
 The map shows the galaxies whose distances are measured independently of their redshift: the
-Local Group, the galaxies of the Local Volume (to about 36 million ly) and the 55,877 galaxies of
-Cosmicflows-4 (to about 1.5 billion ly). Galaxies with only a redshift distance or only a position
-on the sky are not included. This document is the specification the implementation follows.
+Local Group, the galaxies of the Local Volume (to about 36 million ly), the 55,877 galaxies of
+Cosmicflows-4 (to about 1.5 billion ly) and those of NED-D (to 3 billion ly): 158,881 in all.
+Galaxies with only a redshift distance or only a position on the sky are not included. This document is the specification the implementation follows.
 
 ## Data (`pipeline/galmap/galaxies.py`)
 
@@ -16,6 +16,8 @@ on the sky are not included. This document is the specification the implementati
 | Local Volume Database (Pace 2025, release v1.1.1, GitHub) | dwarf galaxies of the Local Group and the Local Volume: satellites of the Milky Way and Andromeda, field dwarfs to about 10 Mpc; distances, half-light radii, ellipticities, position angles, magnitudes | 732 with a distance |
 | Updated Nearby Galaxy Catalog (Karachentsev, Makarov & Kaisina 2013, AJ 145, 101) | all known galaxies within about 11 Mpc: distances and their method, Holmberg diameters, axis ratios, types, luminosities | 869, of which 90 have a distance from their velocity only (left out) |
 | Cosmicflows-4 (Tully et al. 2023, ApJ 944, 94) | distances of 55,877 galaxies from the tip of the red giant branch, Cepheids, masers, surface brightness fluctuations, supernovae, the fundamental plane and the Tully-Fisher relation | 55,877 |
+| NED-D, NED Redshift-Independent Distances v17.1 (Steer et al. 2017, AJ 153, 37) | 293,568 distances of 150,802 galaxies from the literature (fundamental plane, Tully-Fisher, supernovae, Cepheids, TRGB, SBF, …), each with method, distance modulus, error and paper; galaxies by NED's preferred name, no positions | 139,864 (102,350 not in the catalogues above) |
+| HyperLEDA (Makarov et al. 2014, A&A 570, A13; the mirror at the Observatoire de Haute-Provence) | positions and PGC numbers of the NED-D galaxies: its SQL interface resolves any designation (`objname('UGC 03657')`), 300 per request (133,874 of the 150,802; cached in `nedd_leda.csv`, so a later run asks only for new names) | |
 | 2MASS Extended Source Catalog (IRSA) | total radius, axis ratio, position angle and K magnitude of the galaxies it has | |
 | Wikidata | English and German names, Wikipedia articles, catalogue numbers (Messier, NGC, IC, UGC, ESO) and sky positions of the 17,000 galaxies with a PGC number; the names of the dwarf galaxies it lists without one (Fornax Dwarf Galaxy, Boötes I, …), looked up by label | |
 
@@ -32,30 +34,50 @@ were not reachable when this was built); all downloads are cached in `pipeline/c
   its position (within the same match radius). If that galaxy is already in the list, or one is
   listed under the same UNGC / LVDB name (the SMC, whose centres differ by 1°), the two are merged.
   The UNGC's own entry for the Milky Way is left out (it is a record of its own).
+* **NED-D** (`pipeline/galmap/nedd.py`) is merged last. The individual stars of the Magellanic
+  Clouds it lists (OGLE RR Lyrae and Cepheids) are left out. Each galaxy gets one distance: that of
+  its most precise method (the method's typical error: masers, eclipsing binaries, Cepheids, TRGB
+  0.1 mag, RR Lyrae 0.12, SBF, SN Ia, horizontal branch 0.15, … the fundamental plane and
+  Tully-Fisher 0.45), among that method's measurements the median modulus and the median error
+  (at least half the typical one). Positions: HyperLEDA's, else the coordinates in the designation
+  (2MASX J…, SDSS J…; 8,261 galaxies). A NED-D galaxy is a listed one with the same PGC number
+  (if the distances agree within 1 mag; else the listed one stays as it is), else one within 1.5'
+  whose distance agrees within 1 mag, or within 5" whatever the distance (the listed one's stays);
+  else it is added: one per PGC number, one without a number only if no other lies within 5",
+  and only from 6.3 Mpc (20 million ly; nearer, the UNGC and the LVDB are complete, and what
+  NED-D adds there are globular clusters and stars of the Milky Way) to 3 billion ly (NED-D's
+  distances are luminosity distances, which farther out grow ever larger than the distance a map
+  needs). The two fundamental plane studies agree on the whole (median offset 0.04 mag) but scatter
+  by about 0.5 mag each: 4,102 galaxies whose NED-D distance disagrees by more than 1 mag keep
+  their Cosmicflows-4 one.
 * **Distance:** the most precise of the catalogues' distances (smallest distance-modulus error;
-  where a catalogue gives none, the method's typical error). The method is kept (TRGB, Cepheids,
+  where a catalogue gives none, the method's typical error). NED-D's against the others by its
+  method's typical error plus 0.05 mag, not the errors its papers quote: it replaces a distance
+  only with a better method (Cepheids for a Tully-Fisher one, say), so Cosmicflows-4 stays the
+  reference for its galaxies. The method is kept (TRGB, Cepheids,
   masers, SBF, SN Ia, SN II, fundamental plane, Tully-Fisher, RR Lyrae, horizontal branch, CMD,
   brightest stars, group membership, …). Galaxies without a redshift-independent distance are
   left out.
 * **Position:** right ascension, declination and distance → heliocentric galactic Cartesian
   coordinates in light years, the frame of the stars.
-* **Size:** the UNGC's Holmberg diameter (about the 26.5 mag/arcsec² isophote in B); else the
-  2MASS total diameter or the LVDB half-light diameter, scaled to the Holmberg diameter by the
-  median ratio of the galaxies that have both; else from the luminosity (a fit of size against
-  luminosity).
-* **Shape:** axis ratio and position angle from the LVDB, else 2MASS, else the UNGC's axis ratio
-  with a fixed pseudo-random position angle.
+* **Size:** the UNGC's Holmberg diameter (about the 26.5 mag/arcsec² isophote in B); else
+  HyperLEDA's D25 (NED-D galaxies), the 2MASS total diameter or the LVDB half-light diameter,
+  scaled to the Holmberg diameter by the median ratio of the galaxies that have both (1.21 × D25,
+  1.31 × 2MASS); else from the luminosity (a fit of size against luminosity).
+* **Shape:** axis ratio and position angle from the LVDB, else 2MASS, else the UNGC's axis ratio,
+  else HyperLEDA's (NED-D galaxies); an unknown position angle is a fixed pseudo-random one.
 * **Orientation in space:** the major axis lies on the sky at the position angle; the disk is
   tilted out of the sky plane about it by the inclination that the axis ratio gives
   (`cos² i = (q² − 0.2²) / (1 − 0.2²)`, 0.2 being a disk's own thickness). Which way it is tilted
   the sky does not tell; a fixed pseudo-random choice. So every galaxy looks from the Sun as it
   does on the sky.
 * **Class:** spiral, lenticular, elliptical, irregular, spheroidal (dwarf spheroidal / dwarf
-  elliptical) from the UNGC's type; for Cosmicflows-4 galaxies without one, elliptical if their
+  elliptical) from the UNGC's type, else HyperLEDA's (NED-D galaxies; the same limits of the
+  numerical type); for galaxies without one, elliptical if their
   distance comes from the fundamental plane or SBF and not from Tully-Fisher, else spiral; LVDB
   dwarfs without one: spheroidal for satellites, irregular for field dwarfs.
 * **Luminosity** (log L☉): the UNGC's K-band luminosity, else from the 2MASS K magnitude, else from
-  M_V (LVDB) or M_B (UNGC), else from the size.
+  M_V (LVDB) or M_B (UNGC), else from HyperLEDA's total B magnitude, else from the size.
 * **Names:** the Wikidata label in English and German where it is a common name with a Wikipedia
   article (Andromeda Galaxy / Andromedagalaxie); else the best designation: Messier (short, "M 81",
   in both languages), NGC, IC, then the LVDB and UNGC names that are not catalogue numbers
@@ -63,8 +85,11 @@ were not reachable when this was built); all downloads are cached in `pipeline/c
   galaxy without a common name whose LVDB / UNGC name is the start of the English label of a
   Wikidata item with a Wikipedia article at the same place (within 20' or its own size) takes that
   item's names ("Fornax" → Fornax Dwarf Galaxy / Fornax-Zwerggalaxie). Every galaxy keeps its
-  other designations; the primary one is its PGC number (else its first designation). Name ranks:
-  0 common name, 1 Messier, 2 NGC, 3 IC, 4 other, 99 PGC number only.
+  other designations; the primary one is its PGC number (else its first designation). NED-D's
+  name counts like the UNGC's, in the map's spelling ("UGC 03657" → "UGC 3657", "ESO 563- G 028" →
+  "ESO 563-28", "MESSIER 031" → "M 31"); a designation with coordinates (2MASX J…, SDSS J…) only
+  for a galaxy without a PGC number, and it is no name to label it with. Name ranks: 0 common
+  name, 1 Messier, 2 NGC, 3 IC, 4 other, 99 PGC number (or coordinate designation) only.
 * **Local Group:** members are the galaxies within 1.5 Mpc of the barycentre between the Milky Way
   and Andromeda (at 55 % of the way to Andromeda).
 * **The Milky Way** is the first record, drawn as a model (see below), at the Galactic Centre
@@ -85,7 +110,7 @@ were not reachable when this was built); all downloads are cached in `pipeline/c
 | 24 | i16 | log L☉ × 1000 (−32768: unknown) |
 | 26 | u8 | relative distance error × 200 (255: unknown) |
 | 27 | u8 | distance method (index into `methods`) |
-| 28 | u8 | flags: 1 LVDB, 2 UNGC, 4 Cosmicflows-4, 8 Local Group, 16 named, 32 model |
+| 28 | u8 | flags: 1 LVDB, 2 UNGC, 4 Cosmicflows-4, 8 Local Group, 16 named, 32 model, 64 NED-D |
 | 29 | u8, u16 | reserved |
 | 32 | u32 | PGC number (0: none) |
 
@@ -100,7 +125,7 @@ designations leave out the primary one). A galaxy without an entry is called "PG
 
 * The visible radius reaches 2 billion ly, the camera 5 billion ly. Distances of a million light
   years and more are written in millions ("2.5 million ly" / "2,5 Mio. Lj") and billions.
-* The galaxy files (2 MB and 0.4 MB) are loaded the first time the visible radius exceeds
+* The galaxy files (5.7 MB and 1.4 MB, 4.2 and 0.3 MB compressed) are loaded the first time the visible radius exceeds
   20,000 ly, or with the search index (the search knows the stars and the galaxies at once).
 * A view far from the stars waits for none of them (no "loading" notice); the status line counts
   the galaxies in the visible sphere ("38 galaxies in view").
@@ -111,7 +136,7 @@ designations leave out the primary one). A galaxy without an entry is called "PG
   edge), relative to an origin near the view centre (float precision). Only the galaxies within
   1.15 visible radii of the view centre are copied into the instance buffers (again when the view
   centre has moved by 1 % of the radius, or the radius has grown by 10 % or halved): drawing all
-  56,000 every frame cost most of the frame time at the scales of the Local Group and the Local
+  56,000 (now 159,000) every frame cost most of the frame time at the scales of the Local Group and the Local
   Volume.
 * **Disk galaxies** (spiral, lenticular, irregular) are quads in their disk plane (seen from
   either side), of their true size and orientation, with a procedural pattern: a spiral has an exponential disk, two

@@ -170,6 +170,7 @@ export class GalaxyCard {
       if (cat.flags[i] & GalaxyFlag.CF4) src.push('Cosmicflows-4');
       if (cat.flags[i] & GalaxyFlag.UNGC) src.push('UNGC');
       if (cat.flags[i] & GalaxyFlag.LVDB) src.push('LVDB');
+      if (cat.flags[i] & GalaxyFlag.NEDD) src.push('NED-D');
       row(t('source'), src.join(', '));
     }
     this.root.appendChild(dl);

@@ -18,7 +18,7 @@ log = logging.getLogger(__name__)
 
 
 def steps() -> list[tuple[str, Callable[[], object]]]:
-    from . import binaries, galaxies, moons, planets, probes
+    from . import binaries, galaxies, moons, nedd, planets, probes
     from .sources import athyg, census20, gaia, gcns, hyg, iau, simbad, wikidata
 
     def gaia_core() -> None:
@@ -45,6 +45,8 @@ def steps() -> list[tuple[str, Callable[[], object]]]:
         ("LVDB", galaxies.load_lvdb),
         ("2MASS XSC (IRSA)", galaxies.load_xsc),
         ("Wikidata galaxies", galaxies.load_wikidata),
+        # (the names resolved by HyperLEDA are cached: a later run asks only for what is missing)
+        ("NED-D and HyperLEDA", nedd.galaxies),
     ] + [(f"{name} (JPL Horizons)", lambda k=key, i=pid, a=start, b=stop: probes.fetch(k, i, a, b)) for key, pid, name, _, start, stop in probes.PROBES]
 
 

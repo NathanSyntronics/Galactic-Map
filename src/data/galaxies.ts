@@ -22,6 +22,8 @@ export const GalaxyFlag = {
   LOCAL_GROUP: 8,
   NAMED: 16,
   MODEL: 32,
+  /** In NED-D, the NASA/IPAC Extragalactic Database's list of redshift-independent distances. */
+  NEDD: 64,
 } as const;
 
 /** [index, English name, German name or null, rank, designation, other designations?] */
