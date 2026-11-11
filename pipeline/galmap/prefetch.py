@@ -30,6 +30,7 @@ def steps() -> list[tuple[str, Callable[[], object]]]:
         ("AT-HYG", athyg.load),
         ("Gaia DR3 cross-matches (ESA)", gaia_core),
         ("Gaia DR3 field 100-200 pc (ESA)", gaia.load_field),
+        ("Gaia DR3 beyond 200 pc, parallaxes better than 1 % (ESA)", gaia.load_precise),
         ("Hipparcos 2007 (ESA)", gaia.load_hipparcos),
         ("HYG", hyg.load),
         ("GCNS (CDS)", gcns.load),

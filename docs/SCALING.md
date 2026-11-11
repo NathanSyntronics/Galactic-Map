@@ -1,6 +1,6 @@
 # Scaling to hundreds of millions of stars
 
-The map holds 4.3 million stars today. Gaia DR3 has 1.47 billion stars with a parallax, about
+The map holds 7.9 million stars today (3.6 million of them through the bulk path). Gaia DR3 has 1.47 billion stars with a parallax, about
 98 million with a distance better than 10 % and 192 million better than 20 %. This document is the
 architecture that lets the pipeline and the app handle such numbers. It is implemented and tested
 with today's data and with synthetic data; the large catalogues themselves are not downloaded
@@ -34,7 +34,9 @@ with today's data and with synthetic data; the large catalogues themselves are n
    core star). What needs the neighbourhood of every star is missing: wide-binary systems,
    SIMBAD matches by position, Wikidata and IAU names.
 
-The Gaia stars between 100 and 200 pc that the map holds (1.5 million) stay in the core catalogue
+The Gaia stars beyond 200 pc with parallaxes better than 1 % (`precise_source`, 5.8 million rows
+from the archive, 3.6 million new stars) are bulk stars in every build (`--no-precise` leaves them
+out). The Gaia stars between 100 and 200 pc that the map holds (1.5 million) stay in the core catalogue
 by default: they fit in memory, and there they also take part in the wide-binary search. The build
 option `--field-bulk` sends them through the bulk path instead; comparing both builds tests the
 bulk path on real data (see Checks).
@@ -54,6 +56,9 @@ point is computed per chunk.
 
 * `field_source`: the archive query of the 100–200 pc field (cached by `galmap.sources.gaia`),
   read in row groups (`parquet_source`). Fine up to a few million rows.
+* `precise_source`: the archive query of all stars beyond 200 pc with ϖ/σ > 90 (`gaia.load_precise`,
+  512 source-id ranges, about an hour; cached), selected by `bulk.PRECISE` (parallax below the
+  field's 5 mas, relative error below 1 % after the zero point and the RUWE inflation).
 * `files_source`: the ESA bulk files (`GaiaSource_*.csv.gz`), read file by file with only the
   needed columns (exact float parsing). Downloading them is a separate, resumable step:
   `python -m galmap.fetch_gaia_bulk --dest DIR` (3,386 files, about 650 GB; a partial file is
@@ -80,7 +85,9 @@ of arrival, so the tree does not depend on how the stars arrive (it used to be a
    (110 bytes: position, values, designation numbers, order keys); the few text fields
    (designation strings, names, spectral types) go to a side file per chunk.
 2. **Buckets.** The root cube is split adaptively, four levels per pass over the spool, until
-   every cube holds at most `max_bucket` stars (default 8 million, `--max-bucket`); every star is
+   every cube holds at most `max_bucket` stars (default 8 million, `--max-bucket`; the deploy uses
+   3 million: today's 7.9 million stars in 39 buckets, the same stars in the same nodes as in one
+   bucket, with a peak of 7.5 GB instead of 9.9 GB for the whole build); every star is
    appended to its bucket's file. A dataset that fits one bucket (today's) is one bucket: the
    whole tree in memory as before.
 3. **Upper levels.** A node above a bucket of depth `d` takes at most `capacity` stars from it
@@ -125,7 +132,8 @@ names: 31 bytes).
 
 | Selection | Stars | Packs | Nodes | Manifests |
 |---|---|---|---|---|
-| today | 4.3 million | 170 MB | 2,900 | 1 |
+| before the precise stars | 4.3 million | 170 MB | 2,900 | 1 |
+| today | 7.9 million | 302 MB | 5,700 | 2 |
 | Gaia, distance better than 10 % | ~98 million | ~4 GB | ~70,000 | ~20 |
 | Gaia, distance better than 20 % | ~192 million | ~8 GB | ~140,000 | ~40 |
 | Gaia, every star with a parallax | ~1.47 billion | ~55 GB | ~1 million | ~250 |

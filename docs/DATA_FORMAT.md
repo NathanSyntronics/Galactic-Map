@@ -183,7 +183,7 @@ without copying once the blob is in its own `ArrayBuffer`.
 | 10  | `SUN`             | the Sun                                                         |
 | 11  | `GIANT`           | luminosity class I–III (giant / supergiant)                     |
 | 12  | `VARIABLE`        | known variable star                                             |
-| 13  | `SRC_GAIA`        | Gaia DR3 field star between 100 and 200 pc (no other catalogue) |
+| 13  | `SRC_GAIA`        | Gaia DR3 star of no other catalogue: the field between 100 and 200 pc (parallax better than 10 %), or beyond 200 pc with a parallax better than 1 % |
 | 14  | `SRC_EXOPLANET`   | planet host from the NASA Exoplanet Archive (no other catalogue; see docs/PLANETS.md) |
 | 15  | `RV_KNOWN`        | the velocity includes a measured radial velocity (own or its system's); without it the star moves only across the line of sight |
 

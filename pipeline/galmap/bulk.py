@@ -11,7 +11,8 @@ every star is missing: wide-binary systems and SIMBAD matches by position.
 Sources yield pandas tables with the Gaia columns in GAIA_COLUMNS (plus parallax_zp, computed
 here when missing):
 
-* parquet_source: a table on disk (the archive queries cached by galmap.sources.gaia);
+* parquet_source: a table on disk (the archive queries cached by galmap.sources.gaia; precise_source:
+  the stars beyond 200 pc with parallaxes better than 1 %, part of every build);
 * files_source: the ESA bulk files GaiaSource_*.csv.gz (galmap.fetch_gaia_bulk downloads them).
 """
 
@@ -84,6 +85,9 @@ class Selection:
 
 #: the Gaia field stars between 100 and 200 pc of today's build (merge.add_gaia_field)
 FIELD = Selection()
+#: the Gaia stars beyond the field (200 pc) with a parallax better than 1 % (after the zero point
+#: and the RUWE inflation of the error), from gaia.load_precise
+PRECISE = Selection(min_plx=0.0, max_plx=merge.FIELD_MIN_PLX, max_rel_err=0.01)
 
 
 # ------------------------------------------------------------------ sources
@@ -115,6 +119,11 @@ def field_source(refresh: bool = False, rows: int = CHUNK_ROWS) -> Iterator[pd.D
     if refresh or not path.exists():
         gaia.fetch_xmatch("field200", chunks=128, refresh=refresh)  # downloads once, then cached
     yield from parquet_source(path, rows)
+
+
+def precise_source(refresh: bool = False, rows: int = CHUNK_ROWS) -> Iterator[pd.DataFrame]:
+    """The Gaia stars beyond 200 pc with a parallax better than about 1 %, through the archive cache."""
+    yield from parquet_source(gaia.load_precise(refresh), rows)
 
 
 def files_source(directory: Path, rows: int = CHUNK_ROWS, pattern: str = "GaiaSource_*.csv.gz") -> Iterator[pd.DataFrame]:

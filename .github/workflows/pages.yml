@@ -56,9 +56,10 @@ jobs:
 
       # Any step that fails stops the run before the deploy: the site online stays as it was
       # (a source that is down must not publish a map without its planets or galaxies).
+      # (octree buckets of 3 million stars: the same data, with a peak of about 7.5 GB instead of 10)
       - name: Build star data
         working-directory: pipeline
-        run: python -m galmap.build --out ../public/data
+        run: python -m galmap.build --out ../public/data --max-bucket 3000000
 
       # Sanity checks against known stars (exit code 1 on a problem).
       - name: Verify star data

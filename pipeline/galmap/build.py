@@ -221,14 +221,16 @@ def build(
     use_simbad: bool = True,
     field: bool = True,
     field_bulk: bool = False,
+    precise: bool = True,
     bulk_files: Path | None = None,
     bulk_selection: bulk.Selection | None = None,
     work_dir: Path | None = None,
     max_bucket: int | None = None,
 ) -> dict:
-    """The whole dataset. The core catalogue is merged in memory; bulk Gaia stars (the 100-200 pc
-    field with `field_bulk`, ESA bulk files with `bulk_files`) are derived chunk by chunk and
-    streamed into the out-of-core octree writer (docs/SCALING.md)."""
+    """The whole dataset. The core catalogue is merged in memory; bulk Gaia stars (the stars beyond
+    200 pc with parallaxes better than 1 % with `precise`, the 100-200 pc field with `field_bulk`,
+    ESA bulk files with `bulk_files`) are derived chunk by chunk and streamed into the out-of-core
+    octree writer (docs/SCALING.md)."""
     t0 = time.time()
     phot = Photometry(load_mamajek(fetch(MAMAJEK_URL, MAMAJEK_FILE, refresh=refresh)))
 
@@ -249,6 +251,10 @@ def build(
     elif field:
         s = merge.add_gaia_field(s, gaia.load_field(refresh))
         gc.collect()
+    if precise:
+        # beyond the field (or, without it, the GCNS)
+        sel_p = bulk.Selection(**{**bulk.PRECISE.kwargs(), "max_plx": bulk.PRECISE.max_plx if field else 10.0})
+        sources_bulk.append(("gaia_precise", lambda: bulk.precise_source(refresh), sel_p))
     if bulk_files:
         sel = bulk_selection or bulk.Selection(min_plx=1.0, max_plx=bulk.FIELD.min_plx if field else 10.0)
         sources_bulk.append(("gaia_files", lambda: bulk.files_source(bulk_files), sel))
@@ -410,6 +416,7 @@ def main() -> None:
     ap.add_argument("--no-simbad", action="store_true", help="skip the SIMBAD name lookup")
     ap.add_argument("--no-field", action="store_true", help="skip the Gaia field stars between 100 and 200 pc")
     ap.add_argument("--field-bulk", action="store_true", help="the field stars through the bulk path (chunk by chunk, see docs/SCALING.md)")
+    ap.add_argument("--no-precise", action="store_true", help="skip the Gaia stars beyond 200 pc with parallaxes better than 1 %%")
     ap.add_argument("--bulk-files", type=Path, default=None, help="directory of ESA GaiaSource_*.csv.gz files to add as bulk stars")
     ap.add_argument("--bulk-min-plx", type=float, default=1.0, help="bulk files: smallest parallax in mas (default 1, i.e. 1 kpc)")
     ap.add_argument("--bulk-max-rel-err", type=float, default=0.1, help="bulk files: largest relative parallax error (default 0.1)")
@@ -426,7 +433,7 @@ def main() -> None:
         )
     build(
         args.out, refresh=args.refresh, capacity=args.capacity, limit=args.limit,
-        use_simbad=not args.no_simbad, field=not args.no_field, field_bulk=args.field_bulk,
+        use_simbad=not args.no_simbad, field=not args.no_field, field_bulk=args.field_bulk, precise=not args.no_precise,
         bulk_files=args.bulk_files, bulk_selection=selection, work_dir=args.work_dir, max_bucket=args.max_bucket,
     )
 

@@ -159,6 +159,25 @@ def test_skip_and_selection():
     assert bulk.SortedIds([]).contains(np.array([1, 2])).tolist() == [False, False]
 
 
+def test_precise_selection_takes_the_stars_beyond_the_field_better_than_one_percent():
+    raw = gaia_rows(4000, seed=11)
+    # beyond 200 pc as well: 1-9 mas
+    rng = np.random.default_rng(3)
+    raw["parallax"] = rng.uniform(1.0, 9.0, len(raw))
+    raw["parallax_error"] = raw["parallax"] * rng.uniform(0.002, 0.03, len(raw))
+    keep, plx, err = bulk.PRECISE.keep(raw)
+    assert keep.any()
+    # beyond the field only, every one better than 1 % (zero point and RUWE inflation included)
+    assert (plx[keep] < merge.FIELD_MIN_PLX).all()
+    assert (err[keep] / plx[keep] < 0.01).all()
+    # and every such star is taken
+    sol = raw["astrometric_params_solved"].isin([31, 95]).to_numpy()
+    assert keep.sum() == int(((plx < merge.FIELD_MIN_PLX) & (err > 0) & (err / plx < 0.01) & sol).sum())
+    # the field takes over from 5 mas on: no star in both
+    fkeep, _, _ = bulk.FIELD.keep(raw)
+    assert not (keep & fkeep).any()
+
+
 def write_gaia_files(directory: Path, raw: pd.DataFrame, parts=3) -> None:
     """ESA-style files: '#' metadata lines, more columns than needed, 'null' for missing values."""
     table = raw.drop(columns=["parallax_zp"])

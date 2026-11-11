@@ -49,14 +49,25 @@ FIELD_WHERE = (
     f"g.parallax > {FIELD_MIN_PLX} AND g.parallax < {FIELD_MAX_PLX} AND g.parallax_over_error > 9 "
     "AND g.visibility_periods_used >= 10"
 )
+# All Gaia DR3 stars beyond the field (200 pc) whose parallax is measured to better than about 1 %
+# (the final cut, after the zero point and the RUWE inflation of the error, is made by the bulk
+# selection bulk.PRECISE): some 4.6 million, mostly within 1 to 2 kpc.
+PRECISE_MAX_PLX = 5.1
+PRECISE_WHERE = f"g.parallax < {PRECISE_MAX_PLX} AND g.parallax_over_error > 90 AND g.visibility_periods_used >= 10"
 COUNTS = {
     "field200": "SELECT COUNT(*) AS n FROM gaiadr3.gaia_source AS g "
     f"WHERE g.source_id >= {{lo}} AND g.source_id < {{hi}} AND {FIELD_WHERE}",
+    "precise": "SELECT COUNT(*) AS n FROM gaiadr3.gaia_source AS g "
+    f"WHERE g.source_id >= {{lo}} AND g.source_id < {{hi}} AND {PRECISE_WHERE}",
 }
 QUERIES = {
     "field200": (
         "SELECT {cols} FROM gaiadr3.gaia_source AS g "
         f"WHERE g.source_id >= {{lo}} AND g.source_id < {{hi}} AND {FIELD_WHERE}"
+    ),
+    "precise": (
+        "SELECT {cols} FROM gaiadr3.gaia_source AS g "
+        f"WHERE g.source_id >= {{lo}} AND g.source_id < {{hi}} AND {PRECISE_WHERE}"
     ),
     "gcns": (
         "SELECT {cols} FROM external.gaiaedr3_gcns_main_1 AS x "
@@ -215,6 +226,18 @@ def load_field(refresh: bool = False) -> pd.DataFrame:
     df["parallax_zp"] = parallax_zero_point(df)
     log.info("Gaia DR3 field stars 100-200 pc: %d", len(df))
     return df
+
+
+#: source_id chunks of the precise query (each split further until it arrives complete)
+PRECISE_CHUNKS = 512
+
+
+def load_precise(refresh: bool = False) -> Path:
+    """Gaia DR3 stars beyond 200 pc with a parallax better than about 1 % (see PRECISE_WHERE),
+    downloaded once into the archive cache; returns the Parquet file (bulk.precise_source reads it
+    chunk by chunk, so that the 5 million rows are never held as one table)."""
+    fetch_xmatch("precise", chunks=PRECISE_CHUNKS, refresh=refresh)
+    return CACHE_DIR / "gaia" / "gaia_dr3_precise.parquet"
 
 
 def load(refresh: bool = False, extra_ids=None) -> pd.DataFrame:

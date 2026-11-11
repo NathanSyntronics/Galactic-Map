@@ -2,6 +2,14 @@
 
 Every round of changes that goes live raises the version by 0.01 (README, *Versions*).
 
+## 1.12 (2026-11-11)
+
+* 3.6 million more stars: every Gaia DR3 star beyond 200 pc whose parallax is better than 1 %
+  (4.4 million, the others were on the map already), half of them within 1,400 ly, nine in ten
+  within 2,200 ly, the farthest at 4,100 ly. The map holds 7.9 million stars now; zoomed out to a
+  few thousand light years the disk of the Milky Way around the Sun shows. These stars are named by
+  their Gaia DR3 number; the star data grew from 203 to 331 MB (loaded only where you look).
+
 ## 1.11 (2026-11-10)
 
 * Zoomed in to a moon (Naiad, say), its planet and the moons no longer vanish once the planet lies

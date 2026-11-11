@@ -9,10 +9,12 @@ push, see *Deployment*).
   a trigonometric parallax from Gaia DR3, Hipparcos or the 20 pc census. The positions are
   converted into a heliocentric galactic coordinate system (X towards the Galactic Centre,
   Z towards the North Galactic Pole).
-* **As many stars as possible.** About 4.3 million stars are included:
+* **As many stars as possible.** About 7.9 million stars are included:
   * every known object within 20 pc (65 ly), including brown dwarfs;
   * every star with good Gaia astrometry within 100 pc (326 ly);
   * every Gaia DR3 star between 100 and 200 pc (650 ly) whose parallax is better than 10 %;
+  * every Gaia DR3 star beyond 200 pc whose parallax is better than 1 % (4.4 million, 3.6 million of
+    them new to the map; half within 1,400 ly, nine in ten within 2,200 ly, the farthest at 4,100 ly);
   * all Tycho-2 stars, which are the brighter stars, out to several thousand light years;
   * every star with a confirmed planet whose distance is known (Kepler, TESS and microlensing hosts
     too, from the NASA Exoplanet Archive).
@@ -248,7 +250,8 @@ with the jump network's *Line colour → Star colours* the links take the factio
 | Republic of Spica | Republik Spica | Spica | 250 ly | 1,000 | purple |
 
 The large territories reach 50 ly (Spica) to 254 ly (Betelgeuse) from their capitals; Betelgeuse's
-fills most of the map's edge region in the direction of Orion (the star data end at 650 ly).
+fills most of the map's edge region in the direction of Orion (the territories were computed when
+the star data ended at 650 ly; the stars farther out belong to no faction).
 
 The territories follow the jump network with the default settings. They grow from their capitals
 along its links, all at once: a faction claims the places (systems or single stars) that are
@@ -356,7 +359,7 @@ specified in [`docs/ROUTES.md`](docs/ROUTES.md):
 |---|---|
 | [20 pc census](https://exoplanetarchive.ipac.caltech.edu/docs/20pcCensus.html) (Kirkpatrick et al. 2024, ApJS 271, 55) | everything within 20 pc: positions, parallaxes, spectral types, brown dwarfs, system hierarchy, names |
 | [Gaia Catalogue of Nearby Stars](https://doi.org/10.1051/0004-6361/202039498) (Gaia Collaboration, Smart et al. 2021) | stars within 100 pc |
-| [Gaia DR3](https://www.cosmos.esa.int/web/gaia/dr3) (Gaia Collaboration 2023), parallax zero point after Lindegren et al. 2021 | astrometry and colours of the Tycho-2 / Hipparcos and GCNS stars; all stars between 100 and 200 pc |
+| [Gaia DR3](https://www.cosmos.esa.int/web/gaia/dr3) (Gaia Collaboration 2023), parallax zero point after Lindegren et al. 2021 | astrometry and colours of the Tycho-2 / Hipparcos and GCNS stars; all stars between 100 and 200 pc; beyond 200 pc all stars with parallaxes better than 1 % |
 | [Hipparcos new reduction](https://doi.org/10.1051/0004-6361:20078357) (van Leeuwen 2007) | parallaxes of bright stars whose Gaia solution is poor |
 | [AT-HYG v4.0](https://codeberg.org/astronexus/athyg) and [HYG v4.4](https://codeberg.org/astronexus/hyg) (D. Nash, CC BY-SA 4.0) | 2.5 million Tycho-2 / Hipparcos stars, classical designations, Gliese systems |
 | [IAU Catalog of Star Names](https://exopla.net/star-names/modern-iau-star-names/) (WGSN) | official proper names |
@@ -419,6 +422,11 @@ It handles the following cases:
 * **Gaia field stars.** Between 100 and 200 pc, every Gaia DR3 source with a five- or six-parameter
   solution whose corrected parallax is better than 10 % (errors inflated by the RUWE) is added,
   unless it is already in the catalogue: 1.5 million stars.
+* **Precise Gaia stars beyond 200 pc.** Every Gaia DR3 source beyond the field whose corrected
+  parallax is better than 1 % (errors inflated by the RUWE; downloaded with a margin, ϖ/σ > 90,
+  5.8 million rows) and that is not already in the catalogue: 3.6 million stars. They go through
+  the bulk path chunk by chunk (`docs/SCALING.md`): their designation is their Gaia DR3 number;
+  wide binaries among them are not searched for.
 * **Quality cut.** Stars with a parallax error above 100 % or beyond 15 kpc are dropped. The
   app can additionally hide stars by distance uncertainty (20 % by default).
 
