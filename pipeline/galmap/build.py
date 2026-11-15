@@ -47,6 +47,18 @@ GAIA_INFO = {
     "license": "CC BY-SA 3.0 IGO",
 }
 
+#: (with `build --gaia-release dr4`: the stars beyond 200 pc; the citation is the one announced for DR4)
+GAIA_DR4_INFO = {
+    "key": "gaia_dr4",
+    "title": "Gaia Data Release 4 (stars beyond 200 pc with parallaxes better than 1 %)",
+    "citation": "Gaia Collaboration 2026, Gaia Data Release 4. This work has made use of data from the European Space "
+    "Agency (ESA) mission Gaia (https://www.cosmos.esa.int/gaia), processed by the Gaia Data Processing and Analysis "
+    "Consortium (DPAC). Parallax bias: the tentative_parallax_bias of Gaia DR4; designations of DR3 through the "
+    "archive's dr3_neighbourhood table.",
+    "url": "https://www.cosmos.esa.int/web/gaia/dr4",
+    "license": "CC BY-SA 3.0 IGO",
+}
+
 HIPPARCOS_INFO = {
     "key": "hipparcos",
     "title": "Hipparcos, the New Reduction of the Raw Data",
@@ -226,12 +238,16 @@ def build(
     bulk_selection: bulk.Selection | None = None,
     work_dir: Path | None = None,
     max_bucket: int | None = None,
+    gaia_release: str | None = None,
 ) -> dict:
     """The whole dataset. The core catalogue is merged in memory; bulk Gaia stars (the stars beyond
     200 pc with parallaxes better than 1 % with `precise`, the 100-200 pc field with `field_bulk`,
     ESA bulk files with `bulk_files`) are derived chunk by chunk and streamed into the out-of-core
-    octree writer (docs/SCALING.md)."""
+    octree writer (docs/SCALING.md). `gaia_release` ("dr3", "dr4"; default: the environment
+    variable GALMAP_GAIA_RELEASE, else DR3) is the Gaia release of the stars beyond 200 pc
+    (docs/GAIA_DR4.md); everything else stays Gaia DR3."""
     t0 = time.time()
+    rel = gaia.release(gaia_release)
     phot = Photometry(load_mamajek(fetch(MAMAJEK_URL, MAMAJEK_FILE, refresh=refresh)))
 
     a = athyg.load(refresh)
@@ -254,7 +270,7 @@ def build(
     if precise:
         # beyond the field (or, without it, the GCNS)
         sel_p = bulk.Selection(**{**bulk.PRECISE.kwargs(), "max_plx": bulk.PRECISE.max_plx if field else 10.0})
-        sources_bulk.append(("gaia_precise", lambda: bulk.precise_source(refresh), sel_p))
+        sources_bulk.append(("gaia_precise", lambda: bulk.precise_source(refresh, release=rel), sel_p))
     if bulk_files:
         sel = bulk_selection or bulk.Selection(min_plx=1.0, max_plx=bulk.FIELD.min_plx if field else 10.0)
         sources_bulk.append(("gaia_files", lambda: bulk.files_source(bulk_files), sel))
@@ -363,6 +379,7 @@ def build(
         (athyg.SOURCE_INFO, Flag.SRC_ATHYG),
         (hyg.SOURCE_INFO, None),
         (GAIA_INFO, None),
+        *([(GAIA_DR4_INFO, None)] if precise and rel is gaia.DR4 else []),
         (HIPPARCOS_INFO, None),
         (iau.SOURCE_INFO, None),
         (simbad.SOURCE_INFO, None),
@@ -382,6 +399,7 @@ def build(
         "wideBinaryMaxSepAu": systems.MAX_SEP_AU,
         "gaiaFieldMinParallaxMas": merge.FIELD_MIN_PLX,
         "gaiaFieldMaxRelativeError": merge.FIELD_MAX_REL_ERR,
+        "gaiaReleaseBeyond200pc": rel.label if precise else None,
     }
     bulk_iter = None
     if sources_bulk:
@@ -417,6 +435,8 @@ def main() -> None:
     ap.add_argument("--no-field", action="store_true", help="skip the Gaia field stars between 100 and 200 pc")
     ap.add_argument("--field-bulk", action="store_true", help="the field stars through the bulk path (chunk by chunk, see docs/SCALING.md)")
     ap.add_argument("--no-precise", action="store_true", help="skip the Gaia stars beyond 200 pc with parallaxes better than 1 %%")
+    ap.add_argument("--gaia-release", choices=sorted(gaia.RELEASES), default=None,
+                    help="Gaia release of the stars beyond 200 pc (default: $GALMAP_GAIA_RELEASE, else dr3; see docs/GAIA_DR4.md)")
     ap.add_argument("--bulk-files", type=Path, default=None, help="directory of ESA GaiaSource_*.csv.gz files to add as bulk stars")
     ap.add_argument("--bulk-min-plx", type=float, default=1.0, help="bulk files: smallest parallax in mas (default 1, i.e. 1 kpc)")
     ap.add_argument("--bulk-max-rel-err", type=float, default=0.1, help="bulk files: largest relative parallax error (default 0.1)")
@@ -435,6 +455,7 @@ def main() -> None:
         args.out, refresh=args.refresh, capacity=args.capacity, limit=args.limit,
         use_simbad=not args.no_simbad, field=not args.no_field, field_bulk=args.field_bulk, precise=not args.no_precise,
         bulk_files=args.bulk_files, bulk_selection=selection, work_dir=args.work_dir, max_bucket=args.max_bucket,
+        gaia_release=args.gaia_release,
     )
 
 

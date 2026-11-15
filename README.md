@@ -177,6 +177,29 @@ R ∝ √L / T²), limb darkened, for the eight largest on screen (`src/render/s
 Betelgeuse some 800 solar radii (almost 4 AU), the Sun within a few million kilometres. Such a
 star stays in the visible sphere as long as any part of it does (its surface, not its centre).
 
+### Filter: finding stars
+
+Under *Filter* in the settings, the map lists the stars within a radius of the Sun or of the view
+centre (10, 30, 100, 300 ly or any value up to 3,000) that meet the chosen criteria, nearest first:
+
+* spectral classes O, B, A, F, G, K, M, brown dwarfs (L, T, Y) and white dwarfs (none chosen: all);
+* known planets, or a potentially habitable one;
+* only stars with a name, only members of multiple systems;
+* an attribute: a built-in one (temperature, luminosity, absolute magnitude, distance
+  uncertainty) or one of your own, by a range of numbers or a text value (a faction, say).
+
+"All M dwarfs with planets within 30 ly" gives 43 stars, from Proxima Centauri to Teegarden's
+Star and beyond. On the map the stars found get a gold rim, whatever the level of detail (a star
+too faint to be drawn at the view's detail is drawn anyway); the other stars can be dimmed. A tap on
+a row selects the star and flies to it. The list can be exported as CSV, with the designation as
+the first column: a column added in a spreadsheet can be imported back as an attribute.
+
+The filter loads the octree nodes that reach into its sphere, coarse to fine, up to 48 MB (the
+300 ly around the Sun take 39 MB, some 630,000 stars to search). A larger sphere is searched only
+for its most luminous stars, and the list says so. Stars hidden by the settings (brown or white
+dwarfs, the distance uncertainty) are not listed. `src/data/filter.ts` (criteria, nodes, search,
+CSV), `src/ui/filter-box.ts` (the tab).
+
 ### Data layers and your own attributes
 
 Under *Layers* in the settings, the star colours and sizes can follow any attribute:
@@ -426,7 +449,8 @@ It handles the following cases:
   parallax is better than 1 % (errors inflated by the RUWE; downloaded with a margin, ϖ/σ > 90,
   5.8 million rows) and that is not already in the catalogue: 3.6 million stars. They go through
   the bulk path chunk by chunk (`docs/SCALING.md`): their designation is their Gaia DR3 number;
-  wide binaries among them are not searched for.
+  wide binaries among them are not searched for. Gaia DR4 (2 December 2026) can replace DR3 for
+  these stars with one setting, keeping their DR3 designations ([`docs/GAIA_DR4.md`](docs/GAIA_DR4.md)).
 * **Quality cut.** Stars with a parallax error above 100 % or beyond 15 kpc are dropped. The
   app can additionally hide stars by distance uncertainty (20 % by default).
 
@@ -513,6 +537,8 @@ cd pipeline
 ../.venv/bin/python -m galmap.fetch_gaia_bulk --dest /data/gaia_source --limit 2   # ESA bulk files
 ../.venv/bin/python -m galmap.build --out /data/out --bulk-files /data/gaia_source --work-dir /data/tmp
 ../.venv/bin/python -m galmap.scale_test --stars 8000000 --out /tmp/scale   # synthetic memory test
+../.venv/bin/python -m galmap.sources.gaia check dr4              # is Gaia DR4 in the archive? (docs/GAIA_DR4.md)
+../.venv/bin/python -m galmap.build --out /tmp/a --gaia-release dr4   # the stars beyond 200 pc from Gaia DR4
 ```
 
 The app reads the star data from `VITE_DATA_URL` when it is set (e.g. object storage with range

@@ -679,6 +679,9 @@ def primary_designation(row) -> tuple[int, int, int, str | None]:
     if pd.notna(row.get("gaia")):
         g = int(row["gaia"])
         return Desig.GAIA_DR3, g & 0xFFFFFFFF, g >> 32, None
+    if pd.notna(row.get("gaia_dr4")):
+        # a Gaia DR4 star that DR3 does not have (gaia.normalise_dr4)
+        return Desig.STRING, 0, 0, f"Gaia DR4 {int(row['gaia_dr4'])}"
     for key in ("census_name", "name_2mass"):
         v = row.get(key)
         if isinstance(v, str) and v:
@@ -782,6 +785,7 @@ def unique_designations(s: pd.DataFrame, dc, dlo, dhi, dstr, name_en) -> None:
     hd = s["hd"].array if "hd" in s else None
     tyc = s["tyc"].array if "tyc" in s else None
     gaia = s["gaia"].array
+    gaia4 = s["gaia_dr4"].array if "gaia_dr4" in s else None
     ra, dec = s["ra"].to_numpy(float), s["dec"].to_numpy(float)
     census = s["census_name"].array if "census_name" in s else None
     kept: set[tuple] = set()
@@ -802,6 +806,8 @@ def unique_designations(s: pd.DataFrame, dc, dlo, dhi, dstr, name_en) -> None:
         if pd.notna(gaia[i]):
             g = int(gaia[i])
             options.append((Desig.GAIA_DR3, g & 0xFFFFFFFF, g >> 32, None))
+        if gaia4 is not None and pd.notna(gaia4[i]):
+            options.append((Desig.STRING, 0, 0, f"Gaia DR4 {int(gaia4[i])}"))
         for v in (name_en[i], census[i] if census is not None else None):
             if isinstance(v, str) and v:
                 options.append((Desig.STRING, 0, 0, v))

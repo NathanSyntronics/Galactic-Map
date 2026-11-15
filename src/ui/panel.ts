@@ -43,8 +43,8 @@ const sliderToRadius = (v: number) => {
 };
 
 /** The tabs of the settings panel. */
-export type PanelTab = 'view' | 'stars' | 'space' | 'layers' | 'info';
-const PANEL_TABS: readonly PanelTab[] = ['view', 'stars', 'space', 'layers', 'info'];
+export type PanelTab = 'view' | 'stars' | 'space' | 'layers' | 'filter' | 'info';
+const PANEL_TABS: readonly PanelTab[] = ['view', 'stars', 'space', 'layers', 'filter', 'info'];
 const TAB_KEY = 'galactic-map:panel-tab';
 
 /** The tab last open (this browser), or the first. */
@@ -80,6 +80,8 @@ export class SettingsPanel {
   onManageAttributes: () => void = () => {};
   /** The data layer controls; rebuilt when the chosen attributes or the attribute list change. */
   private readonly layers = el('div', 'layers');
+  /** The Filter tab's content (ui/filter-box), owned by the app. */
+  private filterContent: HTMLElement | null = null;
   /** The jump network controls; rebuilt when the network is switched or its attribute changes. */
   private readonly jumpBox = el('div', 'jumps');
   /** Link count or the reason why there is no network (kept across rebuilds). */
@@ -173,6 +175,12 @@ export class SettingsPanel {
     this.renderJumps();
   }
 
+  /** The content of the Filter tab. */
+  setFilterContent(content: HTMLElement): void {
+    this.filterContent = content;
+    document.getElementById('panel-page-filter')?.replaceChildren(content);
+  }
+
   /** Status line of the jump network; `warn` marks a reason why it is not shown. */
   setJumpStatus(text: string, warn = false): void {
     if (this.jumpStatus.textContent !== text) this.jumpStatus.textContent = text;
@@ -232,6 +240,7 @@ export class SettingsPanel {
       ['stars', 'tabStars'],
       ['space', 'tabSpace'],
       ['layers', 'tabLayers'],
+      ['filter', 'tabFilter'],
       ['info', 'tabInfo'],
     ];
     const bar = el('div', 'panel-tabs');
@@ -338,6 +347,10 @@ export class SettingsPanel {
     layers.appendChild(el('h3', '', t('jumpSection')));
     layers.appendChild(this.jumpBox);
     this.renderJumps();
+
+    // --- Filter: the stars that meet criteria, as a list and on the map
+    const filter = page('filter');
+    if (this.filterContent) filter.appendChild(this.filterContent);
 
     // --- Labels (view)
     view.appendChild(el('h3', '', t('labelsSection')));

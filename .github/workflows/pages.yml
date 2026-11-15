@@ -25,6 +25,10 @@ jobs:
     runs-on: ubuntu-latest
     # a slow catalogue server may take long; what is downloaded is kept in the cache for the next run
     timeout-minutes: 360
+    env:
+      # the Gaia release of the stars beyond 200 pc: the repository variable GAIA_RELEASE ("dr4"
+      # once Gaia DR4 is out and `python -m galmap.sources.gaia check dr4` passes, docs/GAIA_DR4.md)
+      GALMAP_GAIA_RELEASE: ${{ vars.GAIA_RELEASE || 'dr3' }}
     steps:
       - uses: actions/checkout@v4
 

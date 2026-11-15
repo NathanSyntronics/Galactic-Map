@@ -53,6 +53,9 @@ GAIA_COLUMNS = [
     "ecl_lat",
     "astrometric_params_solved",
 ]
+#: further columns a source may have: the zero point, the epoch of the position (Gaia DR4: J2017.5)
+#: and the DR4 number (gaia.normalise_dr4; source_id is then the DR3 number, -1 where there is none)
+EXTRA_COLUMNS = ["parallax_zp", "ref_epoch", "dr4_source_id"]
 #: rows per chunk read from a source
 CHUNK_ROWS = 500_000
 
@@ -97,8 +100,9 @@ def _typed(df: pd.DataFrame) -> pd.DataFrame:
     out = pd.DataFrame({"source_id": pd.to_numeric(df["source_id"], errors="coerce").astype("int64")})
     for c in GAIA_COLUMNS[1:]:
         out[c] = pd.to_numeric(df[c], errors="coerce") if c in df else np.nan
-    if "parallax_zp" in df:
-        out["parallax_zp"] = pd.to_numeric(df["parallax_zp"], errors="coerce")
+    for c in EXTRA_COLUMNS:
+        if c in df:
+            out[c] = pd.to_numeric(df[c], errors="coerce").astype("int64") if c == "dr4_source_id" else pd.to_numeric(df[c], errors="coerce")
     return out
 
 
@@ -108,7 +112,7 @@ def parquet_source(path: Path, rows: int = CHUNK_ROWS) -> Iterator[pd.DataFrame]
 
     f = pq.ParquetFile(path)
     names = set(f.schema_arrow.names)
-    cols = [c for c in GAIA_COLUMNS + ["parallax_zp"] if c in names]
+    cols = [c for c in GAIA_COLUMNS + EXTRA_COLUMNS if c in names]
     for batch in f.iter_batches(batch_size=rows, columns=cols):
         yield _typed(batch.to_pandas())
 
@@ -121,9 +125,10 @@ def field_source(refresh: bool = False, rows: int = CHUNK_ROWS) -> Iterator[pd.D
     yield from parquet_source(path, rows)
 
 
-def precise_source(refresh: bool = False, rows: int = CHUNK_ROWS) -> Iterator[pd.DataFrame]:
-    """The Gaia stars beyond 200 pc with a parallax better than about 1 %, through the archive cache."""
-    yield from parquet_source(gaia.load_precise(refresh), rows)
+def precise_source(refresh: bool = False, rows: int = CHUNK_ROWS, release: gaia.Release | None = None) -> Iterator[pd.DataFrame]:
+    """The Gaia stars beyond 200 pc with a parallax better than about 1 %, through the archive cache
+    (of Gaia DR3, or of the release `release`, default gaia.release())."""
+    yield from parquet_source(gaia.load_precise(refresh, release), rows)
 
 
 def files_source(directory: Path, rows: int = CHUNK_ROWS, pattern: str = "GaiaSource_*.csv.gz") -> Iterator[pd.DataFrame]:
@@ -204,7 +209,8 @@ def derive_chunk(raw: pd.DataFrame, selection: Selection, phot: Photometry, skip
         s = derive.positions(s)
         ext: dict[int, dict] = {}
         if lookups.simbad is not None and len(s):
-            idents, info = lookups.simbad.lookup(s["gaia"].to_numpy(dtype=np.int64))
+            # (a Gaia DR4 star without a DR3 number: -1, found nowhere)
+            idents, info = lookups.simbad.lookup(s["gaia"].fillna(-1).to_numpy(dtype=np.int64))
             s = pd.concat([s, info], axis=1)
             no_spt = s["spect"].isna() & s["simbad_sp_type"].notna()
             s.loc[no_spt, "spect"] = s.loc[no_spt, "simbad_sp_type"]
@@ -223,7 +229,7 @@ def derive_chunk(raw: pd.DataFrame, selection: Selection, phot: Photometry, skip
         s = naming.assign_names(s, ext)
     planets = lookups.planets
     if planets is not None and len(planets) and len(s):
-        g = s["gaia"].to_numpy(dtype=np.int64)
+        g = s["gaia"].fillna(-1).to_numpy(dtype=np.int64)
         s["planets"] = pd.Series(g).map(planets).fillna(0).astype(np.int64).to_numpy()
     else:
         s["planets"] = 0
@@ -273,7 +279,7 @@ def prepass(source: Iterable[pd.DataFrame], selection: Selection, core: pd.DataF
     merges them exactly as when all field stars are in the core; the rest stays bulk."""
     cands = merge.dedupe_candidates(core)
     if not len(cands):
-        return pd.DataFrame(columns=GAIA_COLUMNS + ["parallax_zp"])
+        return pd.DataFrame(columns=GAIA_COLUMNS + EXTRA_COLUMNS)
     tree = cKDTree(unit_vectors(cands["ra"].to_numpy(), cands["dec"].to_numpy()))
     rmax = float(cands["radius"].max())
     radius = cands["radius"].to_numpy()

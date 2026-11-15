@@ -2,6 +2,21 @@
 
 Every round of changes that goes live raises the version by 0.01 (README, *Versions*).
 
+## 1.14 (2026-11-15)
+
+* Filter: a new tab in the settings lists the stars around the Sun or the view centre that meet
+  criteria (spectral classes, brown and white dwarfs, known or potentially habitable planets, names,
+  multiple systems, any attribute by value or range), nearest first. "All M dwarfs with planets
+  within 30 ly" gives 43 stars. The stars found get a gold rim on the map (also where the view's
+  detail would leave them out), the others can be dimmed; a tap on a row flies to the star; the
+  list can be exported as CSV.
+* Prepared for Gaia DR4 (due on 2 December 2026): one setting takes the stars beyond 200 pc from
+  DR4 instead of DR3, with DR4's parallax bias, its epoch J2017.5 and the DR3 designations of the
+  same stars (the archive's DR3 neighbourhood table), so that names, SIMBAD links, planets and
+  your attributes stay with their stars. A check tells when the archive has the release. About 7
+  million instead of 4.4 million stars with parallaxes better than 1 % are expected
+  (docs/GAIA_DR4.md).
+
 ## 1.13 (2026-11-15)
 
 * No more square structures in large views at low detail: only the stars bright enough to be

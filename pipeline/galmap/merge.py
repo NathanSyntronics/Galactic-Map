@@ -309,13 +309,17 @@ def field_selection(field: pd.DataFrame, min_plx: float = FIELD_MIN_PLX, max_plx
 
 
 def field_rows(new: pd.DataFrame, plx: np.ndarray, err: np.ndarray) -> pd.DataFrame:
-    """Star rows (the merged table's columns) of Gaia field sources."""
-    return pd.DataFrame(
+    """Star rows (the merged table's columns) of Gaia field sources. A row may carry the epoch of
+    its position (ref_epoch, Gaia DR4) and a DR4 number (dr4_source_id; source_id is then the DR3
+    number, -1 where there is none: such a star is designated "Gaia DR4 ...", see naming)."""
+    sid = new["source_id"].astype("Int64")
+    epoch = new["ref_epoch"].to_numpy(float) if "ref_epoch" in new else np.full(len(new), COMMON_EPOCH)
+    rows = pd.DataFrame(
         {
             "src": Flag.SRC_GAIA,
             "ra": new["ra"].to_numpy(float),
             "dec": new["dec"].to_numpy(float),
-            "epoch": COMMON_EPOCH,
+            "epoch": np.where(np.isfinite(epoch), epoch, COMMON_EPOCH),
             "plx": plx,
             "plx_err": err,
             "plx_src": "gaia",
@@ -329,12 +333,16 @@ def field_rows(new: pd.DataFrame, plx: np.ndarray, err: np.ndarray) -> pd.DataFr
             "jmag": np.nan,
             "spect": None,
             "teff_cat": np.nan,
-            "gaia": new["source_id"].astype("Int64").to_numpy(),
+            "gaia": pd.array(sid.where(sid >= 0), dtype="Int64"),
             "wd_prob": np.nan,
             "name_2mass": None,
             "is_sun": False,
         }
     )
+    if "dr4_source_id" in new:
+        dr4 = new["dr4_source_id"].astype("Int64")
+        rows["gaia_dr4"] = pd.array(dr4.where(sid.lt(0).fillna(True).to_numpy()), dtype="Int64")
+    return rows
 
 
 def add_gaia_field(stars: pd.DataFrame, field: pd.DataFrame, **selection) -> pd.DataFrame:

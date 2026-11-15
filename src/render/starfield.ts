@@ -41,6 +41,7 @@ attribute float aImp;
 uniform float uDt;
 uniform float uImpCut;
 uniform float uMarks;
+uniform float uMarkedOnly;
 uniform float uPixelRatio;
 uniform vec3 uCamLocal;
 uniform vec3 uCamRest;
@@ -65,10 +66,14 @@ void main() {
   vec3 rel = (position - uCamLocal) + aVel * uDt;
   float d = distance(rel, uTargetRel);
   float a = 1.0 - smoothstep(uRadius * uFade, uRadius, d);
+  // a star the filter found (MARK_FILTER) is always drawn; in a node loaded for the filter only
+  // (uMarkedOnly) it is the only one
+  bool found = aMark > 2.5;
+  if (uMarkedOnly > 0.5 && !found) a = 0.0;
   // only stars bright enough, seen from here, to be loaded in every part of the view (see
   // completenessCut): no denser cubes where finer nodes happen to be loaded
   float lb = aImp - 0.8685889638 * log(max(length(rel), 1e-12));
-  a *= smoothstep(uImpCut - IMP_SOFT, uImpCut, lb);
+  if (!found) a *= smoothstep(uImpCut - IMP_SOFT, uImpCut, lb);
   if (a <= 0.0 || aSize <= 0.0) {
     gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
     gl_PointSize = 0.0;
@@ -97,7 +102,7 @@ void main() {
   vBody = px;
   vMark = 0.0;
   vRing = 0.0;
-  if (uMarks > 0.5 && aMark > 0.5) {
+  if ((uMarks > 0.5 && aMark > 0.5) || found) {
     // a thin rim just outside the star's visible body (its core on a large sprite, the soft disk
     // on a small one): the sprite grows to hold it
     float large = clamp((px / uPixelRatio - 4.0) / 8.0, 0.0, 1.0);
@@ -145,10 +150,11 @@ void main() {
     col = mix(vColor, vec3(1.0), core * 0.3 * large);
   }
   if (vMark > 0.5) {
-    // the planets' rim: blue, green with a potentially habitable planet (fades with the sphere only)
-    float w = 0.75 * uPixelRatio;
+    // the planets' rim: blue, green with a potentially habitable planet; gold: found by the filter
+    // (fades with the sphere only)
+    float w = (vMark > 2.5 ? 1.0 : 0.75) * uPixelRatio;
     float ring = (1.0 - smoothstep(w * 0.5, w * 1.5, abs(rp - vRing))) * 0.9 * vFade * min(uBrightness, 1.0);
-    vec3 rc = vMark > 1.5 ? vec3(0.31, 0.88, 0.54) : vec3(0.35, 0.65, 1.0);
+    vec3 rc = vMark > 2.5 ? vec3(1.0, 0.76, 0.24) : vMark > 1.5 ? vec3(0.31, 0.88, 0.54) : vec3(0.35, 0.65, 1.0);
     float t = a + ring;
     if (t > 0.0) col = (col * a + rc * ring) / t;
     a = min(t, 1.0);
@@ -224,6 +230,7 @@ export function createStarMaterial(): ShaderMaterial {
       uBrightness: { value: 1 },
       uPixelRatio: { value: 1 },
       uMarks: { value: 0 },
+      uMarkedOnly: { value: 0 },
       uDt: { value: 0 },
       uImpCut: { value: NO_CUT },
     },
@@ -349,6 +356,11 @@ function temperatureStyle(node: NodeData, i: number, s: Settings, colors: Uint8A
   }
 }
 
+/** The rim of a star the filter found (gold, drawn whatever the completeness cut and the planet rims). */
+export const MARK_FILTER = 3;
+/** Colour factor of the stars the filter did not find (option "dim the others"). */
+export const FILTER_DIM = 0.28;
+
 /** Rim of a star with planets (setting planetMarks): 0 none (and the Sun), 1 planets, 2 a potentially habitable one. */
 export function planetMark(node: NodeData, i: number): number {
   const c = planetClass(node, i);
@@ -358,6 +370,7 @@ export function planetMark(node: NodeData, i: number): number {
 /**
  * Colour and symbol size of every star of a node (size 0: hidden); optionally its planet rim and
  * whether it is drawn grey and small for lack of a value (`missing`, picking prefers the others).
+ * With a filter (plan.highlight) its hits get the gold rim, the other stars are dimmed if asked.
  */
 export function computeStyle(
   node: NodeData,
@@ -377,33 +390,47 @@ export function computeStyle(
       continue;
     }
     if (marks && node.planets.get(i)) marks[i] = planetMark(node, i);
-    const hasColor = plan.color ? plan.color(node, i, colors, 3 * i) : true;
-    let size = plan.size ? plan.size(node, i) : symbolRadius(starLogL(node, i));
-    const hasSize = size !== undefined;
-    if (hasColor && hasSize) {
-      if (!plan.color) temperatureStyle(node, i, s, colors);
-      sizes[i] = size!;
-      continue;
+    styleStar(node, i, s, plan, colors, sizes, missing);
+    const h = plan.highlight;
+    if (h) {
+      if (h.has(node, i)) {
+        if (marks) marks[i] = MARK_FILTER;
+      } else if (h.dim && !(node.flags[i] & Flag.SUN)) {
+        colors[3 * i] = Math.round(colors[3 * i] * FILTER_DIM);
+        colors[3 * i + 1] = Math.round(colors[3 * i + 1] * FILTER_DIM);
+        colors[3 * i + 2] = Math.round(colors[3 * i + 2] * FILTER_DIM);
+      }
     }
-    // no value for the attribute the map is coloured or sized by
-    const sun = (node.flags[i] & Flag.SUN) !== 0;
-    if (plan.missing === 'hide' && !sun) {
-      sizes[i] = 0;
-      colors[3 * i] = colors[3 * i + 1] = colors[3 * i + 2] = 0;
-      continue;
-    }
-    if (plan.missing === 'normal' || sun) {
-      if (!hasColor || !plan.color) temperatureStyle(node, i, s, colors);
-      size ??= symbolRadius(starLogL(node, i));
-    } else {
-      colors[3 * i] = MISSING_RGB[0];
-      colors[3 * i + 1] = MISSING_RGB[1];
-      colors[3 * i + 2] = MISSING_RGB[2];
-      size = MISSING_SIZE;
-      if (missing) missing[i] = 1;
-    }
-    sizes[i] = size;
   }
+}
+
+function styleStar(node: NodeData, i: number, s: Settings, plan: StylePlan, colors: Uint8Array, sizes: Float32Array, missing?: Uint8Array): void {
+  const hasColor = plan.color ? plan.color(node, i, colors, 3 * i) : true;
+  let size = plan.size ? plan.size(node, i) : symbolRadius(starLogL(node, i));
+  const hasSize = size !== undefined;
+  if (hasColor && hasSize) {
+    if (!plan.color) temperatureStyle(node, i, s, colors);
+    sizes[i] = size!;
+    return;
+  }
+  // no value for the attribute the map is coloured or sized by
+  const sun = (node.flags[i] & Flag.SUN) !== 0;
+  if (plan.missing === 'hide' && !sun) {
+    sizes[i] = 0;
+    colors[3 * i] = colors[3 * i + 1] = colors[3 * i + 2] = 0;
+    return;
+  }
+  if (plan.missing === 'normal' || sun) {
+    if (!hasColor || !plan.color) temperatureStyle(node, i, s, colors);
+    size ??= symbolRadius(starLogL(node, i));
+  } else {
+    colors[3 * i] = MISSING_RGB[0];
+    colors[3 * i + 1] = MISSING_RGB[1];
+    colors[3 * i + 2] = MISSING_RGB[2];
+    size = MISSING_SIZE;
+    if (missing) missing[i] = 1;
+  }
+  sizes[i] = size;
 }
 
 function releaseArray(this: BufferAttribute): void {
@@ -426,6 +453,8 @@ export interface RenderedNode {
   imp: Float32Array;
   /** The faintest importance in the node: its cube is complete down to it. */
   minImp: number;
+  /** Drawn only for the stars a filter found (the view's level of detail does not draw it). */
+  markedOnly: boolean;
 }
 
 /** Owns one THREE.Points per loaded octree node and keeps their style attributes up to date. */
@@ -489,10 +518,11 @@ export class Starfield {
     // the shared material's camera uniforms are relative to this node's origin
     points.onBeforeRender = (_renderer, _scene, camera) => {
       setNodeView(this.material, camera, this.target, origin);
+      this.material.uniforms.uMarkedOnly.value = r.markedOnly ? 1 : 0;
       this.material.uniformsNeedUpdate = true;
     };
     this.group.add(points);
-    const r: RenderedNode = { node, data, points, origin, colors, sizes, marks, missing, imp, minImp };
+    const r: RenderedNode = { node, data, points, origin, colors, sizes, marks, missing, imp, minImp, markedOnly: false };
     this.rendered.set(node.path, r);
     return r;
   }
@@ -522,14 +552,29 @@ export class Starfield {
     return this.rendered.values();
   }
 
-  /** Show exactly the given set of node paths. */
-  setVisible(paths: Set<string>): void {
-    for (const [path, r] of this.rendered) r.points.visible = paths.has(path);
+  /**
+   * Show exactly the given set of node paths (the view's level of detail), and of the nodes in
+   * `marked` only the stars a filter found.
+   */
+  setVisible(paths: Set<string>, marked?: Set<string>): void {
+    for (const [path, r] of this.rendered) {
+      const own = paths.has(path);
+      r.markedOnly = !own && !!marked?.has(path);
+      r.points.visible = own || r.markedOnly;
+    }
   }
 
+  /** The nodes the view's level of detail draws. */
   visibleNodes(): RenderedNode[] {
     const out: RenderedNode[] = [];
-    for (const r of this.rendered.values()) if (r.points.visible) out.push(r);
+    for (const r of this.rendered.values()) if (r.points.visible && !r.markedOnly) out.push(r);
+    return out;
+  }
+
+  /** The nodes drawn only for the stars a filter found. */
+  markedNodes(): RenderedNode[] {
+    const out: RenderedNode[] = [];
+    for (const r of this.rendered.values()) if (r.points.visible && r.markedOnly) out.push(r);
     return out;
   }
 
@@ -551,7 +596,7 @@ export class Starfield {
 
   visiblePointCount(): number {
     let n = 0;
-    for (const r of this.rendered.values()) if (r.points.visible) n += r.data.count;
+    for (const r of this.rendered.values()) if (r.points.visible && !r.markedOnly) n += r.data.count;
     return n;
   }
 }

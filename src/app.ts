@@ -4,7 +4,8 @@ import { medianJump, tourStart } from './controls/tour';
 import { LABELLED_RADIUS, PRECISE_PX, SPRITE_CORE, labelledWins, pickScore } from './controls/pick';
 import { TapDetector } from './controls/tap';
 import { AttributeStore, type ChangeKind } from './data/attributes';
-import { Flag, designationOf, setVelocityScale, type NodeData } from './data/format';
+import { Flag, designationOf, setVelocityScale, spectralClassOf, type NodeData } from './data/format';
+import { hitSet, scanStars, sphereNodes, starMatcher, starsCsv, type FilterCriteria, type FilterHit } from './data/filter';
 import { DEFAULT_VELOCITY_SCALE, moveTo, starCoord, starPosition, yearsSinceEpoch } from './data/motion';
 import { decodeCsv } from './data/csv';
 import { NO_LOOKUP, csvNeedsLookup, exportCsv, importCsvAsync, type ImportReport, type StarResolver } from './data/importer';
@@ -44,16 +45,31 @@ import { ROUTE_STORAGE_KEY, RoutePlanner, parseStoredRoute, type RouteEnd, type 
 import { JumpLines } from './render/links';
 import { DropLines, Marker, PolarGrid } from './render/overlays';
 import { RouteLine, fitDistance, routeBounds } from './render/route';
-import { IMP_SOFT, NO_CUT, Starfield, apparentMag, completenessCut, computeStyle, spritePx, starLogL, type RenderedNode } from './render/starfield';
 import {
+  IMP_SOFT,
+  MARK_FILTER,
+  NO_CUT,
+  Starfield,
+  apparentMag,
+  completenessCut,
+  computeStyle,
+  isStarVisible,
+  spritePx,
+  starLogL,
+  type RenderedNode,
+} from './render/starfield';
+import {
+  BUILTIN_ATTRIBUTES,
   SIZE_LUMINOSITY,
   SIZE_UNIFORM,
   attributeInfo,
   buildPlan,
   numericScale,
+  planetClass,
   planetsOf,
   setHabitableHosts,
   valueGetter,
+  type Highlight,
   type StylePlan,
 } from './render/style';
 import {
@@ -84,6 +100,7 @@ import { GalaxyLayer, milkyWayOpacity } from './render/galaxies';
 import { Legend } from './ui/legend';
 import { LabelLayer, TopK, labelUnder, labelledStarNear, milkyWayLabelPos, namedCandidateLimit, onScreen, starPriority, type LabelCandidate } from './ui/labels';
 import { SettingsPanel } from './ui/panel';
+import { FilterBox, type FilterAttribute, type FilterRow } from './ui/filter-box';
 import { RouteBox, type RouteNames } from './ui/route-box';
 import { CLOCK_MAX_JD, CLOCK_MIN_JD, PlanetTimeControl, formatClockDate, yearOfJd } from './ui/time-control';
 import { ProbeCard } from './ui/probe-card';
@@ -157,6 +174,15 @@ const ROUTE_KEYS: (keyof Settings)[] = [
 ];
 /** The route is computed again this long after the last change of a setting (sliders change continuously). */
 const ROUTE_DELAY_MS = 400;
+/**
+ * Most data the filter loads for its sphere (beyond it: the most luminous stars only): the 300 ly
+ * around the Sun take 39 MB (630,000 stars in the nodes that reach into it), 1000 ly 166 MB.
+ */
+const FILTER_MAX_BYTES = 48e6;
+/** Stars the filter found that get a label candidate (the nearest to the view centre). */
+const FILTER_LABELS = 60;
+/** Their name rank at most (as Bayer names): labelled ahead of the other unnamed stars. */
+const FILTER_LABEL_RANK = 2;
 /** Two taps within this time and 30 px make a double-tap. */
 const DOUBLE_TAP_MS = 350;
 
@@ -209,6 +235,27 @@ export class App {
   private readonly timeControl: PlanetTimeControl;
   /** Nodes the route planner waits for (requested in addition to the view's). */
   private routeNodes: OctreeNode[] = [];
+  /** The Filter tab (criteria, list). */
+  private readonly filterBox = new FilterBox();
+  /**
+   * The filter searched or shown: its criteria and centre, the nodes of its sphere (requested in
+   * addition to the view's while it loads), then the stars found (gold rims, drawn also in nodes
+   * the view does not draw: `filterPaths`).
+   */
+  private filterRun: {
+    token: number;
+    criteria: FilterCriteria;
+    centre: Vector3;
+    nodes: OctreeNode[];
+    complete: boolean;
+    done: boolean;
+    failed: number;
+    hits: FilterHit[];
+    set: Map<string, Set<number>>;
+  } | null = null;
+  private filterToken = 0;
+  /** Nodes drawn only for the stars the filter found. */
+  private filterPaths = new Set<string>();
   /** The route drawn: the planner's last result. */
   private route: RouteResult | null = null;
   /**
@@ -344,7 +391,7 @@ export class App {
     this.camera = new PerspectiveCamera(55, 1, 0.001, 1e6);
     this.nav = new Navigation(this.camera, this.renderer.domElement);
     // the user's attributes arrive from the browser's storage shortly after the start (loadAttributes)
-    this.stylePlan = buildPlan(this.store.get(), this.attrs);
+    this.stylePlan = this.planOf(this.store.get());
     this.starfield = new Starfield(
       () => this.store.get(),
       () => this.stylePlan,
@@ -400,6 +447,17 @@ export class App {
     this.panel.onGoTo = (where) => (where === 'earth' ? this.goToEarth() : where === 'galaxy' ? this.goToGalaxy() : this.goToSun());
     this.panel.onHelp = () => this.showHelp();
     this.panel.onAbout = () => this.showAbout();
+    this.panel.setFilterContent(this.filterBox.root);
+    this.filterBox.attributes = () => this.filterAttributes();
+    this.filterBox.render();
+    this.filterBox.onRun = (c) => void this.runFilter(c);
+    this.filterBox.onClear = () => this.clearFilter();
+    this.filterBox.onPick = (row) => this.pickFilterRow(row);
+    this.filterBox.onCsv = () => void this.exportFilter();
+    this.filterBox.onDim = () => {
+      this.stylePlan = this.planOf(this.store.get());
+      this.styleDirty = true;
+    };
 
     this.info = new InfoPanel(container, this.attrs);
     this.catchSecondTap(this.info.root);
@@ -681,6 +739,7 @@ export class App {
     if (kind === 'labels') {
       // names and value labels in other languages: only the texts change
       this.panel.attributesChanged();
+      this.filterBox.render();
       this.updateLegend();
       if (!this.info.editing) this.info.rerender(this.nav.target);
       return;
@@ -695,8 +754,9 @@ export class App {
       if (Object.keys(patch).length) this.store.set(patch);
       this.panel.attributesChanged();
     }
-    this.stylePlan = buildPlan(this.store.get(), this.attrs);
+    this.stylePlan = this.planOf(this.store.get());
     this.styleDirty = true;
+    this.filterBox.render();
     // capacities by attribute and hidden stars
     this.jumpDirty = true;
     this.planner.styleChanged();
@@ -747,6 +807,11 @@ export class App {
       lang,
     );
     const filename = lang === 'de' ? 'galaktische-karte-attribute.csv' : 'galactic-map-attributes.csv';
+    await this.saveFile(filename, csv);
+  }
+
+  /** Hands a text file to the user (a download). */
+  private async saveFile(filename: string, csv: string): Promise<void> {
     // inside the claude.ai artifact viewer, files are handed over by its downloads capability
     const viewer = (window as { claude?: { use?: (name: string) => Promise<unknown> } }).claude;
     const downloads = viewer?.use ? ((await viewer.use('downloads')) as DownloadsApi | null) : null;
@@ -912,13 +977,15 @@ export class App {
       this.showPlanetCard();
       this.showProbeCard();
       this.routeBox.updateTexts();
+      this.filterBox.render();
+      this.showFilterResult();
       this.refreshChrome();
     }
     if (has('flybyStep')) {
       this.routeBox.setFlybyStep(s.flybyStep);
       this.nav.setTourStep(s.flybyStep);
     }
-    if (has('colorBy', 'sizeBy', 'missingStyle')) this.stylePlan = buildPlan(s, this.attrs);
+    if (has('colorBy', 'sizeBy', 'missingStyle')) this.stylePlan = this.planOf(s);
     if (has('showBrownDwarfs', 'showWhiteDwarfs', 'maxDistErr', 'saturation', 'colorBy', 'sizeBy', 'missingStyle')) {
       this.styleDirty = true;
     }
@@ -990,7 +1057,8 @@ export class App {
     // its stars where they are at the date drawn
     if (data.vel && Number.isFinite(this.motionDt)) moveTo(data, this.motionDt);
     const r = this.starfield.add(node, data);
-    r.points.visible = this.selectedPaths.has(node.path);
+    r.markedOnly = !this.selectedPaths.has(node.path) && this.filterPaths.has(node.path);
+    r.points.visible = this.selectedPaths.has(node.path) || r.markedOnly;
     // its faintest star is known now: the selection's order of refinement may change
     if (r.points.visible && node.childMask !== 0) this.lodDirty = true;
     this.candidatesDirty = true;
@@ -1019,6 +1087,7 @@ export class App {
       this.searchTarget = null;
     }
     this.planner.nodeArrived();
+    this.filterProgress();
   }
 
   /** A node could not be loaded even after retries. */
@@ -1027,6 +1096,7 @@ export class App {
     if (node.path === 'r') this.showLoadError('loadError');
     if (this.pendingSelect?.path === node.path) this.pendingSelect = null;
     this.planner.nodeArrived();
+    this.filterProgress();
   }
 
   private updateLod(): void {
@@ -1079,10 +1149,13 @@ export class App {
     if (this.pendingSelect && !pending) void this.reachNode(this.pendingSelect.path);
     if (pending && !this.selectedPaths.has(pending.path)) extra.push(pending);
     for (const n of this.routeNodes) if (!this.selectedPaths.has(n.path) && n !== pending) extra.push(n);
+    // the filter's sphere while it loads, then the nodes of the stars it found
+    const fr = this.filterRun;
+    if (fr) for (const n of fr.nodes) if (!this.selectedPaths.has(n.path) && n !== pending && (!fr.done || fr.set.has(n.path))) extra.push(n);
     // the root node holds the Sun, whose label stays while the stars are hidden (not drawn)
     if (hidden && starLabelMode(s.radius) === 'sun' && !extra.includes(this.octree.root)) extra.push(this.octree.root);
     this.loader.request(extra.length ? [...selected, ...extra] : selected, budget * 2);
-    this.starfield.setVisible(this.selectedPaths);
+    this.starfield.setVisible(this.selectedPaths, this.filterPaths);
   }
 
   // ------------------------------------------------------------------ labels & stats
@@ -1567,6 +1640,8 @@ export class App {
 
   /** Whether star i lies (mostly) below the completeness cut, seen from the camera at (-ex, -ey, -ez). */
   private belowCut(rn: RenderedNode, i: number, ex: number, ey: number, ez: number, cut: number): boolean {
+    // (the stars a filter found are always drawn)
+    if (rn.marks[i] === MARK_FILTER) return false;
     const d2 = ex * ex + ey * ey + ez * ez;
     return rn.imp[i] - Math.log10(Math.max(d2, 1e-24)) < cut - IMP_SOFT / 2;
   }
@@ -1827,7 +1902,7 @@ export class App {
     const closeUp = s.radius < DISC_RADIUS;
     const reach = closeUp ? MAX_STAR_RADIUS_LY : 0;
     const cut = this.impCut;
-    for (const rn of starsHidden(s.radius) ? [] : this.starfield.visibleNodes()) {
+    for (const rn of starsHidden(s.radius) ? [] : this.drawnNodes()) {
       const d = rn.data;
       // quick reject: node entirely outside the sphere
       if (rn.node.box.distanceToPoint(target) > s.radius + reach + rn.data.vmax * Math.abs(rn.data.movedTo)) continue;
@@ -1840,7 +1915,7 @@ export class App {
         const dz = z - tz;
         const dd = dx * dx + dy * dy + dz * dz;
         if (dd > r2 && !(closeUp && Math.sqrt(dd) - starRadiusLy(d, i) <= s.radius)) continue;
-        if (rn.sizes[i] <= 0) continue;
+        if (rn.sizes[i] <= 0 || (rn.markedOnly && rn.marks[i] !== MARK_FILTER)) continue;
         if (cut > NO_CUT && this.belowCut(rn, i, x - cx, y - cy, z - cz, cut)) continue;
         inView++;
         if (labelMode === 'none') continue;
@@ -1899,6 +1974,7 @@ export class App {
       });
     }
     this.routeCandidates(cands);
+    this.filterCandidates(cands);
     this.galaxyCandidates(cands);
     this.planetCandidates(cands);
     this.probeCandidates(cands);
@@ -2130,15 +2206,15 @@ export class App {
     let best: { d: number; dist: number; data: NodeData; i: number; preferred: boolean } | null = null;
     // stars that stand out (coloured by the data layer rather than grey, or rimmed for their planets) win
     const layer = (!!this.stylePlan.color || !!this.stylePlan.size) && s.missingStyle === 'dim';
-    const prefer = (rn: RenderedNode, i: number) => (layer && !rn.missing[i]) || (s.planetMarks && rn.marks[i] > 0);
+    const prefer = (rn: RenderedNode, i: number) => (layer && !rn.missing[i]) || (s.planetMarks && rn.marks[i] > 0) || rn.marks[i] === MARK_FILTER;
     // stars within the pick radius (a crowded view lets labelled stars win)
     let nearby = 0;
     const dt = this.drawDt;
-    for (const rn of this.starfield.visibleNodes()) {
+    for (const rn of this.drawnNodes()) {
       const d = rn.data;
       if (rn.node.box.distanceToPoint(target) > s.radius + rn.data.vmax * Math.abs(rn.data.movedTo)) continue;
       for (let i = 0; i < d.count; i++) {
-        if (rn.sizes[i] <= 0) continue;
+        if (rn.sizes[i] <= 0 || (rn.markedOnly && rn.marks[i] !== MARK_FILTER)) continue;
         const x = starCoord(d, 3 * i, dt);
         const y = starCoord(d, 3 * i + 1, dt);
         const z = starCoord(d, 3 * i + 2, dt);
@@ -2495,6 +2571,205 @@ export class App {
       if (n) out.push(n);
     }
     return out;
+  }
+
+  // ------------------------------------------------------------------ filter
+
+  /** The style plan of the settings, with the stars the filter found. */
+  private planOf(s: Settings): StylePlan {
+    return { ...buildPlan(s, this.attrs), highlight: this.filterHighlight() };
+  }
+
+  private filterHighlight(): Highlight | null {
+    const run = this.filterRun;
+    if (!run?.done || !run.hits.length) return null;
+    const set = run.set;
+    return { has: (node, i) => set.get(node.path)?.has(i) === true, dim: this.filterBox.dim };
+  }
+
+  /** The nodes drawn: the view's, and those drawn only for the stars the filter found. */
+  private drawnNodes(): RenderedNode[] {
+    const marked = this.filterPaths.size ? this.starfield.markedNodes() : [];
+    return marked.length ? [...this.starfield.visibleNodes(), ...marked] : this.starfield.visibleNodes();
+  }
+
+  /** The attributes the filter offers: the built-in ones and the user's (numbers and texts). */
+  private filterAttributes(): FilterAttribute[] {
+    const out: FilterAttribute[] = [];
+    for (const b of BUILTIN_ATTRIBUTES) {
+      // (spectral classes and planets have their own criteria)
+      if (b.id === '@spec' || b.id === '@planets') continue;
+      out.push({ id: b.id, name: t(b.label), type: b.type, categories: b.categories });
+    }
+    for (const d of this.attrs.defs) {
+      if (d.type === 'color') continue;
+      const info = attributeInfo(d.id, this.attrs);
+      if (!info) continue;
+      const categories = d.type === 'text' ? [...new Set([...this.attrs.values(d.id).entries()].map(([, v]) => String(v)))].sort((a, b) => a.localeCompare(b)) : undefined;
+      out.push({ id: d.id, name: info.name, type: d.type, categories: categories && categories.length <= 60 ? categories : undefined });
+    }
+    return out;
+  }
+
+  /**
+   * Searches the stars within the filter's radius: the sub-manifests of the sphere, then its
+   * nodes (coarse to fine, up to FILTER_MAX_BYTES), then the scan (filterProgress).
+   */
+  private async runFilter(c: FilterCriteria): Promise<void> {
+    const oct = this.octree;
+    if (!oct || !this.loader) return;
+    const token = ++this.filterToken;
+    // the Sun is the origin of the world frame
+    const centre = c.centre === 'sun' ? new Vector3() : this.nav.target.clone();
+    this.filterRun = { token, criteria: c, centre, nodes: [], complete: true, done: false, failed: 0, hits: [], set: new Map() };
+    this.filterPaths = new Set();
+    this.stylePlan = this.planOf(this.store.get());
+    this.styleDirty = true;
+    this.candidatesDirty = true;
+    this.filterBox.setState({ kind: 'expanding' });
+    // potentially habitable planets are known from the planet catalogue
+    if (c.planets === 'habitable') await this.ensurePlanets();
+    // the sub-manifests of the sphere, as far as its nodes fit the budget
+    for (let k = 0; k < 64; k++) {
+      const todo = sphereNodes(oct.root, centre, c.radius, FILTER_MAX_BYTES).nodes.filter((n) => Octree.hasUnloaded(n));
+      if (!todo.length) break;
+      try {
+        await Promise.all(todo.map((n) => oct.loadSub(n, this.fetchRows)));
+      } catch (err) {
+        console.warn('filter: sub-manifest unavailable', err);
+        break;
+      }
+      if (this.filterRun?.token !== token) return;
+    }
+    const run = this.filterRun;
+    if (run?.token !== token) return;
+    const { nodes, complete } = sphereNodes(oct.root, centre, c.radius, FILTER_MAX_BYTES);
+    run.nodes = nodes;
+    run.complete = complete;
+    this.lodDirty = true;
+    this.filterProgress();
+  }
+
+  /** Progress of the filter's loading; once every node is there (or given up), the scan. */
+  private filterProgress(): void {
+    const run = this.filterRun;
+    const loader = this.loader;
+    if (!run || run.done || !run.nodes.length || !loader) return;
+    let loaded = 0;
+    let failed = 0;
+    for (const n of run.nodes) {
+      if (loader.get(n.path)) loaded++;
+      else if (loader.hasFailed(n.path)) failed++;
+    }
+    if (loaded + failed < run.nodes.length) {
+      this.filterBox.setState({ kind: 'loading', loaded, total: run.nodes.length });
+      return;
+    }
+    const c = run.criteria;
+    const s = this.store.get();
+    const value = c.attr ? (valueGetter(c.attr.id, this.attrs) ?? undefined) : undefined;
+    const match = starMatcher(c, { planetClass, value });
+    const datas: NodeData[] = [];
+    for (const n of run.nodes) {
+      const d = loader.get(n.path);
+      if (d) datas.push(d);
+    }
+    // only stars the settings show (brown and white dwarfs, distance uncertainty)
+    run.hits = scanStars(datas, run.centre, c.radius, (d, i) => isStarVisible(d, i, s) && match(d, i), (d, i, out) => this.starAt(d, i, out), new Vector3());
+    run.set = hitSet(run.hits);
+    run.failed = failed;
+    run.done = true;
+    this.filterPaths = new Set(run.set.keys());
+    this.stylePlan = this.planOf(s);
+    this.styleDirty = true;
+    this.lodDirty = true;
+    this.candidatesDirty = true;
+    this.showFilterResult();
+  }
+
+  /** The list of the stars found (again after a language change). */
+  private showFilterResult(): void {
+    const run = this.filterRun;
+    if (!run?.done) return;
+    this.filterBox.setState({ kind: 'done', rows: this.filterRows(run.hits), complete: run.complete, failed: run.failed });
+  }
+
+  private filterRows(hits: FilterHit[]): FilterRow[] {
+    const rows: FilterRow[] = [];
+    for (const h of hits) {
+      const d = this.loader?.get(h.path);
+      if (!d || h.index >= d.count) continue;
+      const name = this.starName(d, h.index);
+      const desig = designationOf(d, h.index);
+      rows.push({
+        path: h.path,
+        index: h.index,
+        name,
+        designation: desig !== name ? desig : null,
+        dist: h.dist,
+        spec: d.spectralTypes.get(h.index) ?? spectralClassOf(d.spec[h.index]),
+        planets: planetsOf(d, h.index),
+      });
+    }
+    return rows;
+  }
+
+  /** Removes the filter's marks (a new search shows them again). */
+  private clearFilter(): void {
+    this.filterToken++;
+    this.filterRun = null;
+    this.filterPaths = new Set();
+    this.stylePlan = this.planOf(this.store.get());
+    this.styleDirty = true;
+    this.lodDirty = true;
+    this.candidatesDirty = true;
+  }
+
+  /** A star of the list: selected, and the view flies to it (on a phone the panel closes). */
+  private pickFilterRow(row: FilterRow): void {
+    const d = this.loader?.get(row.path);
+    const pos = d ? this.starAt(d, row.index) : this.filterRun?.centre.clone() ?? new Vector3();
+    this.pickSearch({ nameEn: row.name, nameDe: null, path: row.path, index: row.index, pos, rank: 0, matched: row.name, designation: row.designation ?? row.name });
+    if (window.matchMedia?.('(max-width: 700px)').matches) this.panel.toggle(false);
+  }
+
+  /** Labels for the stars found in view, ahead of the other unnamed stars. */
+  private filterCandidates(cands: LabelCandidate[]): void {
+    const run = this.filterRun;
+    if (!run?.done || !run.hits.length || starsHidden(this.store.get().radius)) return;
+    const target = this.nav.target;
+    const r = this.store.get().radius;
+    const byKey = new Map(cands.map((c) => [c.key, c]));
+    const near: { d: NodeData; i: number; dist: number }[] = [];
+    for (const h of run.hits) {
+      const d = this.loader?.get(h.path);
+      if (!d || h.index >= d.count) continue;
+      const dist = this.starAt(d, h.index).distanceTo(target);
+      if (dist <= r) near.push({ d, i: h.index, dist });
+    }
+    near.sort((a, b) => a.dist - b.dist);
+    for (const { d, i } of near.slice(0, FILTER_LABELS)) {
+      const key = `${d.path}:${i}`;
+      const c = byKey.get(key) ?? this.candidateOf(d, i);
+      c.rank = Math.min(c.rank, FILTER_LABEL_RANK);
+      if (!byKey.has(key)) {
+        byKey.set(key, c);
+        cands.push(c);
+      }
+    }
+  }
+
+  private async exportFilter(): Promise<void> {
+    const run = this.filterRun;
+    if (!run?.done) return;
+    const lang = this.store.get().lang;
+    const rows = this.filterRows(run.hits);
+    const csv = starsCsv(
+      rows.map((r) => ({ designation: r.designation ?? r.name, name: r.designation ? r.name : '', dist: r.dist, spec: r.spec, planets: r.planets })),
+      [t('filterCsvDesignation'), t('filterCsvName'), t('filterCsvDistance'), t('filterCsvSpectral'), t('filterCsvPlanets')],
+      lang,
+    );
+    await this.saveFile(t('filterCsvFile'), csv);
   }
 
   // ------------------------------------------------------------------ route

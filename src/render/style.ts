@@ -284,6 +284,13 @@ export interface StylePlan {
   /** Symbol radius in ly, or undefined if the star has no value. Null: luminosity. */
   size: ((node: NodeData, i: number) => number | undefined) | null;
   missing: MissingStyle;
+  /** The stars a filter found (gold rim, see starfield MARK_FILTER); `dim`: the others darker. */
+  highlight?: Highlight | null;
+}
+
+export interface Highlight {
+  has(node: NodeData, i: number): boolean;
+  dim: boolean;
 }
 
 /** Symbol radius for a position 0..1 on a size scale (the Sun's luminosity symbol is 0.2 ly). */
