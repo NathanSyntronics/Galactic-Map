@@ -225,10 +225,68 @@ export interface CsvStar {
 /**
  * The list as CSV: the designation first (the attribute import's key column, so that a column
  * added in a spreadsheet can be imported back), the name, the distance from the filter's centre,
- * the spectral type and the number of known planets. German: semicolons and decimal commas.
+ * the spectral type and the number of known planets, and the filter attribute's value (`extra`).
+ * German: semicolons and decimal commas.
  */
-export function starsCsv(stars: CsvStar[], header: [string, string, string, string, string], lang: 'en' | 'de'): string {
+export function starsCsv(
+  stars: CsvStar[],
+  header: [string, string, string, string, string],
+  lang: 'en' | 'de',
+  extra?: { header: string; value: (k: number) => string },
+): string {
   const num = (x: number) => (lang === 'de' ? x.toFixed(3).replace('.', ',') : x.toFixed(3));
-  const rows = [header as string[], ...stars.map((r) => [r.designation, r.name, num(r.dist), r.spec ?? '', r.planets ? String(r.planets) : ''])];
+  const head: string[] = extra ? [...header, extra.header] : [...header];
+  const rows = [head, ...stars.map((r, k) => {
+    const row = [r.designation, r.name, num(r.dist), r.spec ?? '', r.planets ? String(r.planets) : ''];
+    if (extra) row.push(extra.value(k));
+    return row;
+  })];
   return toCsv(rows, lang === 'de' ? ';' : ',');
+}
+
+/** What the list can be sorted by: distance, name, spectral class, number of planets, the attribute. */
+export type SortKey = 'dist' | 'name' | 'spec' | 'planets' | 'value';
+export const SORT_KEYS: readonly SortKey[] = ['dist', 'name', 'spec', 'planets', 'value'];
+
+export interface SortableRow {
+  name: string;
+  dist: number;
+  /** The `spec` code (spectral class × 10 + subclass, hot to cool; 255 unknown). */
+  specCode: number;
+  planets: number;
+  /** The filter attribute's value. */
+  valueKey?: number | string;
+}
+
+/**
+ * The rows sorted by a key (a copy). Rows without a value for it (no spectral class, no attribute
+ * value) come last either way; ties go by distance.
+ */
+export function sortRows<T extends SortableRow>(rows: readonly T[], key: SortKey, desc: boolean, locale?: string): T[] {
+  const has = (r: T) => (key === 'spec' ? r.specCode !== 255 : key === 'value' ? r.valueKey !== undefined : true);
+  const cmp = (a: T, b: T): number => {
+    switch (key) {
+      case 'dist':
+        return a.dist - b.dist;
+      case 'name':
+        return a.name.localeCompare(b.name, locale, { numeric: true, sensitivity: 'base' });
+      case 'spec':
+        return a.specCode - b.specCode;
+      case 'planets':
+        return a.planets - b.planets;
+      case 'value': {
+        const x = a.valueKey!;
+        const y = b.valueKey!;
+        if (typeof x === 'number' && typeof y === 'number') return x - y;
+        return String(x).localeCompare(String(y), locale, { numeric: true, sensitivity: 'base' });
+      }
+    }
+  };
+  return [...rows].sort((a, b) => {
+    const ha = has(a);
+    const hb = has(b);
+    if (ha !== hb) return ha ? -1 : 1;
+    const c = ha ? cmp(a, b) : 0;
+    return (desc ? -c : c) || a.dist - b.dist;
+  });
 }

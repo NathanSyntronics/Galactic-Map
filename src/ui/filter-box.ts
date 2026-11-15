@@ -7,13 +7,15 @@ import {
   RADIUS_PRESETS,
   clampRadius,
   readCriteria,
+  sortRows,
   type CentreKind,
   type ClassKey,
   type FilterCriteria,
   type PlanetCriterion,
+  type SortKey,
 } from '../data/filter';
 import { parseNumber } from '../data/csv';
-import { formatLy, formatNumber, getLang, t, type MessageKey } from '../i18n';
+import { formatLy, formatNumber, getLang, locale, t, type MessageKey } from '../i18n';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -30,6 +32,8 @@ export interface FilterAttribute {
   type: 'number' | 'text';
   /** Values to choose from (text attributes). */
   categories?: string[];
+  /** Unit after a value in the list (built-in attributes). */
+  unit?: string;
 }
 
 /** One star of the result list. */
@@ -41,14 +45,19 @@ export interface FilterRow {
   designation: string | null;
   dist: number;
   spec: string | null;
+  /** The `spec` code (for sorting by spectral class; 255 unknown). */
+  specCode: number;
   planets: number;
+  /** The filter attribute's value as shown, and as sorted. */
+  value?: string;
+  valueKey?: number | string;
 }
 
 export type FilterState =
   | { kind: 'idle' }
   | { kind: 'expanding' }
   | { kind: 'loading'; loaded: number; total: number }
-  | { kind: 'done'; rows: FilterRow[]; complete: boolean; failed: number };
+  | { kind: 'done'; rows: FilterRow[]; complete: boolean; failed: number; attrName: string | null };
 
 const STORE_KEY = 'galactic-map:filter';
 /** Rows shown at first and added by "show more". */
@@ -59,37 +68,55 @@ const CLASS_LABEL: Partial<Record<ClassKey, MessageKey>> = { BD: 'filterClassBD'
 interface Stored {
   criteria: FilterCriteria;
   dim: boolean;
+  sort: SortKey;
+  desc: boolean;
 }
+
+const SORT_LABEL: Record<SortKey, MessageKey> = {
+  dist: 'filterSortDist',
+  name: 'filterSortName',
+  spec: 'filterSortSpec',
+  planets: 'filterSortPlanets',
+  value: 'filterAttr',
+};
 
 function readStored(): Stored {
   try {
     const raw = localStorage.getItem(STORE_KEY);
     if (raw) {
-      const v = JSON.parse(raw) as { criteria?: unknown; dim?: unknown };
-      return { criteria: readCriteria(v.criteria), dim: v.dim !== false };
+      const v = JSON.parse(raw) as { criteria?: unknown; dim?: unknown; sort?: unknown; desc?: unknown };
+      const sort = (Object.keys(SORT_LABEL) as SortKey[]).find((k) => k === v.sort) ?? 'dist';
+      return { criteria: readCriteria(v.criteria), dim: v.dim !== false, sort, desc: v.desc === true };
     }
   } catch {
     // storage unavailable or malformed: the defaults
   }
-  return { criteria: { ...DEFAULT_CRITERIA }, dim: true };
+  return { criteria: { ...DEFAULT_CRITERIA }, dim: true, sort: 'dist', desc: false };
 }
 
 export class FilterBox {
   readonly root = el('div', 'filter-box');
   private criteria: FilterCriteria;
   private dimOthers: boolean;
+  private sortKey: SortKey;
+  private sortDesc: boolean;
+  /** The rows of the last search in the order chosen. */
+  private sorted: FilterRow[] = [];
   private state: FilterState = { kind: 'idle' };
   private shown = PAGE_ROWS;
   private readonly status = el('div', 'filter-status');
-  private readonly list = el('ol', 'filter-list');
   private readonly actions = el('div', 'go-row filter-actions');
+  private readonly sortRow = el('div', 'row select filter-sort');
+  private readonly list = el('ol', 'filter-list');
+  private readonly more = el('div', 'filter-more');
 
   /** The criteria to search with (also on "Find" with unchanged criteria: a new search). */
   onRun: (c: FilterCriteria) => void = () => {};
   /** The marks are removed (the list stays until the next search). */
   onClear: () => void = () => {};
   onPick: (row: FilterRow) => void = () => {};
-  onCsv: () => void = () => {};
+  /** The list as shown (in its order) and the attribute's name, if the filter has one. */
+  onCsv: (rows: FilterRow[], attrName: string | null) => void = () => {};
   onDim: (dim: boolean) => void = () => {};
   /** The attributes to offer (asked at every render). */
   attributes: () => FilterAttribute[] = () => [];
@@ -98,6 +125,8 @@ export class FilterBox {
     const s = readStored();
     this.criteria = s.criteria;
     this.dimOthers = s.dim;
+    this.sortKey = s.sort;
+    this.sortDesc = s.desc;
     this.render();
   }
 
@@ -111,7 +140,7 @@ export class FilterBox {
 
   private save(): void {
     try {
-      localStorage.setItem(STORE_KEY, JSON.stringify({ criteria: this.criteria, dim: this.dimOthers }));
+      localStorage.setItem(STORE_KEY, JSON.stringify({ criteria: this.criteria, dim: this.dimOthers, sort: this.sortKey, desc: this.sortDesc }));
     } catch {
       // storage unavailable: the criteria are not kept
     }
@@ -227,7 +256,8 @@ export class FilterBox {
       this.onDim(v);
     }));
 
-    r.append(this.status, this.list, this.actions);
+    // the buttons above the list: no scrolling down to them
+    r.append(this.status, this.actions, this.sortRow, this.list, this.more);
     this.renderState();
   }
 
@@ -320,16 +350,21 @@ export class FilterBox {
   setState(state: FilterState): void {
     if (state.kind === 'done' && this.state.kind !== 'done') this.shown = PAGE_ROWS;
     this.state = state;
+    if (state.kind === 'done') {
+      // sorted by the attribute only while the filter has one
+      if (this.sortKey === 'value' && !state.attrName) this.sortKey = 'dist';
+      this.sorted = sortRows(state.rows, this.sortKey, this.sortDesc, locale());
+    } else {
+      this.sorted = [];
+    }
     this.renderState();
   }
 
-  /** The status line, the list and its buttons. */
+  /** The status line, the buttons, the sort order and the list. */
   private renderState(): void {
     const st = this.state;
-    this.list.replaceChildren();
-    this.actions.replaceChildren();
-    this.status.replaceChildren();
-    this.status.classList.remove('warn');
+    for (const e of [this.status, this.actions, this.sortRow, this.list, this.more]) e.replaceChildren();
+    this.sortRow.hidden = true;
     if (st.kind === 'idle') return;
     if (st.kind === 'expanding') {
       this.status.textContent = t('filterExpanding');
@@ -343,17 +378,35 @@ export class FilterBox {
     this.status.appendChild(el('strong', '', n === 0 ? t('filterNone') : n === 1 ? t('filterCountOne') : t('filterCount', { n: formatNumber(n) })));
     if (!st.complete) this.status.appendChild(el('p', 'hint warn', t('filterIncomplete')));
     if (st.failed) this.status.appendChild(el('p', 'hint warn', t('filterFailed', { n: st.failed })));
-    for (const row of st.rows.slice(0, this.shown)) {
+    if (n) {
+      const csv = el('button', 'btn small', t('filterCsv'));
+      csv.type = 'button';
+      csv.addEventListener('click', () => this.onCsv(this.sorted, st.attrName));
+      this.actions.appendChild(csv);
+    }
+    const clear = el('button', 'btn small subtle', t('filterClear'));
+    clear.type = 'button';
+    clear.addEventListener('click', () => {
+      this.state = { kind: 'idle' };
+      this.sorted = [];
+      this.renderState();
+      this.onClear();
+    });
+    this.actions.appendChild(clear);
+    if (n > 1) this.renderSort(st.attrName);
+    for (const row of this.sorted.slice(0, this.shown)) {
       const li = el('li');
       const b = el('button', 'filter-row');
       b.type = 'button';
-      const main = el('span', 'filter-name', row.name);
+      const head = el('span', 'filter-head');
+      head.appendChild(el('span', 'filter-name', row.name));
+      if (row.value !== undefined) head.appendChild(el('span', 'filter-value', row.value));
       const meta = el('span', 'filter-meta');
       const bits = [formatLy(row.dist)];
       if (row.spec) bits.push(row.spec);
       if (row.planets) bits.push(row.planets === 1 ? t('filterPlanetOne') : t('filterPlanetCount', { n: row.planets }));
       meta.textContent = bits.join(' · ');
-      b.append(main, meta);
+      b.append(head, meta);
       if (row.designation) b.title = row.designation;
       b.addEventListener('click', () => this.onPick(row));
       li.appendChild(b);
@@ -366,21 +419,45 @@ export class FilterBox {
         this.shown += PAGE_ROWS;
         this.renderState();
       });
-      this.actions.appendChild(more);
+      this.more.appendChild(more);
     }
-    if (n) {
-      const csv = el('button', 'btn small', t('filterCsv'));
-      csv.type = 'button';
-      csv.addEventListener('click', () => this.onCsv());
-      this.actions.appendChild(csv);
+  }
+
+  /** "Sort by" and the direction. */
+  private renderSort(attrName: string | null): void {
+    const row = this.sortRow;
+    row.hidden = false;
+    const label = el('label', 'filter-sort-label');
+    label.appendChild(el('span', '', t('filterSort')));
+    const sel = el('select');
+    for (const k of Object.keys(SORT_LABEL) as SortKey[]) {
+      if (k === 'value' && !attrName) continue;
+      sel.appendChild(new Option(k === 'value' ? attrName! : t(SORT_LABEL[k]), k));
     }
-    const clear = el('button', 'btn small subtle', t('filterClear'));
-    clear.type = 'button';
-    clear.addEventListener('click', () => {
-      this.state = { kind: 'idle' };
-      this.renderState();
-      this.onClear();
+    sel.value = this.sortKey;
+    sel.addEventListener('change', () => {
+      this.sortKey = sel.value as SortKey;
+      // the natural direction of each order: the nearest, A to Z, hot to cool, the most planets
+      this.sortDesc = this.sortKey === 'planets';
+      this.resort();
     });
-    this.actions.appendChild(clear);
+    label.appendChild(sel);
+    const dir = el('button', 'btn small filter-dir', this.sortDesc ? '↓' : '↑');
+    dir.type = 'button';
+    dir.title = t(this.sortDesc ? 'filterSortDesc' : 'filterSortAsc');
+    dir.setAttribute('aria-label', dir.title);
+    dir.addEventListener('click', () => {
+      this.sortDesc = !this.sortDesc;
+      this.resort();
+    });
+    row.append(label, dir);
+  }
+
+  private resort(): void {
+    this.save();
+    if (this.state.kind !== 'done') return;
+    this.sorted = sortRows(this.state.rows, this.sortKey, this.sortDesc, locale());
+    this.shown = PAGE_ROWS;
+    this.renderState();
   }
 }

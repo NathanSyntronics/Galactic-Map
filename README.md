@@ -191,8 +191,11 @@ centre (10, 30, 100, 300 ly or any value up to 3,000) that meet the chosen crite
 "All M dwarfs with planets within 30 ly" gives 43 stars, from Proxima Centauri to Teegarden's
 Star and beyond. On the map the stars found get a gold rim, whatever the level of detail (a star
 too faint to be drawn at the view's detail is drawn anyway); the other stars can be dimmed. A tap on
-a row selects the star and flies to it. The list can be exported as CSV, with the designation as
-the first column: a column added in a spreadsheet can be imported back as an attribute.
+a row selects the star and flies to it. With an attribute among the criteria, every row shows the
+star's value of it. The list sorts by distance, name, spectral class, number of planets or that
+attribute, either way (stars without a value last). It can be exported as CSV in the order shown,
+with the designation as the first column (a column added in a spreadsheet can be imported back as
+an attribute) and the attribute's values as the last.
 
 The filter loads the octree nodes that reach into its sphere, coarse to fine, up to 48 MB (the
 300 ly around the Sun take 39 MB, some 630,000 stars to search). A larger sphere is searched only
@@ -477,7 +480,10 @@ The stars are stored in an octree (`pipeline/galmap/octree.py`):
   fade in over 0.15 dex below it). The nodes are refined in the order of these limits (the node
   that limits the view most first; a node not loaded yet is estimated by its size), so that the
   budget brings the limit down as far as it can. Labels, picking and the count of stars in view
-  use the same limit. A complete view (the usual case close to the Sun) is not limited.
+  use the same limit. A complete view (the usual case close to the Sun) is not limited. Nodes on
+  their way count as drawn: the nodes the level of detail chose that are still loading, and those
+  whose descendants' list is loading, in the sphere the level of detail last saw. Otherwise a zoom
+  out would hide most stars for the moment the new nodes take to arrive.
 * **Light** (`src/render/star-buffer.ts`): where the device can render to a half-float buffer, the
   stars' light is added up there and composited onto the screen with a soft shoulder (light up to
   0.6 unchanged, more compressed towards white), instead of being clipped in the 8-bit screen.

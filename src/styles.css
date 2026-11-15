@@ -1623,3 +1623,58 @@ label.check input {
   min-width: 0;
   max-width: 64%;
 }
+
+.filter-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+}
+
+.filter-value {
+  flex: none;
+  color: var(--accent);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.filter-sort {
+  margin: 12px 0 6px;
+}
+
+.filter-sort-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.filter-sort-label select {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.btn.filter-dir {
+  min-width: 2.4em;
+  font-size: 15px;
+}
+
+.filter-more {
+  margin-top: 10px;
+}
+
+.filter-actions .btn {
+  flex: 1 1 auto;
+  white-space: nowrap;
+}
+
+.filter-sort-label > span {
+  white-space: nowrap;
+}
+
+.filter-box .filter-sort-label select {
+  max-width: none;
+}

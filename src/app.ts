@@ -3,7 +3,7 @@ import { Navigation } from './controls/navigation';
 import { medianJump, tourStart } from './controls/tour';
 import { LABELLED_RADIUS, PRECISE_PX, SPRITE_CORE, labelledWins, pickScore } from './controls/pick';
 import { TapDetector } from './controls/tap';
-import { AttributeStore, type ChangeKind } from './data/attributes';
+import { AttributeStore, valueLabel, type ChangeKind } from './data/attributes';
 import { Flag, designationOf, setVelocityScale, spectralClassOf, type NodeData } from './data/format';
 import { hitSet, scanStars, sphereNodes, starMatcher, starsCsv, type FilterCriteria, type FilterHit } from './data/filter';
 import { DEFAULT_VELOCITY_SCALE, moveTo, starCoord, starPosition, yearsSinceEpoch } from './data/motion';
@@ -97,7 +97,7 @@ import { PlanetLayer } from './render/planets';
 import { AU_PER_LY, julianDate, loadPlanets, moveHosts, planetName, type PlanetCatalogue, type PlanetHost } from './data/planets';
 import { GalaxyFlag, galaxyDesignation, galaxyName, galaxyRank, loadGalaxies, type GalaxyCatalogue } from './data/galaxies';
 import { GalaxyLayer, milkyWayOpacity } from './render/galaxies';
-import { Legend } from './ui/legend';
+import { Legend, formatValue } from './ui/legend';
 import { LabelLayer, TopK, labelUnder, labelledStarNear, milkyWayLabelPos, namedCandidateLimit, onScreen, starPriority, type LabelCandidate } from './ui/labels';
 import { SettingsPanel } from './ui/panel';
 import { FilterBox, type FilterAttribute, type FilterRow } from './ui/filter-box';
@@ -179,6 +179,10 @@ const ROUTE_DELAY_MS = 400;
  * around the Sun take 39 MB (630,000 stars in the nodes that reach into it), 1000 ly 166 MB.
  */
 const FILTER_MAX_BYTES = 48e6;
+/** Units of the built-in attributes in the filter's list. */
+const BUILTIN_UNITS: Record<string, string> = { '@teff': 'K', '@lum': 'L☉', '@absmag': 'mag', '@disterr': '%' };
+/** Their decimals in the list (temperatures in whole kelvin, uncertainties in steps of 0.5 %). */
+const BUILTIN_DIGITS: Record<string, number> = { '@teff': 0, '@absmag': 2, '@disterr': 1 };
 /** Stars the filter found that get a label candidate (the nearest to the view centre). */
 const FILTER_LABELS = 60;
 /** Their name rank at most (as Bayer names): labelled ahead of the other unnamed stars. */
@@ -322,6 +326,8 @@ export class App {
 
   private lodDirty = true;
   private lastLod = 0;
+  /** The visible sphere the level of detail last chose the nodes for. */
+  private lodSphere: { target: Vector3; radius: number } | null = null;
   private candidatesDirty = true;
   private lastCandidates = 0;
   private selectedPaths = new Set<string>();
@@ -453,7 +459,7 @@ export class App {
     this.filterBox.onRun = (c) => void this.runFilter(c);
     this.filterBox.onClear = () => this.clearFilter();
     this.filterBox.onPick = (row) => this.pickFilterRow(row);
-    this.filterBox.onCsv = () => void this.exportFilter();
+    this.filterBox.onCsv = (rows, attrName) => void this.exportFilter(rows, attrName);
     this.filterBox.onDim = () => {
       this.stylePlan = this.planOf(this.store.get());
       this.styleDirty = true;
@@ -1128,6 +1134,7 @@ export class App {
         );
     const before = this.selectedPaths;
     this.selectedPaths = new Set(selected.map((n) => n.path));
+    this.lodSphere = { target: this.nav.target.clone(), radius: s.radius + drift };
     // a view far from the stars (galaxy scales) waits for none of them
     if (!selected.length && this.loadingKey === 'loading') this.loadingEl.classList.add('hidden');
     const added = [...this.selectedPaths].some((p) => !before.has(p));
@@ -1658,7 +1665,15 @@ export class App {
     const nodes = this.starfield.visibleNodes();
     this.starNodesDrawn = nodes.length;
     for (const rn of nodes) drawn.add(rn.node.path);
-    const cut = completenessCut(nodes, (p) => drawn.has(p), (n) => n.box.distanceToPoint(target) <= r, cam, cam.distanceTo(target) - r);
+    // the nodes the level of detail chose count as drawn while they load (they are coming), unless
+    // they were given up
+    const coming = (p: string) => drawn.has(p) || (this.selectedPaths.has(p) && !this.loader?.hasFailed(p));
+    // the visible sphere as the level of detail last saw it, too: while zooming out, nodes whose
+    // children it has not been asked to choose yet (up to 120 ms) are not left unrefined either
+    const lod = this.lodSphere;
+    const inSphere = (n: OctreeNode) => n.box.distanceToPoint(target) <= r && (!lod || n.box.distanceToPoint(lod.target) <= lod.radius);
+    const refining = (n: OctreeNode) => this.selectedPaths.has(n.path) && (this.subRetryAt.get(n.path) ?? 0) <= performance.now();
+    const cut = completenessCut(nodes, coming, inSphere, cam, cam.distanceTo(target) - r, refining);
     this.impCut = cut;
     this.starfield.material.uniforms.uImpCut.value = cut;
   }
@@ -2599,7 +2614,7 @@ export class App {
     for (const b of BUILTIN_ATTRIBUTES) {
       // (spectral classes and planets have their own criteria)
       if (b.id === '@spec' || b.id === '@planets') continue;
-      out.push({ id: b.id, name: t(b.label), type: b.type, categories: b.categories });
+      out.push({ id: b.id, name: t(b.label), type: b.type, categories: b.categories, unit: BUILTIN_UNITS[b.id] });
     }
     for (const d of this.attrs.defs) {
       if (d.type === 'color') continue;
@@ -2691,25 +2706,39 @@ export class App {
   private showFilterResult(): void {
     const run = this.filterRun;
     if (!run?.done) return;
-    this.filterBox.setState({ kind: 'done', rows: this.filterRows(run.hits), complete: run.complete, failed: run.failed });
+    const attr = run.criteria.attr ? this.filterAttributes().find((a) => a.id === run.criteria.attr!.id) : undefined;
+    this.filterBox.setState({ kind: 'done', rows: this.filterRows(run.hits, attr), complete: run.complete, failed: run.failed, attrName: attr?.name ?? null });
   }
 
-  private filterRows(hits: FilterHit[]): FilterRow[] {
+  /** The list's rows; with an attribute, each star's value of it (shown, sortable, exported). */
+  private filterRows(hits: FilterHit[], attr?: FilterAttribute): FilterRow[] {
     const rows: FilterRow[] = [];
+    const get = attr ? valueGetter(attr.id, this.attrs) : null;
+    const def = attr ? this.attrs.def(attr.id) : undefined;
+    const lang = this.store.get().lang;
     for (const h of hits) {
       const d = this.loader?.get(h.path);
       if (!d || h.index >= d.count) continue;
       const name = this.starName(d, h.index);
       const desig = designationOf(d, h.index);
-      rows.push({
+      const row: FilterRow = {
         path: h.path,
         index: h.index,
         name,
         designation: desig !== name ? desig : null,
         dist: h.dist,
         spec: d.spectralTypes.get(h.index) ?? spectralClassOf(d.spec[h.index]),
+        specCode: d.spec[h.index],
         planets: planetsOf(d, h.index),
-      });
+      };
+      const v = get?.(d, h.index);
+      if (v !== undefined) {
+        row.valueKey = v;
+        const digits = attr ? BUILTIN_DIGITS[attr.id] : undefined;
+        const text = typeof v === 'number' ? (digits !== undefined ? formatNumber(v, digits) : formatValue(v)) : def ? valueLabel(def, v, lang) : v;
+        row.value = attr?.unit ? `${text} ${attr.unit}` : text;
+      }
+      rows.push(row);
     }
     return rows;
   }
@@ -2759,15 +2788,16 @@ export class App {
     }
   }
 
-  private async exportFilter(): Promise<void> {
-    const run = this.filterRun;
-    if (!run?.done) return;
+  /** The list as CSV, in the order shown, with the filter attribute's values. */
+  private async exportFilter(rows: FilterRow[], attrName: string | null): Promise<void> {
     const lang = this.store.get().lang;
-    const rows = this.filterRows(run.hits);
+    const cell = (v: number | string | undefined) =>
+      v === undefined ? '' : typeof v === 'number' ? (lang === 'de' ? String(v).replace('.', ',') : String(v)) : v;
     const csv = starsCsv(
       rows.map((r) => ({ designation: r.designation ?? r.name, name: r.designation ? r.name : '', dist: r.dist, spec: r.spec, planets: r.planets })),
       [t('filterCsvDesignation'), t('filterCsvName'), t('filterCsvDistance'), t('filterCsvSpectral'), t('filterCsvPlanets')],
       lang,
+      attrName ? { header: attrName, value: (k) => cell(rows[k].valueKey) } : undefined,
     );
     await this.saveFile(t('filterCsvFile'), csv);
   }

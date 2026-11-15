@@ -193,15 +193,25 @@ export function importanceOf(d: NodeData, i: number): number {
  * complete: drawing only the stars above it gives the same density everywhere (else the cubes of
  * nodes refined further than their neighbours stand out). NO_CUT when the view is complete.
  * `nearest`: distance from the camera to the nearest point of the visible sphere.
+ *
+ * `drawn` should also hold the nodes on their way (chosen by the level of detail, still loading):
+ * a node whose children are coming is not left that way, and counting it would hide most stars of
+ * the view for the moment it takes them to arrive (zooming out). Likewise a node whose descendants'
+ * list is still loading (`refining`) does not count.
  */
 export function completenessCut(
-  nodes: { node: OctreeNode; minImp: number }[], drawn: (path: string) => boolean, inSphere: (n: OctreeNode) => boolean, cam: Vector3, nearest: number,
+  nodes: { node: OctreeNode; minImp: number }[],
+  drawn: (path: string) => boolean,
+  inSphere: (n: OctreeNode) => boolean,
+  cam: Vector3,
+  nearest: number,
+  refining: (n: OctreeNode) => boolean = () => false,
 ): number {
   let cut = NO_CUT;
   for (const { node, minImp } of nodes) {
     if (!inSphere(node)) continue;
     const open = node.sub !== null && node.childMask !== 0 && node.children.length === 0
-      ? true
+      ? !refining(node)
       : node.children.some((c) => inSphere(c) && !drawn(c.path));
     if (!open) continue;
     const d = Math.max(node.box.distanceToPoint(cam), nearest, 1e-12);

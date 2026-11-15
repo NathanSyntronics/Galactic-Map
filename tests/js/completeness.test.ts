@@ -47,6 +47,27 @@ describe('completeness cut', () => {
     expect(cut1).toBeCloseTo(want, 9);
   });
 
+  it('does not count nodes whose children are on their way (zooming out)', async () => {
+    const t = await tree();
+    const root = t.root;
+    const target = root.worldCenter.clone();
+    const radius = root.halfSize * 4;
+    const cam = target.clone().add(new Vector3(0, 0, 2.2 * radius));
+    const inSphere = (n: OctreeNode) => n.box.distanceToPoint(target) <= radius;
+    const nearest = cam.distanceTo(target) - radius;
+    // only the root drawn, its children chosen and loading: the view is not cut
+    const coming = new Set([root.path, ...root.children.map((c) => c.path)]);
+    expect(completenessCut([{ node: root, minImp: 1 }], (p) => coming.has(p), inSphere, cam, nearest)).toBe(NO_CUT);
+    // a node whose descendants' list is still loading counts only when it is not being refined
+    const fresh = new Octree(read<Manifest>('manifest.json'));
+    const withSub = [...fresh.nodes.values()].find((n) => n.sub !== null && n.childMask !== 0 && n.children.length === 0)!;
+    expect(withSub).toBeDefined();
+    const one = [{ node: withSub, minImp: 0 }];
+    const all = () => true;
+    expect(completenessCut(one, () => true, all, cam, 1)).toBeGreaterThan(NO_CUT);
+    expect(completenessCut(one, () => true, all, cam, 1, () => true)).toBe(NO_CUT);
+  });
+
   it('refines in the order of the cut when the faintest stars are known', async () => {
     const t = await tree();
     const root = t.root;

@@ -2,6 +2,16 @@
 
 Every round of changes that goes live raises the version by 0.01 (README, *Versions*).
 
+## 1.15 (2026-11-15)
+
+* Zooming out is smooth again: since 1.13 most stars vanished for a moment and came back, because
+  the parts of the view still loading counted as incomplete for the whole view. Nodes on their way
+  no longer count.
+* Filter list: the buttons (CSV export, remove marks) are above the list; with an attribute among
+  the criteria (distance uncertainty, say) every star shows its value; the list sorts by distance,
+  name, spectral class, planets or the attribute, ascending or descending, and the CSV export
+  follows the order shown and includes the attribute.
+
 ## 1.14 (2026-11-15)
 
 * Filter: a new tab in the settings lists the stars around the Sun or the view centre that meet

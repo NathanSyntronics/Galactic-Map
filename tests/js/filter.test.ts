@@ -10,6 +10,7 @@ import {
   hitSet,
   readCriteria,
   scanStars,
+  sortRows,
   sphereNodes,
   starMatcher,
   starsCsv,
@@ -150,6 +151,31 @@ describe('filter search', () => {
     expect(en.replace('﻿', '').split('\r\n')).toEqual(['designation,name,distance (ly),spectral type,planets', 'HIP 1,Red One,3.142,M5V,2', 'Gaia DR3 7,,8.000,,', '']);
     const de = starsCsv(rows, ['Bezeichnung', 'Name', 'Entfernung (Lj)', 'Spektraltyp', 'Planeten'], 'de');
     expect(de.split('\r\n')[1]).toBe('HIP 1;Red One;3,142;M5V;2');
+    // with the filter attribute's values
+    const att = starsCsv(rows, ['Bezeichnung', 'Name', 'Entfernung (Lj)', 'Spektraltyp', 'Planeten'], 'de', { header: 'Entfernungsunsicherheit', value: (k) => ['12,5', ''][k] });
+    expect(att.split('\r\n').slice(0, 3)).toEqual(['\ufeffBezeichnung;Name;Entfernung (Lj);Spektraltyp;Planeten;Entfernungsunsicherheit', 'HIP 1;Red One;3,142;M5V;2;12,5', 'Gaia DR3 7;;8,000;;;']);
+  });
+
+  it('sorts the list, rows without a value last', () => {
+    const rows = [
+      { name: 'Wolf 359', dist: 7.9, specCode: 66, planets: 0, valueKey: 0.5 },
+      { name: 'alpha', dist: 4.3, specCode: 42, planets: 2 },
+      { name: 'Barnard', dist: 6.0, specCode: 255, planets: 4, valueKey: 2 },
+      { name: 'Wolf 1061', dist: 14, specCode: 63, planets: 3, valueKey: 0.5 },
+    ];
+    const names = (key: Parameters<typeof sortRows>[1], desc = false) => sortRows(rows, key, desc, 'en').map((r) => r.name);
+    expect(names('dist')).toEqual(['alpha', 'Barnard', 'Wolf 359', 'Wolf 1061']);
+    expect(names('dist', true)).toEqual(['Wolf 1061', 'Wolf 359', 'Barnard', 'alpha']);
+    // ignoring case, numbers by value
+    expect(names('name')).toEqual(['alpha', 'Barnard', 'Wolf 359', 'Wolf 1061']);
+    // hot to cool; no class last, also descending
+    expect(names('spec')).toEqual(['alpha', 'Wolf 1061', 'Wolf 359', 'Barnard']);
+    expect(names('spec', true)).toEqual(['Wolf 359', 'Wolf 1061', 'alpha', 'Barnard']);
+    expect(names('planets', true)).toEqual(['Barnard', 'Wolf 1061', 'alpha', 'Wolf 359']);
+    // the attribute: ties by distance, no value last
+    expect(names('value')).toEqual(['Wolf 359', 'Wolf 1061', 'Barnard', 'alpha']);
+    expect(names('value', true)).toEqual(['Barnard', 'Wolf 359', 'Wolf 1061', 'alpha']);
+    expect(sortRows([{ name: 'b', dist: 1, specCode: 0, planets: 0, valueKey: 'Empire' }, { name: 'a', dist: 2, specCode: 0, planets: 0, valueKey: 'Alliance' }], 'value', false).map((r) => r.name)).toEqual(['a', 'b']);
   });
 });
 
