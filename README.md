@@ -444,6 +444,24 @@ The stars are stored in an octree (`pipeline/galmap/octree.py`):
   (equal luminosities: ordered by a hash of the designation, so the tree does not depend on the
   order in which the stars arrive).
 * Distant regions therefore show their brightest stars first.
+* **Even density** (`src/render/starfield.ts`, `completenessCut`): while the point budget does not
+  reach every star in view, some cubes are loaded a level finer than their neighbours and would
+  show many more faint stars (square structures in large views at low detail). The app therefore
+  draws only the stars bright enough, seen from the camera, to be loaded everywhere in view: for
+  every drawn node whose children are not all drawn, its faintest star at its nearest distance
+  gives a limit of apparent brightness, and the brightest such limit applies to all (the stars
+  fade in over 0.15 dex below it). The nodes are refined in the order of these limits (the node
+  that limits the view most first; a node not loaded yet is estimated by its size), so that the
+  budget brings the limit down as far as it can. Labels, picking and the count of stars in view
+  use the same limit. A complete view (the usual case close to the Sun) is not limited.
+* **Light** (`src/render/star-buffer.ts`): where the device can render to a half-float buffer, the
+  stars' light is added up there and composited onto the screen with a soft shoulder (light up to
+  0.6 unchanged, more compressed towards white), instead of being clipped in the 8-bit screen.
+  The faint stars' brightness floor keeps falling with the number of stars in view, beyond
+  100,000 stars the point-like stars are dimmed by (100,000 / n)^0.6, and an exposure meter (32 x
+  32 blocks of the buffer, read back three times a second without waiting) lowers the exposure
+  once the 6th brightest block averages more than 0.4: millions of stars in view no longer merge
+  into one white blob. Ordinary views measure up to about 0.35 and are drawn as before.
 * The writer (`pipeline/galmap/ooc.py`) works out of core: stars are spooled to disk in chunks
   and split into buckets of at most 8 million stars; the levels above the buckets are built
   exactly from each bucket's brightest candidates, and each bucket's subtree is built and

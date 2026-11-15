@@ -2,6 +2,15 @@
 
 Every round of changes that goes live raises the version by 0.01 (README, *Versions*).
 
+## 1.13 (2026-11-15)
+
+* No more square structures in large views at low detail: only the stars bright enough to be
+  loaded everywhere in view are drawn, so the density is even (the parts of the view are loaded in
+  the order that brings this limit down furthest).
+* Many stars in view no longer merge into one white blob: the stars' light is added up in a
+  half-float buffer and compressed softly, faint stars are dimmed more in crowded views, and an
+  exposure meter darkens the picture when large parts of it would be overexposed.
+
 ## 1.12 (2026-11-11)
 
 * 3.6 million more stars: every Gaia DR3 star beyond 200 pc whose parallax is better than 1 %

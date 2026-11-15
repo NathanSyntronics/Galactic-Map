@@ -218,6 +218,19 @@ export interface SelectionParams {
   budget: number;
   /** Projection factor: pixels per (world size / distance). */
   pixelsPerUnitAtUnitDistance: number;
+  /**
+   * The faintest importance (log L) of a loaded node's stars. When given, nodes are refined in
+   * order of how much they limit the view's completeness (see render/starfield completenessCut):
+   * the child of the node whose faintest star, seen from the camera, is brightest comes first, so
+   * that the view is complete down to the faintest apparent brightness the budget allows. A node
+   * not loaded yet is estimated by its size.
+   */
+  minImpOf?: (node: OctreeNode) => number | undefined;
+}
+
+/** Estimated faintest importance of a node not loaded yet (fitted: 512 ly cubes about 0.55, 256 ly about -0.95). */
+export function estimatedMinImp(node: OctreeNode): number {
+  return 5 * Math.log10(Math.max(node.halfSize, 1e-9)) - 11.5;
 }
 
 const tmpClosest = new Vector3();
@@ -236,9 +249,19 @@ export function selectNodes(octree: Octree, p: SelectionParams): OctreeNode[] {
   const root = octree.root;
   if (!sphereIntersectsBox(p.target, p.radius, root.box)) return selected;
   const heap: { node: OctreeNode; priority: number }[] = [];
+  // (completeness order: the nearest the visible sphere comes to the camera)
+  const nearest = Math.max(p.cameraPos.distanceTo(p.target) - p.radius, 0);
+  const minImpOf = p.minImpOf;
   const push = (node: OctreeNode) => {
-    const d = Math.max(node.worldCenter.distanceTo(p.cameraPos) - node.radius, node.halfSize * 0.05, 1e-6);
-    const priority = ((2 * node.halfSize) / d) * p.pixelsPerUnitAtUnitDistance;
+    let priority: number;
+    if (minImpOf) {
+      const parent = node.parent;
+      const d = Math.max(node.box.distanceToPoint(p.cameraPos), nearest, 1e-9);
+      priority = parent ? (minImpOf(parent) ?? estimatedMinImp(parent)) - 2 * Math.log10(d) : Infinity;
+    } else {
+      const d = Math.max(node.worldCenter.distanceTo(p.cameraPos) - node.radius, node.halfSize * 0.05, 1e-6);
+      priority = ((2 * node.halfSize) / d) * p.pixelsPerUnitAtUnitDistance;
+    }
     heap.push({ node, priority });
     // sift up
     let i = heap.length - 1;

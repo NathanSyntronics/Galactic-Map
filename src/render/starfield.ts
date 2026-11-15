@@ -37,7 +37,9 @@ attribute vec3 aColor;
 attribute float aSize;
 attribute float aMark;
 attribute vec3 aVel;
+attribute float aImp;
 uniform float uDt;
+uniform float uImpCut;
 uniform float uMarks;
 uniform float uPixelRatio;
 uniform vec3 uCamLocal;
@@ -50,6 +52,7 @@ uniform float uSizeMul;
 uniform float uMinPx;
 uniform float uMaxPx;
 uniform float uMinAlpha;
+uniform float uCrowd;
 varying vec3 vColor;
 varying float vAlpha;
 varying float vPx;
@@ -62,6 +65,10 @@ void main() {
   vec3 rel = (position - uCamLocal) + aVel * uDt;
   float d = distance(rel, uTargetRel);
   float a = 1.0 - smoothstep(uRadius * uFade, uRadius, d);
+  // only stars bright enough, seen from here, to be loaded in every part of the view (see
+  // completenessCut): no denser cubes where finer nodes happen to be loaded
+  float lb = aImp - 0.8685889638 * log(max(length(rel), 1e-12));
+  a *= smoothstep(uImpCut - IMP_SOFT, uImpCut, lb);
   if (a <= 0.0 || aSize <= 0.0) {
     gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
     gl_PointSize = 0.0;
@@ -82,7 +89,8 @@ void main() {
     // stars that would be smaller than the minimum sprite are drawn at the minimum size but
     // dimmed roughly like their apparent brightness, down to a density-dependent floor
     float f = px / uMinPx;
-    intensity = max(f * sqrt(f), uMinAlpha);
+    // (in a crowded view the point-like stars are dimmed together, see star-buffer crowdFactor)
+    intensity = max(f * sqrt(f), uMinAlpha) * uCrowd;
     px = uMinPx;
   }
   px = min(px, uMaxPx);
@@ -155,8 +163,50 @@ export function spritePx(size: number, sizeMul: number, scale: number, depth: nu
   return Math.min(Math.max(px, minPx), maxPx);
 }
 
+/** uImpCut when every node in view is complete (no star is left out). */
+export const NO_CUT = -1e9;
+/** Width (dex of apparent brightness) over which stars fade in below the cut. */
+export const IMP_SOFT = 0.15;
+
+/**
+ * Importance of star i, as the octree orders the stars (pipeline octree.importance_of): log L,
+ * else from the absolute magnitude, else -3; the Sun first.
+ */
+export function importanceOf(d: NodeData, i: number): number {
+  if (d.flags[i] & Flag.SUN) return 99;
+  if (d.logL[i] !== UNKNOWN_I16) return d.logL[i] / 1000;
+  if (d.absMag[i] !== UNKNOWN_I16) return (4.74 - d.absMag[i] / 100) / 2.5;
+  return -3;
+}
+
+/**
+ * The completeness cut (log10 of L / ly² as seen from the camera): every node in the visible
+ * sphere whose children are not all drawn holds only the stars of its cube down to its faintest
+ * one (`minImp`); a star fainter than that, seen from the camera, may be missing there. The
+ * largest such limit over those nodes is the apparent brightness down to which the whole view is
+ * complete: drawing only the stars above it gives the same density everywhere (else the cubes of
+ * nodes refined further than their neighbours stand out). NO_CUT when the view is complete.
+ * `nearest`: distance from the camera to the nearest point of the visible sphere.
+ */
+export function completenessCut(
+  nodes: { node: OctreeNode; minImp: number }[], drawn: (path: string) => boolean, inSphere: (n: OctreeNode) => boolean, cam: Vector3, nearest: number,
+): number {
+  let cut = NO_CUT;
+  for (const { node, minImp } of nodes) {
+    if (!inSphere(node)) continue;
+    const open = node.sub !== null && node.childMask !== 0 && node.children.length === 0
+      ? true
+      : node.children.some((c) => inSphere(c) && !drawn(c.path));
+    if (!open) continue;
+    const d = Math.max(node.box.distanceToPoint(cam), nearest, 1e-12);
+    cut = Math.max(cut, minImp - 2 * Math.log10(d));
+  }
+  return cut;
+}
+
 export function createStarMaterial(): ShaderMaterial {
   return new ShaderMaterial({
+    defines: { IMP_SOFT: IMP_SOFT.toFixed(3) },
     vertexShader,
     fragmentShader,
     uniforms: {
@@ -170,10 +220,12 @@ export function createStarMaterial(): ShaderMaterial {
       uMinPx: { value: 2.5 },
       uMaxPx: { value: 72 },
       uMinAlpha: { value: 0.45 },
+      uCrowd: { value: 1 },
       uBrightness: { value: 1 },
       uPixelRatio: { value: 1 },
       uMarks: { value: 0 },
       uDt: { value: 0 },
+      uImpCut: { value: NO_CUT },
     },
     transparent: true,
     depthWrite: false,
@@ -370,6 +422,10 @@ export interface RenderedNode {
   marks: Uint8Array;
   /** 1: drawn grey and small for lack of a value. */
   missing: Uint8Array;
+  /** Importance of each star (see importanceOf). */
+  imp: Float32Array;
+  /** The faintest importance in the node: its cube is complete down to it. */
+  minImp: number;
 }
 
 /** Owns one THREE.Points per loaded octree node and keeps their style attributes up to date. */
@@ -415,6 +471,13 @@ export class Starfield {
     const vel = new BufferAttribute(data.vel ?? new Float32Array(3 * data.count), 3);
     vel.onUpload(releaseArray);
     geometry.setAttribute('aVel', vel);
+    const imp = new Float32Array(data.count);
+    let minImp = Infinity;
+    for (let i = 0; i < data.count; i++) {
+      imp[i] = importanceOf(data, i);
+      if (imp[i] < minImp) minImp = imp[i];
+    }
+    geometry.setAttribute('aImp', new BufferAttribute(imp, 1));
     geometry.boundingSphere = new Sphere(node.worldCenter.clone().sub(origin), node.radius);
     const points = new Points(geometry, this.material);
     points.position.copy(origin);
@@ -429,7 +492,7 @@ export class Starfield {
       this.material.uniformsNeedUpdate = true;
     };
     this.group.add(points);
-    const r: RenderedNode = { node, data, points, origin, colors, sizes, marks, missing };
+    const r: RenderedNode = { node, data, points, origin, colors, sizes, marks, missing, imp, minImp };
     this.rendered.set(node.path, r);
     return r;
   }

@@ -44,7 +44,7 @@ import { ROUTE_STORAGE_KEY, RoutePlanner, parseStoredRoute, type RouteEnd, type 
 import { JumpLines } from './render/links';
 import { DropLines, Marker, PolarGrid } from './render/overlays';
 import { RouteLine, fitDistance, routeBounds } from './render/route';
-import { Starfield, apparentMag, computeStyle, spritePx, starLogL, type RenderedNode } from './render/starfield';
+import { IMP_SOFT, NO_CUT, Starfield, apparentMag, completenessCut, computeStyle, spritePx, starLogL, type RenderedNode } from './render/starfield';
 import {
   SIZE_LUMINOSITY,
   SIZE_UNIFORM,
@@ -89,6 +89,7 @@ import { CLOCK_MAX_JD, CLOCK_MIN_JD, PlanetTimeControl, formatClockDate, yearOfJ
 import { ProbeCard } from './ui/probe-card';
 import { ProbeLayer } from './render/probes';
 import { depthOfClipW, scaleClipSpace } from './render/clip';
+import { StarBuffer, crowdFactor, halfFloatSupported, minStarAlpha } from './render/star-buffer';
 import { MAX_DISCS, MAX_STAR_RADIUS_LY, StarDiscLayer, starRadiusLy, type StarDisc } from './render/star-discs';
 import { loadProbes, probePosition, type ProbeCatalogue } from './data/probes';
 import { SearchBox, SearchIndex, hitOf, type SearchHit, type SearchTuple } from './ui/search';
@@ -196,6 +197,8 @@ export class App {
   private readonly camera: PerspectiveCamera;
   private readonly nav: Navigation;
   private readonly starfield: Starfield;
+  /** The stars' light in a half-float buffer, composited with a soft shoulder (null: drawn directly). */
+  private readonly starBuffer: StarBuffer | null;
   private readonly grid = new PolarGrid();
   private readonly dropLines = new DropLines();
   private readonly selMarker = new Marker(0xffc861, 30);
@@ -213,6 +216,10 @@ export class App {
    * drawn, the jump network is neither drawn nor computed (docs/ROUTES.md).
    */
   private routeOnly = false;
+  /** The completeness cut of the frame (see updateImpCut). */
+  private impCut = NO_CUT;
+  /** Star nodes drawn this frame (none at galaxy scales: the star buffer is skipped). */
+  private starNodesDrawn = 0;
   /** The route end a double tap chooses: the other one than the route was begun with (null: the missing one). */
   private routeTapEnd: 'from' | 'to' | null = null;
   /** The jump network needs to be recomputed. */
@@ -343,6 +350,7 @@ export class App {
       () => this.stylePlan,
     );
 
+    this.starBuffer = halfFloatSupported(this.renderer) ? new StarBuffer(this.starfield.group) : null;
     this.scene.add(
       this.galaxyLayer.milkyWay,
       this.galaxyLayer.group,
@@ -353,7 +361,7 @@ export class App {
       this.dropLines.lines,
       this.jumpLines.group,
       this.routeLine.group,
-      this.starfield.group,
+      this.starBuffer ? this.starBuffer.quad : this.starfield.group,
       this.selMarker.points,
     );
 
@@ -983,6 +991,8 @@ export class App {
     if (data.vel && Number.isFinite(this.motionDt)) moveTo(data, this.motionDt);
     const r = this.starfield.add(node, data);
     r.points.visible = this.selectedPaths.has(node.path);
+    // its faintest star is known now: the selection's order of refinement may change
+    if (r.points.visible && node.childMask !== 0) this.lodDirty = true;
     this.candidatesDirty = true;
     if (r.points.visible) this.jumpDirty = true;
     if (node.path === 'r') {
@@ -1039,7 +1049,11 @@ export class App {
       ? { nodes: [] as OctreeNode[], wide: false }
       : selectWithMargin(
           this.octree,
-          { cameraPos: this.camera.position, target: this.nav.target, radius: s.radius + drift, budget: viewBudget, pixelsPerUnitAtUnitDistance: pxPerUnit },
+          {
+            cameraPos: this.camera.position, target: this.nav.target, radius: s.radius + drift, budget: viewBudget, pixelsPerUnitAtUnitDistance: pxPerUnit,
+            // refined in the order of the completeness cut (render/starfield completenessCut)
+            minImpOf: (n) => this.starfield.get(n.path)?.minImp,
+          },
           margin,
         );
     const before = this.selectedPaths;
@@ -1551,6 +1565,29 @@ export class App {
     this.findAnchor(s, dt);
   }
 
+  /** Whether star i lies (mostly) below the completeness cut, seen from the camera at (-ex, -ey, -ez). */
+  private belowCut(rn: RenderedNode, i: number, ex: number, ey: number, ez: number, cut: number): boolean {
+    const d2 = ex * ex + ey * ey + ez * ez;
+    return rn.imp[i] - Math.log10(Math.max(d2, 1e-24)) < cut - IMP_SOFT / 2;
+  }
+
+  /**
+   * Per frame: the completeness cut (see completenessCut) for the shader and the CPU side (labels,
+   * picking, the count of stars in view).
+   */
+  private updateImpCut(s: Settings): void {
+    const target = this.nav.target;
+    const cam = this.camera.position;
+    const r = s.radius;
+    const drawn = new Set<string>();
+    const nodes = this.starfield.visibleNodes();
+    this.starNodesDrawn = nodes.length;
+    for (const rn of nodes) drawn.add(rn.node.path);
+    const cut = completenessCut(nodes, (p) => drawn.has(p), (n) => n.box.distanceToPoint(target) <= r, cam, cam.distanceTo(target) - r);
+    this.impCut = cut;
+    this.starfield.material.uniforms.uImpCut.value = cut;
+  }
+
   /** Years since the epoch of the date drawn (as the shader has it). */
   private get drawDt(): number {
     return Number.isFinite(this.motionDt) ? this.motionDt : 0;
@@ -1789,6 +1826,7 @@ export class App {
     // close up, a star drawn at its true size keeps its label while any of it is in the sphere
     const closeUp = s.radius < DISC_RADIUS;
     const reach = closeUp ? MAX_STAR_RADIUS_LY : 0;
+    const cut = this.impCut;
     for (const rn of starsHidden(s.radius) ? [] : this.starfield.visibleNodes()) {
       const d = rn.data;
       // quick reject: node entirely outside the sphere
@@ -1803,6 +1841,7 @@ export class App {
         const dd = dx * dx + dy * dy + dz * dz;
         if (dd > r2 && !(closeUp && Math.sqrt(dd) - starRadiusLy(d, i) <= s.radius)) continue;
         if (rn.sizes[i] <= 0) continue;
+        if (cut > NO_CUT && this.belowCut(rn, i, x - cx, y - cy, z - cz, cut)) continue;
         inView++;
         if (labelMode === 'none') continue;
         const sun = (d.flags[i] & Flag.SUN) !== 0;
@@ -2080,6 +2119,7 @@ export class App {
     const m = vp.elements;
     const s = this.store.get();
     const target = this.nav.target;
+    const cam = this.camera.position;
     const r2 = s.radius * s.radius;
     // sprite sizes as the shader draws them (large star sizes make discs much wider than the pick radius)
     const u = this.starfield.material.uniforms;
@@ -2106,6 +2146,8 @@ export class App {
         const ddy = y - target.y;
         const ddz = z - target.z;
         if (ddx * ddx + ddy * ddy + ddz * ddz > r2) continue;
+        // (a star left out by the completeness cut is not drawn: not picked either)
+        if (this.impCut > NO_CUT && this.belowCut(rn, i, x - cam.x, y - cam.y, z - cam.z, this.impCut)) continue;
         const cw = m[3] * x + m[7] * y + m[11] * z + m[15];
         if (cw <= 0) continue;
         const sx = ((m[0] * x + m[4] * y + m[8] * z + m[12]) / cw + 1) * 0.5 * w;
@@ -2981,14 +3023,18 @@ export class App {
     scaleClipSpace(this.camera, dist);
     // labels and picking need this frame's camera matrix
     this.camera.updateMatrixWorld();
+    this.updateImpCut(s);
 
     const u = this.starfield.material.uniforms;
     this.starfield.setTarget(this.nav.target);
     const h = this.renderer.domElement.clientHeight || window.innerHeight;
     u.uScale.value = (h * this.renderer.getPixelRatio()) / (2 * Math.tan(MathUtils.degToRad(this.camera.fov) / 2));
     u.uPixelRatio.value = this.renderer.getPixelRatio();
-    // the more stars are in view, the fainter the faintest ones, so dense regions do not saturate
-    u.uMinAlpha.value = MathUtils.clamp(0.55 * Math.sqrt(2500 / Math.max(this.inView, 1)), 0.035, 0.55);
+    // the more stars are in view, the fainter the faintest ones, so dense regions do not saturate;
+    // in the half-float buffer even tiny shares add up: beyond 100,000 stars the floor falls with
+    // the count (their light together about constant)
+    u.uMinAlpha.value = minStarAlpha(this.inView, !!this.starBuffer);
+    u.uCrowd.value = crowdFactor(this.inView, !!this.starBuffer);
     u.uMinPx.value = 2.6 * this.renderer.getPixelRatio();
     u.uMarks.value = s.planetMarks ? 1 : 0;
     this.updateGalaxies(s, u.uScale.value);
@@ -3059,6 +3105,10 @@ export class App {
     if (s.dropLines && s.labels) this.dropLines.set(this.labels.labelledPositions, this.nav.target);
     this.dropLines.lines.visible = s.dropLines && s.labels && s.grid;
 
+    if (this.starBuffer) {
+      this.starBuffer.quad.visible = this.starNodesDrawn > 0;
+      if (this.starNodesDrawn > 0) this.starBuffer.render(this.renderer, this.camera);
+    }
     this.renderer.render(this.scene, this.camera);
   };
 }
