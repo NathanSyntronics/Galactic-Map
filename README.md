@@ -272,8 +272,8 @@ for the date on the clock: switch the factions on under *Layers → Factions* an
 year per second or faster to watch the **Solar Empire** spread from the Sun from 2027 on. *New
 faction* adds factions with any home star; they grow together, and a system belongs to one of
 them at most. Colonies get a wide rim in the faction's colour, stations a thin one, and the jumps
-are drawn as lines; the legend shows each faction's colour and figures, a star's card its
-faction. See [`docs/FACTIONS.md`](docs/FACTIONS.md).
+are drawn as lines; the legend shows each faction's colour, colonies, stations, income per
+year and pool, a star's card its faction. See [`docs/FACTIONS.md`](docs/FACTIONS.md).
 
 ### Jump network
 

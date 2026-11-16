@@ -2,6 +2,11 @@
 
 Every round of changes that goes live raises the version by 0.01 (README, *Versions*).
 
+## 1.21 (2026-11-16)
+
+* The legend shows each faction's income per year ("+3,591.6 credits a year"), with the credits in
+  the pool after it; colonies and stations on the line above.
+
 ## 1.20 (2026-11-16)
 
 * New factions: *New faction* under Layers → Factions asks for a name and a home star (a named

@@ -69,8 +69,8 @@ The Solar Empire alone in its 150 ly region, with the default parameters:
 Colonies get a wide rim in the faction's colour, stations a thin, fainter one, and the jumps by
 which they were reached are drawn as lines in the same colour (a station's fainter). Like the stars
 the filter finds, the factions' systems are drawn whatever the level of detail. The legend lists
-the factions with their colours and the year's figures (colonies, stations, credits); the panel
-adds the year's income. A star's card shows under *Attributes* the faction it belongs to: colony
+the factions with their colours and the year's figures: colonies and stations, then the year's
+income and the credits in the pool. A star's card shows under *Attributes* the faction it belongs to: colony
 or station, and since when.
 
 ## Implementation

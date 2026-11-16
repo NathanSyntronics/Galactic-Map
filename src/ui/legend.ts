@@ -46,11 +46,11 @@ function jumpLineCss(s: Settings): string {
   return 'linear-gradient(to right, #ffcf9a, #cfdcff)';
 }
 
-/** A faction in the legend: its colour, name and the year's figures. */
+/** A faction in the legend: its colour, name and the year's figures (one line each). */
 export interface LegendFaction {
   name: string;
   color: string;
-  text: string;
+  lines: string[];
 }
 
 /** Legend of the data layers (bottom left), shown while the map is coloured or sized by an attribute. */
@@ -82,21 +82,26 @@ export class Legend {
   private renderFactions(): void {
     const box = this.factionBox;
     const rows = this.factions ?? [];
-    if (box.childElementCount === rows.length && rows.every((r, k) => box.children[k].getAttribute('data-key') === `${r.color}|${r.name}`)) {
+    this.root.classList.toggle('with-factions', rows.length > 0);
+    const key = (r: LegendFaction) => `${r.color}|${r.name}|${r.lines.length}`;
+    if (box.childElementCount === rows.length && rows.every((r, k) => box.children[k].getAttribute('data-key') === key(r))) {
+      // only the figures change (every year while the clock runs)
       rows.forEach((r, k) => {
-        const text = box.children[k].querySelector('.legend-faction-text');
-        if (text && text.textContent !== r.text) text.textContent = r.text;
+        box.children[k].querySelectorAll('.legend-faction-text').forEach((e, j) => {
+          if (e.textContent !== r.lines[j]) e.textContent = r.lines[j];
+        });
       });
       return;
     }
     box.replaceChildren();
     for (const r of rows) {
       const row = el('div', 'legend-faction');
-      row.setAttribute('data-key', `${r.color}|${r.name}`);
+      row.setAttribute('data-key', key(r));
       const sw = el('span', 'swatch ring');
       sw.style.borderColor = r.color;
       const label = el('span', 'legend-faction-label');
-      label.append(el('span', 'legend-faction-name', r.name), el('span', 'legend-faction-text', r.text));
+      label.appendChild(el('span', 'legend-faction-name', r.name));
+      for (const line of r.lines) label.appendChild(el('span', 'legend-faction-text', line));
       row.append(sw, label);
       box.appendChild(row);
     }

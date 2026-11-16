@@ -3227,7 +3227,13 @@ export class App {
       const colonies = run.colonies === 1 ? t('factionColoniesOne') : t('factionColonies', { n: formatNumber(run.colonies) });
       const stations = run.stations === 1 ? t('factionStationsOne') : t('factionStations', { n: formatNumber(run.stations) });
       const credits = run.sim ? formatNumber(run.sim.creditsAt(year), 1) : '0';
-      rows.push({ name: factionName(d), color: d.color, text: run.sim ? t('factionLegendState', { colonies, stations, credits }) : '…' });
+      // the year's income first (how fast it grows), then the pool
+      const income = run.sim ? formatNumber(run.sim.incomeAt(year), 1) : '0';
+      rows.push({
+        name: factionName(d),
+        color: d.color,
+        lines: run.sim ? [t('factionLegendState', { colonies, stations }), t('factionLegendCredits', { income, credits })] : ['…'],
+      });
       if (run.error === 'noHome') {
         say(t('factionNoHome', { home: d.homeName ?? d.home }), true);
       } else if (run.error === 'network') {

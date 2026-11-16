@@ -1780,3 +1780,18 @@ label.check input {
   align-items: center;
   gap: 6px;
 }
+
+/* with factions the legend is a little wider: their figures fit on their lines */
+.legend.with-factions {
+  max-width: min(300px, calc(100vw - 24px));
+}
+
+.legend-faction-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.legend-faction-label {
+  min-width: 0;
+}
