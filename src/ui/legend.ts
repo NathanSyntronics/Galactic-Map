@@ -46,15 +46,60 @@ function jumpLineCss(s: Settings): string {
   return 'linear-gradient(to right, #ffcf9a, #cfdcff)';
 }
 
+/** A faction in the legend: its colour, name and the year's figures. */
+export interface LegendFaction {
+  name: string;
+  color: string;
+  text: string;
+}
+
 /** Legend of the data layers (bottom left), shown while the map is coloured or sized by an attribute. */
 export class Legend {
   readonly root: HTMLElement;
+  /** The factions' rows (updated every year while the clock runs, without the rest of the legend). */
+  private readonly factionBox: HTMLElement;
+  private factions: LegendFaction[] | null = null;
+  /** The legend is switched on (s.legend) and something else is in it. */
+  private wanted = false;
+  private others = false;
   /** The × button: hides the legend (the settings panel shows it again). */
   onClose: () => void = () => {};
 
   constructor(parent: HTMLElement) {
     this.root = el('div', 'legend hidden');
+    this.factionBox = el('div', 'legend-factions');
     parent.appendChild(this.root);
+  }
+
+  /** The factions' rows (null: none shown). */
+  setFactions(rows: LegendFaction[] | null): void {
+    const was = !!this.factions?.length;
+    this.factions = rows;
+    this.renderFactions();
+    if (was !== !!rows?.length) this.root.classList.toggle('hidden', !(this.wanted && (this.others || !!rows?.length)));
+  }
+
+  private renderFactions(): void {
+    const box = this.factionBox;
+    const rows = this.factions ?? [];
+    if (box.childElementCount === rows.length && rows.every((r, k) => box.children[k].getAttribute('data-key') === `${r.color}|${r.name}`)) {
+      rows.forEach((r, k) => {
+        const text = box.children[k].querySelector('.legend-faction-text');
+        if (text && text.textContent !== r.text) text.textContent = r.text;
+      });
+      return;
+    }
+    box.replaceChildren();
+    for (const r of rows) {
+      const row = el('div', 'legend-faction');
+      row.setAttribute('data-key', `${r.color}|${r.name}`);
+      const sw = el('span', 'swatch ring');
+      sw.style.borderColor = r.color;
+      const label = el('span', 'legend-faction-label');
+      label.append(el('span', 'legend-faction-name', r.name), el('span', 'legend-faction-text', r.text));
+      row.append(sw, label);
+      box.appendChild(row);
+    }
   }
 
   /**
@@ -66,7 +111,9 @@ export class Legend {
     const color = s.colorBy ? attributeInfo(s.colorBy, store) : null;
     const size = s.sizeBy !== SIZE_LUMINOSITY && s.sizeBy !== SIZE_UNIFORM ? attributeInfo(s.sizeBy, store) : null;
     const layers = !!color || size?.type === 'number';
-    const show = s.legend && (layers || s.jumps || route.shown);
+    this.wanted = s.legend;
+    this.others = layers || s.jumps || route.shown;
+    const show = s.legend && (this.others || !!this.factions?.length);
     this.root.classList.toggle('hidden', !show);
     if (!show) return;
     const close = el('button', 'icon-btn small legend-close', '×');
@@ -151,6 +198,8 @@ export class Legend {
       }
       this.root.appendChild(row);
     }
+    this.renderFactions();
+    this.root.appendChild(this.factionBox);
   }
 
   private swatch(css: string, label: string): HTMLElement {

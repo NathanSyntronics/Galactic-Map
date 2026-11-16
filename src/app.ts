@@ -42,6 +42,7 @@ import {
 } from './network/places';
 import { boxIntersectsCapsule, segmentDistance } from './network/capsule';
 import type { PlaceLink } from './network/jumps';
+import type { JumpCost } from './network/route';
 import { ROUTE_STORAGE_KEY, RoutePlanner, parseStoredRoute, type RouteEnd, type RouteResult, type StoredRoute, type Waypoint } from './network/planner';
 import { JumpLines } from './render/links';
 import { DropLines, Marker, PolarGrid } from './render/overlays';
@@ -93,19 +94,19 @@ import {
   starCloseScale,
 } from './settings';
 import { AttributesDialog } from './ui/attributes-dialog';
-import { InfoPanel, displayName, type JumpGap, type JumpListing, type StarInfo } from './ui/info';
+import { InfoPanel, displayName, type FactionMembership, type JumpGap, type JumpListing, type StarInfo } from './ui/info';
 import { GalaxyCard } from './ui/galaxy-card';
 import { PlanetCard } from './ui/planet-card';
 import { PlanetLayer } from './render/planets';
 import { AU_PER_LY, julianDate, loadPlanets, moveHosts, planetName, type PlanetCatalogue, type PlanetHost } from './data/planets';
 import { GalaxyFlag, galaxyDesignation, galaxyName, galaxyRank, loadGalaxies, type GalaxyCatalogue } from './data/galaxies';
 import { GalaxyLayer, milkyWayOpacity } from './render/galaxies';
-import { Legend, formatValue } from './ui/legend';
+import { Legend, formatValue, type LegendFaction } from './ui/legend';
 import { LabelLayer, TopK, labelUnder, labelledStarNear, milkyWayLabelPos, namedCandidateLimit, onScreen, starPriority, type LabelCandidate } from './ui/labels';
 import { SettingsPanel } from './ui/panel';
 import { FilterBox, type FilterAttribute, type FilterRow } from './ui/filter-box';
-import { FactionBox, type FactionChange } from './ui/faction-box';
-import { COLONY, FactionSim, type FactionDef } from './factions/sim';
+import { FactionBox, factionName, type FactionChange, type HomeStar } from './ui/faction-box';
+import { COLONY, FactionSim, FactionsSim, type FactionDef } from './factions/sim';
 import { factionWorld, readDefs, saveDefs, targetsOf, type FactionWorld } from './factions/world';
 import { FactionLines, type FactionJump } from './render/faction-lines';
 import { RouteBox, type RouteNames } from './ui/route-box';
@@ -301,8 +302,12 @@ export class App {
   private readonly factionLines = new FactionLines();
   private factionRuns: FactionRun[] = [];
   private factionToken = 0;
+  /** The factions' simulations, run together (null until every network is there). */
+  private factionSims: FactionsSim | null = null;
   /** Rim code per star of the factions' systems drawn (see MARK_FACTION). */
   private factionMarks = new Map<string, Uint8Array>();
+  /** The faction of each star drawn ("path:index"): which, colony or station, since when. */
+  private factionStars = new Map<string, { faction: number; kind: number; year: number }>();
   /** Nodes drawn (also) for the factions' systems. */
   private factionPaths = new Set<string>();
   private factionTimer = 0;
@@ -512,7 +517,10 @@ export class App {
     this.filterBox.onCsv = (rows, attrName) => void this.exportFilter(rows, attrName);
     this.factionBox = new FactionBox(this.factionDefs, this.store.get().factions);
     this.panel.setFactionContent(this.factionBox.root);
-    this.factionBox.onShown = (v) => this.store.set({ factions: v });
+    // (the legend shows the factions' figures: switched on with them)
+    this.factionBox.onShown = (v) => this.store.set(v ? { factions: true, legend: true } : { factions: false });
+    this.factionBox.selectedStar = () => this.selectedHome();
+    this.factionBox.resolveStar = (text) => this.resolveHome(text);
     this.factionBox.onChange = (defs, change) => this.factionsChanged(defs, change);
     this.filterBox.onDim = () => {
       this.stylePlan = this.planOf(this.store.get());
@@ -540,6 +548,7 @@ export class App {
       void this.ensurePlanets().then(() => this.flyToSystem(info.key));
     };
     this.info.jumpsOf = (info) => this.jumpListing(info);
+    this.info.factionOf = (info) => this.factionOfStar(info);
     this.info.onJumpGap = (info, gap) => this.jumpGap(info, gap);
     this.info.onRoute = (info, end) => {
       // a route begun with this end: double taps choose the other one (see doubleTapStar)
@@ -1079,6 +1088,8 @@ export class App {
     if (has('factions')) {
       this.factionBox.setShown(s.factions);
       this.rebuildFactions();
+    } else if (s.factions && has('jumpCostExp', 'jumpCostK')) {
+      this.resimulateFactions();
     } else if (s.factions && has('jumpRange', 'jumpFaint', 'jumpSun', 'jumpBright', 'jumpBy', 'jumpHub', 'jumpConnect', ...VISIBILITY_KEYS)) {
       window.clearTimeout(this.factionTimer);
       this.factionTimer = window.setTimeout(() => this.rebuildFactions(), FACTION_DELAY_MS);
@@ -2894,28 +2905,49 @@ export class App {
     else this.resimulateFactions();
   }
 
-  /** New simulations on the same networks (income, costs, targets, colours). */
+  /** The jump costs set for the jump network (the factions use them too). */
+  private routeCost(s: Settings): JumpCost {
+    return { exp: s.jumpCostExp, k: s.jumpCostK };
+  }
+
+  /** New simulations on the same networks (income, costs, targets, names, colours). */
   private resimulateFactions(): void {
+    // (a deleted or added faction changes the runs: new networks)
+    if (this.factionRuns.length !== Math.min(this.factionDefs.length, MAX_FACTION_COLOURS)) {
+      this.rebuildFactions();
+      return;
+    }
     this.factionRuns.forEach((run, k) => {
-      run.def = this.factionDefs[k] ?? run.def;
-      if (run.world) {
-        run.world.graph.target = targetsOf(run.world.net, run.world.members, run.def);
-        run.sim = this.newFactionSim(run);
-      }
+      run.def = this.factionDefs[k];
+      if (run.world) run.world.graph.target = targetsOf(run.world.net, run.world.members, run.def);
     });
+    this.startFactionSims();
+  }
+
+  /**
+   * Once every faction's network is there (or failed): their simulations, run together (a system
+   * belongs to one faction at most).
+   */
+  private startFactionSims(): void {
+    this.factionSims = null;
+    for (const run of this.factionRuns) run.sim = null;
+    if (this.factionRuns.some((r) => !r.world && !r.error)) return;
+    const cost = this.routeCost(this.store.get());
+    const sims: FactionSim[] = [];
+    for (const run of this.factionRuns) {
+      if (!run.world || !run.home) continue;
+      const place = placeOfStar(run.world.net.places, run.home.path, run.home.index);
+      if (place < 0) {
+        run.error = 'noHome';
+        continue;
+      }
+      run.sim = new FactionSim(run.world.graph, place, run.def, cost);
+      sims.push(run.sim);
+    }
+    this.factionSims = sims.length ? new FactionsSim(sims) : null;
     this.applyFactionColours();
     this.showFactions(true);
     this.factionStatusYear = NaN;
-  }
-
-  private newFactionSim(run: FactionRun): FactionSim | null {
-    if (!run.world || !run.home) return null;
-    const place = placeOfStar(run.world.net.places, run.home.path, run.home.index);
-    if (place < 0) {
-      run.error = 'noHome';
-      return null;
-    }
-    return new FactionSim(run.world.graph, place, run.def);
   }
 
   private applyFactionColours(): void {
@@ -2925,28 +2957,40 @@ export class App {
 
   /**
    * The factions' regions loaded again and their networks computed: at the start, and after a
-   * change of a region, of the jump network's settings or of the stars shown.
+   * change of a region, of the factions, of the jump network's settings or of the stars shown.
    */
   private rebuildFactions(): void {
     window.clearTimeout(this.factionTimer);
     const token = ++this.factionToken;
     this.factionRuns = [];
+    this.factionSims = null;
     this.clearFactionState();
     this.factionStatusYear = NaN;
+    this.updateLegend();
     if (!this.store.get().factions || !this.octree) {
       this.lodDirty = true;
       return;
     }
     this.applyFactionColours();
-    for (const def of this.factionDefs.slice(0, MAX_FACTION_COLOURS)) void this.prepareFaction(def, token);
+    for (const def of this.factionDefs.slice(0, MAX_FACTION_COLOURS)) {
+      const run: FactionRun = { def, centre: new Vector3(), home: null, nodes: [], world: null, sim: null, shown: 0, error: null, loaded: 0, colonies: 0, stations: 0 };
+      this.factionRuns.push(run);
+      void this.prepareFaction(run, token);
+    }
   }
 
-  /** A star by its designation: the Sun in the root node, any other through the search index. */
-  private async locateStar(designation: string): Promise<{ path: string; index: number; pos: Vector3 } | null> {
+  /** A star by its designation: the Sun in the root node, a named star by the search index, any other where it was. */
+  private async locateStar(designation: string, hint?: FactionDef['homeHint']): Promise<{ path: string; index: number; pos: Vector3 } | null> {
     if (designation === 'Sun' && this.octree) {
       const root = this.loader?.get(this.octree.root.path) ?? (await this.waitForNode(this.octree.root.path));
       const i = root ? sunIndex(root) : -1;
       if (root && i >= 0) return { path: root.path, index: i, pos: new Vector3() };
+    }
+    // where it was when the faction was made (the node of an unnamed star)
+    if (hint) {
+      const node = await this.reachNode(hint.path);
+      const d = node ? (this.loader?.get(node.path) ?? (await this.waitForNode(node.path))) : null;
+      if (d) for (let i = 0; i < d.count; i++) if (designationOf(d, i) === designation) return { path: d.path, index: i, pos: this.starAt(d, i) };
     }
     if (!(await this.loadSearch())) return null;
     const tuple = this.searchIndex.find(designation);
@@ -2966,16 +3010,33 @@ export class App {
     return null;
   }
 
-  private async prepareFaction(def: FactionDef, token: number): Promise<void> {
+  /** The star selected on the map as a faction's home. */
+  private selectedHome(): HomeStar | null {
+    const info = this.selected;
+    if (!info) return null;
+    const [path] = info.key.split(':');
+    return { designation: info.designation, name: displayName(info), path, x: info.pos.x, y: info.pos.y, z: info.pos.z };
+  }
+
+  /** A star by name or designation as a faction's home (named stars). */
+  private async resolveHome(text: string): Promise<HomeStar | null> {
+    if (!(await this.loadSearch())) return null;
+    const tuple = this.searchIndex.find(text);
+    if (!tuple) return null;
+    const hit = hitOf(tuple);
+    return { designation: hit.designation ?? text, name: localName(hit.nameEn, hit.nameDe), path: hit.path, x: hit.pos.x, y: hit.pos.y, z: hit.pos.z };
+  }
+
+  private async prepareFaction(run: FactionRun, token: number): Promise<void> {
     const oct = this.octree;
     if (!oct) return;
-    const run: FactionRun = { def, centre: new Vector3(), home: null, nodes: [], world: null, sim: null, shown: 0, error: null, loaded: 0, colonies: 0, stations: 0 };
-    this.factionRuns.push(run);
-    const home = await this.locateStar(def.home);
+    const def = run.def;
+    const home = await this.locateStar(def.home, def.homeHint);
     if (token !== this.factionToken) return;
     if (!home) {
       run.error = 'noHome';
       this.factionStatusYear = NaN;
+      this.startFactionSims();
       return;
     }
     run.home = { path: home.path, index: home.index };
@@ -3001,10 +3062,11 @@ export class App {
     this.factionProgress();
   }
 
-  /** Once a faction's region is loaded: its network, world and simulation. */
+  /** Once a faction's region is loaded: its network and world; once all are there: the simulations. */
   private factionProgress(): void {
     const loader = this.loader;
     if (!loader) return;
+    let built = false;
     for (const run of this.factionRuns) {
       if (run.world || run.error || !run.nodes.length) continue;
       let loaded = 0;
@@ -3019,7 +3081,9 @@ export class App {
       }
       if (loaded + failed < run.nodes.length) continue;
       this.buildFactionWorld(run);
+      built = true;
     }
+    if (built) this.startFactionSims();
   }
 
   private buildFactionWorld(run: FactionRun): void {
@@ -3052,9 +3116,6 @@ export class App {
       return;
     }
     run.world = factionWorld(net, run.def);
-    run.sim = this.newFactionSim(run);
-    this.showFactions(true);
-    this.factionStatusYear = NaN;
   }
 
   /** Per frame: the factions simulated up to the year on the clock, drawn when their systems change. */
@@ -3062,13 +3123,10 @@ export class App {
     this.factionLines.visible = s.factions;
     if (!s.factions || !this.factionRuns.length) return;
     const year = yearOfJd(this.planetJd());
+    const all = this.factionSims;
+    if (all && year > all.year) all.advanceTo(year);
     let changed = false;
-    for (const run of this.factionRuns) {
-      const sim = run.sim;
-      if (!sim) continue;
-      if (year > sim.year) sim.advanceTo(year);
-      if (sim.countAt(year) !== run.shown) changed = true;
-    }
+    for (const run of this.factionRuns) if (run.sim && run.sim.countAt(year) !== run.shown) changed = true;
     const now = performance.now();
     if (changed && now - this.lastFactionDraw >= FACTION_DRAW_MS) {
       this.lastFactionDraw = now;
@@ -3084,17 +3142,20 @@ export class App {
   /** The rims and links of the factions' systems up to the year on the clock. */
   private showFactions(force: boolean): void {
     const year = yearOfJd(this.planetJd());
+    const all = this.factionSims;
+    if (all && year > all.year) all.advanceTo(year);
     const marks = new Map<string, Uint8Array>();
+    const stars = new Map<string, { faction: number; kind: number; year: number }>();
     const jumps: FactionJump[] = [];
     let origin: Vector3 | null = null;
     this.factionRuns.forEach((run, f) => {
       const { sim, world } = run;
-      if (!sim || !world) return;
-      if (year > sim.year) sim.advanceTo(year);
-      const count = sim.countAt(year);
-      run.shown = count;
+      run.shown = 0;
       run.colonies = 0;
       run.stations = 0;
+      if (!sim || !world) return;
+      const count = sim.countAt(year);
+      run.shown = count;
       const pos = world.net.places.positions;
       const at = (p: number) => ({ x: pos[3 * p], y: pos[3 * p + 1], z: pos[3 * p + 2] });
       for (let e = 0; e < count; e++) {
@@ -3110,13 +3171,16 @@ export class App {
             marks.set(m.path, a);
           }
           a[m.index] = code;
+          stars.set(`${m.path}:${m.index}`, { faction: f, kind: ev.kind, year: ev.year });
         }
         if (ev.from >= 0) jumps.push({ a: at(ev.from), b: at(ev.place), color: run.def.color, faint: !colony });
       }
       origin ??= run.centre;
     });
     const before = this.factionMarks;
+    const selectedBefore = this.selected ? this.factionStars.get(this.selected.key) : undefined;
     this.factionMarks = marks;
+    this.factionStars = stars;
     this.factionPaths = new Set(marks.keys());
     if (before.size === 0 || marks.size === 0) this.stylePlan = this.planOf(this.store.get());
     // only the nodes whose rims change
@@ -3127,46 +3191,61 @@ export class App {
     this.factionLines.set(jumps, origin ?? { x: 0, y: 0, z: 0 });
     this.lodDirty = true;
     this.candidatesDirty = true;
+    // the selected star's card, when its faction changed
+    const selectedNow = this.selected ? this.factionStars.get(this.selected.key) : undefined;
+    if (this.selected && (selectedBefore?.faction !== selectedNow?.faction || selectedBefore?.kind !== selectedNow?.kind) && !this.info.editing) {
+      this.info.rerender(this.nav.target);
+    }
   }
 
   /** No faction drawn (switched off, or before new networks). */
   private clearFactionState(): void {
     const before = this.factionMarks;
     this.factionMarks = new Map();
+    this.factionStars = new Map();
     this.factionPaths = new Set();
     this.stylePlan = this.planOf(this.store.get());
     for (const path of before.keys()) this.starfield.restyleNode(path);
     this.factionLines.set([], { x: 0, y: 0, z: 0 });
+    this.legend.setFactions(null);
   }
 
-  /** Each faction's state line in the panel. */
+  /** The faction of a star (for its card): its name and colour, colony or station, since when. */
+  private factionOfStar(info: StarInfo): FactionMembership | null {
+    const m = this.factionStars.get(info.key);
+    const run = m ? this.factionRuns[m.faction] : undefined;
+    if (!m || !run) return null;
+    return { name: factionName(run.def), color: run.def.color, colony: m.kind === COLONY, since: m.year };
+  }
+
+  /** Each faction's state line in the panel, and the legend's rows. */
   private factionStatus(year: number): void {
+    const rows: LegendFaction[] = [];
     for (const run of this.factionRuns) {
       const d = run.def;
       const say = (text: string, warn = false) => this.factionBox.setStatus(d.id, text, warn);
+      const colonies = run.colonies === 1 ? t('factionColoniesOne') : t('factionColonies', { n: formatNumber(run.colonies) });
+      const stations = run.stations === 1 ? t('factionStationsOne') : t('factionStations', { n: formatNumber(run.stations) });
+      const credits = run.sim ? formatNumber(run.sim.creditsAt(year), 1) : '0';
+      rows.push({ name: factionName(d), color: d.color, text: run.sim ? t('factionLegendState', { colonies, stations, credits }) : '…' });
       if (run.error === 'noHome') {
-        say(t('factionNoHome', { home: d.home }), true);
+        say(t('factionNoHome', { home: d.homeName ?? d.home }), true);
       } else if (run.error === 'network') {
         say(t('factionTooLarge'), true);
+      } else if (run.sim?.homeTaken) {
+        say(t('factionHomeTaken'), true);
       } else if (!run.sim) {
         say(t('factionComputing', { loaded: run.loaded, total: run.nodes.length || '…' }));
       } else if (year < d.startYear) {
         say(t('factionBefore', { year: d.startYear }));
       } else {
         const sim = run.sim;
-        const colonies = run.colonies === 1 ? t('factionColoniesOne') : t('factionColonies', { n: formatNumber(run.colonies) });
-        const stations = run.stations === 1 ? t('factionStationsOne') : t('factionStations', { n: formatNumber(run.stations) });
-        let text = t('factionState', {
-          year,
-          colonies,
-          stations,
-          credits: formatNumber(sim.creditsAt(year), 1),
-          income: formatNumber(sim.incomeAt(year), 1),
-        });
+        let text = t('factionState', { year, colonies, stations, credits, income: formatNumber(sim.incomeAt(year), 1) });
         if (sim.exhausted && run.shown === sim.events.length) text += ` · ${t('factionExhausted')}`;
         say(text);
       }
     }
+    this.legend.setFactions(this.store.get().factions && rows.length ? rows : null);
   }
 
   // ------------------------------------------------------------------ route

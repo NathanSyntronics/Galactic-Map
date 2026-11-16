@@ -118,7 +118,7 @@ export const DEFAULT_SETTINGS: Settings = {
   jumpCostExp: false,
   jumpCostK: 1,
   flybyStep: 2.5,
-  factions: true,
+  factions: false,
 };
 
 /**

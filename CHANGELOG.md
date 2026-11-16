@@ -2,6 +2,20 @@
 
 Every round of changes that goes live raises the version by 0.01 (README, *Versions*).
 
+## 1.20 (2026-11-16)
+
+* New factions: *New faction* under Layers → Factions asks for a name and a home star (a named
+  star, or the star selected on the map) and gives the Solar Empire's parameters and the next free
+  colour; factions can be renamed and deleted. Several factions grow together, buying their jumps in
+  turn, and a system one of them holds is closed to the others.
+* The legend lists the factions with their colours and the year's colonies, stations and credits;
+  a star's card shows under Attributes its faction, colony or station, and since when.
+* Simpler parameters: a colony earns the income step in its first year and as much more each year
+  (0.1 by default, at most 10 a year); the jump costs are those of the jump network for every
+  faction (linear by default: exponential with k = 2 as before is set there).
+* The Solar Empire is turquoise, and the factions are off until switched on (which shows the
+  legend). Parameters stored by 1.19 are not read again.
+
 ## 1.19 (2026-11-16)
 
 * Factions: the Solar Empire grows from the Sun along the jump network, for the date on the clock.

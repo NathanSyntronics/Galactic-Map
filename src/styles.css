@@ -1729,3 +1729,54 @@ label.check input {
   border-radius: 6px;
   background: none;
 }
+
+.faction-home {
+  color: var(--text-dim);
+  font-size: 12px;
+  margin-left: auto;
+}
+
+.faction-new .row.select input {
+  width: 11em;
+}
+
+/* the factions in the legend: a rim in their colour, name and the year's figures */
+.legend-factions {
+  margin-top: 6px;
+}
+
+.legend-faction {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 4px 0;
+}
+
+.legend-faction-label {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+
+.legend-faction-text {
+  color: var(--text-dim);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.swatch.ring {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid;
+  background: transparent !important;
+  flex: none;
+  margin-top: 2px;
+}
+
+.faction-of {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}

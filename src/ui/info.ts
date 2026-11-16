@@ -103,6 +103,14 @@ function sunDistanceText(d: number): string {
   return `${formatLy(d)} (${formatNumber(d / LY_PER_PC, d < 33 ? 2 : 1)} ${t('pc')})`;
 }
 
+/** A star's faction (docs/FACTIONS.md): which, a colony or a station, since when. */
+export interface FactionMembership {
+  name: string;
+  color: string;
+  colony: boolean;
+  since: number;
+}
+
 export class InfoPanel {
   readonly root: HTMLElement;
   private info: StarInfo | null = null;
@@ -126,6 +134,8 @@ export class InfoPanel {
   jumpsOf: (info: StarInfo) => JumpListing | JumpGap | null = () => null;
   /** The button under a gap: switch the network on, or zoom in to the star. */
   onJumpGap: (info: StarInfo, gap: JumpGap['gap']) => void = () => {};
+  /** The faction the star belongs to in the year on the clock (null: none, or factions off). */
+  factionOf: (info: StarInfo) => FactionMembership | null = () => null;
   /** True while the attribute form is open (the card is then not rebuilt by data changes). */
   editing = false;
   private jumpBox: HTMLElement | null = null;
@@ -431,6 +441,17 @@ export class InfoPanel {
     });
     head.appendChild(btn);
     box.appendChild(head);
+    // the faction it belongs to (computed, not an attribute of the user's)
+    const faction = this.factionOf(info);
+    if (faction) {
+      const fl = el('dl', 'attr-list');
+      const dd = el('dd', 'faction-of');
+      const sw = el('span', 'swatch ring');
+      sw.style.borderColor = faction.color;
+      dd.append(sw, el('span', '', `${faction.name} · ${t(faction.colony ? 'factionColony' : 'factionStation', { year: faction.since })}`));
+      fl.append(el('dt', '', t('factionOfStar')), dd);
+      box.appendChild(fl);
+    }
     if (!defs.length) {
       box.appendChild(el('p', 'hint', t('noAttributes')));
       return box;

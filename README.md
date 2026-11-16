@@ -265,14 +265,15 @@ were removed in 1.18).
 ### Factions
 
 A faction grows from its home star along the jump network, year by year: every colony earns
-credits (1 in its first year, 0.2 more each year, at most 100), and the faction's pool pays for the
-jumps of the cheapest route to the next F, G or K single star (a jump of d light years costs
-2^(d − 1) credits), with a station on every system on the way and a colony at the end. The map
-shows it for the date on the clock: set the clock to a year per second or faster to watch the
-**Solar Empire** spread from the Sun from 2027 on. Colonies get a wide rim in the faction's colour,
-stations a thin one, and the jumps are drawn as lines. Everything is set under *Layers →
-Factions* (first year, income, jump cost, classes, single stars only, region, colour); see
-[`docs/FACTIONS.md`](docs/FACTIONS.md).
+credits (0.1 in its first year and as much more each year, at most 10), and the faction's pool
+pays for the jumps of the cheapest route to the next F, G or K single star (the jump network's
+route costs), with a station on every system on the way and a colony at the end. The map shows it
+for the date on the clock: switch the factions on under *Layers → Factions* and set the clock to a
+year per second or faster to watch the **Solar Empire** spread from the Sun from 2027 on. *New
+faction* adds factions with any home star; they grow together, and a system belongs to one of
+them at most. Colonies get a wide rim in the faction's colour, stations a thin one, and the jumps
+are drawn as lines; the legend shows each faction's colour and figures, a star's card its
+faction. See [`docs/FACTIONS.md`](docs/FACTIONS.md).
 
 ### Jump network
 

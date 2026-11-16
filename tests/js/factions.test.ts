@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { COLONY, FactionSim, SOLAR_EMPIRE, STATION, colonyIncome, type FactionDef, type FactionGraph } from '../../src/factions/sim';
+import { COLONY, FactionSim, FactionsSim, SOLAR_EMPIRE, STATION, colonyIncome, type FactionDef, type FactionGraph } from '../../src/factions/sim';
 
 /** Places 0 (home), 1 (on the way), 2 and 3 (to settle); links 0-1 and 1-2 of 2 ly, 0-3 of 5 ly. */
 function graph(): FactionGraph {
@@ -11,42 +11,44 @@ function graph(): FactionGraph {
   };
 }
 
-const def: FactionDef = { ...SOLAR_EMPIRE, startYear: 2027, startIncome: 1, incomeStep: 0.2, maxIncome: 100, cost: { exp: true, k: 2 } };
+const def: FactionDef = { ...SOLAR_EMPIRE, startYear: 2027, incomeStep: 0.2, maxIncome: 100 };
+/** Exponential, k = 2 (version 1.19's default). */
+const EXP2 = { exp: true, k: 2 };
 
 describe('factions', () => {
-  it('earns from 1 credit a year, 0.2 more each year, up to 100', () => {
-    expect(colonyIncome(def, 0)).toBe(1);
-    expect(colonyIncome(def, 10)).toBeCloseTo(3, 12);
-    expect(colonyIncome(def, 495)).toBe(100);
-    expect(colonyIncome(def, 2000)).toBe(100);
-    expect(colonyIncome(def, -1)).toBe(0);
+  it('earns the step in its first year and as much more each year, up to the maximum', () => {
+    expect(colonyIncome(SOLAR_EMPIRE, 0)).toBeCloseTo(0.1, 12);
+    expect(colonyIncome(SOLAR_EMPIRE, 9)).toBeCloseTo(1, 12);
+    expect(colonyIncome(SOLAR_EMPIRE, 99)).toBe(10);
+    expect(colonyIncome(SOLAR_EMPIRE, 2000)).toBe(10);
+    expect(colonyIncome(SOLAR_EMPIRE, -1)).toBe(0);
   });
 
   it('pays the jumps of the cheapest route: stations on the way, a colony at the end', () => {
-    const sim = new FactionSim(graph(), 0, def);
+    const sim = new FactionSim(graph(), 0, { ...def, incomeStep: 1 }, EXP2);
     sim.advanceTo(2040);
-    const ev = sim.events.map((e) => [e.year, e.place, e.kind, e.from]);
-    // 2027: 1 credit; 2028: 2.2, the station at 1 (2 credits); 2030: 3.2, the colony at 2 (2 credits);
-    // then 2 earns too (from 2031), and 2035 pays for the 5 ly jump to 3 (2^4 = 16 credits)
-    expect(ev).toEqual([
+    // 2027: 1 credit; 2028: 3, the station at 1 (2^1 = 2 credits); 2029: 4, the colony at 2; 2 earns
+    // from 2030; 2032: 23, the 5 ly jump to 3 (2^4 = 16 credits)
+    expect(sim.events.map((e) => [e.year, e.place, e.kind, e.from])).toEqual([
       [2027, 0, COLONY, -1],
       [2028, 1, STATION, 0],
-      [2030, 2, COLONY, 1],
-      [2035, 3, COLONY, 0],
+      [2029, 2, COLONY, 1],
+      [2032, 3, COLONY, 0],
     ]);
     expect(sim.creditsAt(2027)).toBeCloseTo(1, 9);
-    expect(sim.creditsAt(2030)).toBeCloseTo(1.2, 9);
-    expect(sim.creditsAt(2035)).toBeCloseTo(3.2, 9);
-    expect(sim.incomeAt(2031)).toBeCloseTo(1.8 + 1, 9);
+    expect(sim.creditsAt(2029)).toBeCloseTo(2, 9);
+    expect(sim.creditsAt(2031)).toBeCloseTo(14, 9);
+    expect(sim.creditsAt(2032)).toBeCloseTo(7, 9);
+    expect(sim.incomeAt(2030)).toBeCloseTo(4 + 1, 9);
     expect(sim.exhausted).toBe(true);
     expect(sim.countAt(2026)).toBe(0);
-    expect(sim.countAt(2029)).toBe(2);
+    expect(sim.countAt(2028)).toBe(2);
     expect(sim.countAt(2100)).toBe(4);
     expect([...sim.owned]).toEqual([COLONY, STATION, COLONY, COLONY]);
   });
 
   it('sums the incomes of the colonies like one by one', () => {
-    const d = { ...def, startIncome: 2, incomeStep: 0.7, maxIncome: 9 };
+    const d = { ...def, incomeStep: 0.7, maxIncome: 9 };
     const sim = new FactionSim(graph(), 0, d);
     // colonies founded in these years earn from the next one
     const founded = [2030, 2030, 2041, 2050];
@@ -57,12 +59,45 @@ describe('factions', () => {
     }
   });
 
-  it('polynomial costs and the cheapest target from any of its systems', () => {
+  it('takes the jump costs it is given (polynomial: d^k)', () => {
     // with d^2 the route through 1 costs 8, the jump to 3 costs 25
-    const sim = new FactionSim(graph(), 0, { ...def, cost: { exp: false, k: 2 } });
-    sim.advanceTo(2060);
+    const sim = new FactionSim(graph(), 0, def, { exp: false, k: 2 });
+    sim.advanceTo(2100);
     expect(sim.events.map((e) => e.place)).toEqual([0, 1, 2, 3]);
     expect(sim.events[1].cost).toBe(4);
+  });
+
+  it('grows several factions together; a system belongs to one of them', () => {
+    // a row of five places 1 ly apart: A at 0, B at 4, both want 2
+    const row: FactionGraph = {
+      count: 5,
+      keys: [10, 11, 12, 13, 14],
+      links: { count: 4, a: [0, 1, 2, 3], b: [1, 2, 3, 4], length: [1, 1, 1, 1] },
+      target: Uint8Array.from([0, 0, 1, 0, 0]),
+    };
+    const a = new FactionSim(row, 0, { ...def, id: 'a', incomeStep: 1 }, EXP2);
+    const b = new FactionSim(row, 4, { ...def, id: 'b', incomeStep: 1 }, EXP2);
+    const all = new FactionsSim([a, b]);
+    all.advanceTo(2040);
+    // 2027: each buys its station (1 credit each, in turn); 2028: A reaches 2 first, B's route is cut
+    expect(a.events.map((e) => [e.year, e.place, e.kind])).toEqual([
+      [2027, 0, COLONY],
+      [2027, 1, STATION],
+      [2028, 2, COLONY],
+    ]);
+    expect(b.events.map((e) => [e.year, e.place, e.kind])).toEqual([
+      [2027, 4, COLONY],
+      [2027, 3, STATION],
+    ]);
+    expect(b.blocked[2]).toBe(1);
+    expect(b.exhausted).toBe(true);
+    // a faction whose home another one holds never starts
+    const c = new FactionSim(row, 0, { ...def, id: 'c' }, EXP2);
+    const d = new FactionSim(row, 0, { ...def, id: 'd' }, EXP2);
+    new FactionsSim([c, d]).advanceTo(2030);
+    expect(d.homeTaken).toBe(true);
+    expect(d.events).toEqual([]);
+    expect(c.events[0].place).toBe(0);
   });
 });
 
@@ -91,9 +126,9 @@ describe('faction world', () => {
     expect([...targetsOf(net, members, { targets: ['F', 'G', 'K'], singleOnly: false })]).toEqual([1, 1, 1, 0]);
     expect([...targetsOf(net, members, { targets: ['M'], singleOnly: true })]).toEqual([0, 0, 0, 1]);
     // stored parameters are checked
-    const d = readDef({ startYear: 2100.4, cost: { k: 99 }, region: 1e6, targets: ['G', 'X'], color: 'red' });
+    const d = readDef({ startYear: 2100.4, incomeStep: -3, region: 1e6, targets: ['G', 'X'], color: 'red' });
     expect(d.startYear).toBe(2100);
-    expect(d.cost).toEqual({ exp: true, k: 5 });
+    expect(d.incomeStep).toBe(0.001);
     expect(d.region).toBe(250);
     expect(d.targets).toEqual(['G']);
     expect(d.color).toBe(SOLAR_EMPIRE.color);
@@ -115,7 +150,7 @@ describe('faction world', () => {
     for (let p = 0; p < n; p += 10) target[p] = 1;
     const g: FactionGraph = { count: n, keys: Array.from({ length: n }, (_, k) => k), links: { count: a.length, a, b, length: len }, target };
     const t0 = performance.now();
-    const sim = new FactionSim(g, (w / 2) * w + w / 2, def);
+    const sim = new FactionSim(g, (w / 2) * w + w / 2, { ...def, incomeStep: 1 }, EXP2);
     sim.advanceTo(2400);
     expect(performance.now() - t0).toBeLessThan(3000);
     expect(sim.exhausted).toBe(true);

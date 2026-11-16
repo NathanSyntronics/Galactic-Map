@@ -43,7 +43,7 @@ uniform float uDt;
 uniform float uImpCut;
 uniform float uMarks;
 uniform float uMarkedOnly;
-uniform vec3 uFactionColors[4];
+uniform vec3 uFactionColors[8];
 uniform float uPixelRatio;
 uniform vec3 uCamLocal;
 uniform vec3 uCamRest;
@@ -264,7 +264,7 @@ export function createStarMaterial(): ShaderMaterial {
       uBrightness: { value: 1 },
       uPixelRatio: { value: 1 },
       uMarks: { value: 0 },
-      uFactionColors: { value: [new Color(), new Color(), new Color(), new Color()] },
+      uFactionColors: { value: Array.from({ length: 8 }, () => new Color()) },
       uMarkedOnly: { value: 0 },
       uDt: { value: 0 },
       uImpCut: { value: NO_CUT },
@@ -394,9 +394,9 @@ function temperatureStyle(node: NodeData, i: number, s: Settings, colors: Uint8A
 
 /** The rim of a star the filter found (gold, drawn whatever the completeness cut and the planet rims). */
 export const MARK_FILTER = 3;
-/** Rims of the factions' systems: 8 + 2 · faction for a colony, one more for a station (four factions). */
+/** Rims of the factions' systems: 8 + 2 · faction for a colony, one more for a station (eight factions). */
 export const MARK_FACTION = 8;
-export const MAX_FACTION_COLOURS = 4;
+export const MAX_FACTION_COLOURS = 8;
 /** Colour factor of the stars the filter did not find (option "dim the others"). */
 export const FILTER_DIM = 0.28;
 
