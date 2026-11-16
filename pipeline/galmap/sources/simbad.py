@@ -54,6 +54,12 @@ BASIC_QUERY = (
 )
 IDENT_QUERY = f"SELECT i.oidref, i.id FROM ident AS i JOIN basic AS b ON b.oid = i.oidref WHERE {W10}"
 BASIC_COUNT = f"SELECT COUNT(*) AS n FROM basic AS b WHERE {W10}"
+# The Washington Double Star catalogue numbers of all stars, whatever their distance, by their HIP
+# and Gaia DR3 numbers (some 120,000 rows): double stars beyond 100 pc (Beta Scorpii) are found too
+WDS_FILE = DIR / "simbad_wds_ids.csv"
+_WDS_WHERE = "w.id LIKE 'WDS J%' AND (i.id LIKE 'HIP %' OR i.id LIKE 'Gaia DR3 %')"
+WDS_QUERY = f"SELECT i.id AS id, w.id AS wds FROM ident AS i JOIN ident AS w ON w.oidref = i.oidref WHERE {_WDS_WHERE}"
+WDS_COUNT = f"SELECT COUNT(*) AS n FROM ident AS i JOIN ident AS w ON w.oidref = i.oidref WHERE {_WDS_WHERE}"
 IDENT_COUNT = f"SELECT COUNT(*) AS n FROM ident AS i JOIN basic AS b ON b.oid = i.oidref WHERE {W10}"
 
 # Identifier prefixes that never yield a useful name (cross-match catalogues etc.). Double-star
@@ -94,6 +100,40 @@ def _fetch(query: str, count_query: str, dest: Path, refresh: bool) -> pd.DataFr
     df.to_csv(dest, index=False)
     log.info("SIMBAD: fetched %d rows into %s", len(df), dest.name)
     return df
+
+
+def wds_table(t: pd.DataFrame) -> dict[tuple[str, int], str]:
+    """(kind, number) -> WDS number ("J16054-1948") from rows of WDS_QUERY; kind 'hip' or 'gaia'."""
+    ids = t["id"].astype(str).str.replace(r"\s+", " ", regex=True).str.strip()
+    wds = t["wds"].astype(str).str.replace(r"\s+", " ", regex=True).str.extract(r"^WDS (J\d{5}[+-]\d{4})")[0]
+    out: dict[tuple[str, int], str] = {}
+    for i, w in zip(ids, wds):
+        if not isinstance(w, str):
+            continue
+        m = re.fullmatch(r"(HIP|Gaia DR3) (\d+)", i)
+        if m:
+            out.setdefault(("hip" if m.group(1) == "HIP" else "gaia", int(m.group(2))), w)
+    return out
+
+
+def load_wds(refresh: bool = False) -> dict[tuple[str, int], str]:
+    """WDS numbers of all stars in SIMBAD by HIP and Gaia DR3 number (see WDS_QUERY)."""
+    return wds_table(_fetch(WDS_QUERY, WDS_COUNT, WDS_FILE, refresh))
+
+
+def wds_of(stars: pd.DataFrame, table: dict[tuple[str, int], str]) -> np.ndarray:
+    """The WDS number of each star row (by its Gaia DR3 number, else its HIP number), else None."""
+    out = np.full(len(stars), None, dtype=object)
+    gaia = stars["gaia"].to_numpy(dtype=object) if "gaia" in stars else [None] * len(stars)
+    hip = stars["hip"].to_numpy(dtype=object) if "hip" in stars else [None] * len(stars)
+    for k in range(len(stars)):
+        for kind, v in (("gaia", gaia[k]), ("hip", hip[k])):
+            if v is not None and not pd.isna(v):
+                w = table.get((kind, int(v)))
+                if w:
+                    out[k] = w
+                    break
+    return out
 
 
 def load(refresh: bool = False) -> tuple[pd.DataFrame, pd.DataFrame]:

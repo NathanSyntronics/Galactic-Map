@@ -36,6 +36,7 @@ def steps() -> list[tuple[str, Callable[[], object]]]:
         ("GCNS (CDS)", gcns.load),
         ("20 pc census (NASA)", census20.load),
         ("SIMBAD (CDS)", simbad.load),
+        ("SIMBAD double-star numbers (CDS)", simbad.load_wds),
         ("ORB6 (GSU)", binaries.load),
         ("Wikidata stars", wikidata.load),
         ("IAU names", iau.load),

@@ -460,9 +460,18 @@ It handles the following cases:
 Multiple systems (`systems.py`) are grouped from four sources:
 * the census hierarchy;
 * the Gliese system grouping;
-* the Washington Double Star catalogue (via SIMBAD), checked for consistent distances;
+* the Washington Double Star catalogue (WDS numbers from SIMBAD by HIP and Gaia number, at any
+  distance), every pair of components checked for consistent distances, a projected separation
+  of at most 50,000 AU and proper motions that allow an orbit: their difference at most the
+  escape velocity of the two (masses from the luminosities), and at least 10 km/s for
+  measurement errors. WDS lists chance alignments too: "Aldebaran C" is 2.7 times as far away
+  as Aldebaran and moves 16 km/s differently;
 * a wide-binary search on Gaia data, using projected separation, parallax agreement and the
   escape velocity.
+
+Then every member outside the census is checked against its system's best-measured star by the
+same rules (distance, motion): links chain, and a star next to a companion is not necessarily a
+companion of the primary.
 
 ### Level of detail
 

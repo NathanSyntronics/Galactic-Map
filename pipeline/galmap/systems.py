@@ -3,10 +3,14 @@
 Links come from
   * the 20 pc census hierarchy (authoritative within 20 pc),
   * the Gliese system grouping of HYG (`base`), checked for consistent distances,
+  * the Washington Double Star catalogue (via SIMBAD), every pair of its components checked for
+    consistent distances and proper motions (WDS lists chance alignments too),
   * a wide-binary heuristic for Gaia stars beyond the census volume: small projected
     separation, consistent parallaxes and a tangential velocity difference below the
     escape velocity of a ~2 solar-mass pair (cf. El-Badry, Rix & Heintz 2021),
-and are merged with union-find.
+and are merged with union-find. Every member outside the census is then checked against its
+system's best-measured star (links chain: A next to B and B next to C does not make C a
+companion of A).
 """
 
 from __future__ import annotations
@@ -26,6 +30,12 @@ AU_PER_PC = 206_264.806
 MAX_SEP_AU = 50_000.0  # ~0.24 pc / 0.8 ly
 MAX_SYSTEM_SIZE = 8
 MAX_CATALOG_SEP_LY = 2.0
+#: a catalogue pair's (or a member's and its system's best-measured star's) proper motions may
+#: differ by their orbital motion, at most the escape velocity of the two (masses from their
+#: luminosities), and by at least this much for measurement errors (bright stars, unresolved
+#: companions): Aldebaran and its optical "companion" C differ by 16 km/s
+V_FLOOR_KMS = 10.0
+ARCSEC = np.pi / (180 * 3600)
 
 
 class UnionFind:
@@ -107,6 +117,100 @@ def wide_binary_links(s: pd.DataFrame, min_dist_pc: float = 19.0) -> list[tuple[
     return links
 
 
+def _masses(s: pd.DataFrame) -> np.ndarray:
+    """Rough masses (solar) from the luminosities (main sequence, L ~ M^3.5; giants come out heavier,
+    which only widens the tolerance), 0.5 where unknown."""
+    logl = s["logl"].to_numpy(float) if "logl" in s else np.full(len(s), np.nan)
+    return np.where(np.isfinite(logl), np.clip(10 ** (np.nan_to_num(logl) / 3.5), 0.1, 60.0), 0.5)
+
+
+class _Motion:
+    """Whether two stars' proper motions allow a bound pair (see V_FLOOR_KMS)."""
+
+    def __init__(self, s: pd.DataFrame):
+        self.plx = s["plx"].to_numpy(float)
+        self.err = s["plx_err"].to_numpy(float)
+        self.pmra = s["pmra"].to_numpy(float) if "pmra" in s else np.full(len(s), np.nan)
+        self.pmdec = s["pmdec"].to_numpy(float) if "pmdec" in s else np.full(len(s), np.nan)
+        xyz = s[["x", "y", "z"]].to_numpy(float)
+        norm = np.linalg.norm(xyz, axis=1, keepdims=True)
+        self.u = np.divide(xyz, norm, out=np.zeros_like(xyz), where=norm > 0)
+        self.mass = _masses(s)
+
+    def rel_err(self, i: int) -> float:
+        e = self.err[i] / self.plx[i] if self.plx[i] > 0 else np.inf
+        return float(e) if np.isfinite(e) else np.inf
+
+    def _ref_plx(self, a: int, b: int) -> float:
+        """The parallax of the better-measured of two stars."""
+        return float(self.plx[a] if self.rel_err(a) <= self.rel_err(b) else self.plx[b])
+
+    def sep_au(self, a: int, b: int) -> float:
+        """Projected separation at the distance of the better-measured star (NaN without one)."""
+        plx = self._ref_plx(a, b)
+        if not plx > 0:
+            return float("nan")
+        return float(np.arccos(np.clip(float(np.dot(self.u[a], self.u[b])), -1, 1)) / ARCSEC * 1000.0 / plx)
+
+    def ok(self, a: int, b: int) -> bool:
+        if not (np.isfinite(self.pmra[a]) and np.isfinite(self.pmdec[a]) and np.isfinite(self.pmra[b]) and np.isfinite(self.pmdec[b])):
+            return True
+        # tangential velocities at the distance of the better-measured star
+        plx = self._ref_plx(a, b)
+        if not plx > 0:
+            return True
+        dv = 4.74047 * np.hypot(self.pmra[a] - self.pmra[b], self.pmdec[a] - self.pmdec[b]) / plx
+        sep_au = self.sep_au(a, b)
+        v_esc = 42.1 * np.sqrt((self.mass[a] + self.mass[b]) / max(sep_au, 1.0))
+        return bool(dv <= max(1.5 * v_esc + 0.5, V_FLOOR_KMS))
+
+
+def _pairs(keys: pd.Series, max_group: int = 40) -> list[tuple[int, int]]:
+    """Every pair of rows with the same key (the first row with each other one in large groups)."""
+    out = []
+    k = keys.dropna()
+    for _, idx in k.groupby(k).groups.items():
+        idx = list(idx)
+        if len(idx) > max_group:
+            out += [(idx[0], j) for j in idx[1:]]
+        else:
+            out += [(a, b) for n, a in enumerate(idx) for b in idx[n + 1 :]]
+    return out
+
+
+def vet_members(s: pd.DataFrame, roots: np.ndarray, protected: np.ndarray) -> tuple[np.ndarray, int]:
+    """Group labels with the members that do not belong to their system taken out (own label):
+    every member is compared with the system's best-measured star (a census star where there is
+    one), and stays if its distance agrees (within MAX_CATALOG_SEP_LY, or parallaxes within 3 sigma
+    + 2 %) and its proper motion allows a bound orbit (_Motion). Census members (`protected`) stay."""
+    n = len(s)
+    labels = roots.copy()
+    xyz = s[["x", "y", "z"]].to_numpy(float)
+    mo = _Motion(s)
+    plx, err = mo.plx, mo.err
+    order = np.argsort(roots, kind="stable")
+    bounds = np.flatnonzero(np.diff(roots[order])) + 1
+    detached = 0
+    for grp in np.split(order, bounds):
+        if len(grp) < 2:
+            continue
+        prot = [i for i in grp if protected[i]]
+        pool = prot or list(grp)
+        anchor = min(pool, key=mo.rel_err)
+        for i in grp:
+            if i == anchor or protected[i]:
+                continue
+            near = np.linalg.norm(xyz[i] - xyz[anchor]) <= MAX_CATALOG_SEP_LY
+            same = True
+            if np.isfinite(plx[i]) and np.isfinite(plx[anchor]) and np.isfinite(err[i]) and np.isfinite(err[anchor]):
+                same = abs(plx[i] - plx[anchor]) <= 3 * np.hypot(err[i], err[anchor]) + 0.02 * plx[anchor]
+            if (near or same) and mo.ok(i, anchor):
+                continue
+            labels[i] = n + i
+            detached += 1
+    return labels, detached
+
+
 def assign_systems(s: pd.DataFrame) -> pd.DataFrame:
     s = s.copy()
     n = len(s)
@@ -123,20 +227,25 @@ def assign_systems(s: pd.DataFrame) -> pd.DataFrame:
             uf.union(a, b)
         else:
             rejected += 1
-    # Washington Double Star catalogue systems (via SIMBAD), checked for consistent distances:
-    # WDS also lists optical (chance) pairs, which are rejected here.
+    # Washington Double Star catalogue systems (via SIMBAD): WDS also lists optical (chance)
+    # pairs, so every pair of components is checked for consistent distances and proper motions
     wds_links = []
     wds_rejected = 0
+    wds_moving = 0
     if "wds" in s:
         err = (s["plx_err"].to_numpy(float) / s["plx"].to_numpy(float)) * s["dist_pc"].to_numpy(float) * 3.2616
-        for a, b in _group_links(s["wds"].where(s["wds"].astype(str) != "None")):
+        motion = _Motion(s)
+        for a, b in _pairs(s["wds"].where(s["wds"].astype(str) != "None")):
             tol = max(MAX_CATALOG_SEP_LY, 3 * np.hypot(np.nan_to_num(err[a]), np.nan_to_num(err[b])))
-            if np.linalg.norm(xyz[a] - xyz[b]) <= tol:
+            # (and no farther apart in the sky than a wide binary can be)
+            if np.linalg.norm(xyz[a] - xyz[b]) > tol or motion.sep_au(a, b) > MAX_SEP_AU:
+                wds_rejected += 1
+            elif not motion.ok(a, b):
+                wds_moving += 1
+            else:
                 wds_links.append((a, b))
                 uf.union(a, b)
-            else:
-                wds_rejected += 1
-        log.info("systems: %d WDS links (%d optical pairs rejected)", len(wds_links), wds_rejected)
+        log.info("systems: %d WDS links (optical pairs rejected: %d by distance, %d by proper motion)", len(wds_links), wds_rejected, wds_moving)
     wb = wide_binary_links(s)
     # wide-binary links are only accepted if they do not grow systems beyond a sane size
     for a, b in wb:
@@ -164,6 +273,11 @@ def assign_systems(s: pd.DataFrame) -> pd.DataFrame:
                 uf.union(a, b)
         roots = np.array([uf.find(i) for i in range(n)])
         size = pd.Series(roots).map(pd.Series(roots).value_counts()).to_numpy()
+    # members that only a chain of links joins to their system, or whose catalogue link is wrong
+    census = s["system_row"].notna().to_numpy() if "system_row" in s else np.zeros(n, bool)
+    roots, detached = vet_members(s, roots, census)
+    size = pd.Series(roots).map(pd.Series(roots).value_counts()).to_numpy()
+    log.info("systems: %d members taken out of their systems (distance or motion disagree with the best-measured member)", detached)
 
     multi = size > 1
     ids = np.full(n, -1, dtype=np.int64)

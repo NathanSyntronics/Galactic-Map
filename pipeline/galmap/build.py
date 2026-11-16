@@ -305,6 +305,14 @@ def build(
         if sources_bulk:
             lookups.simbad = simbad.SimbadByGaia(basic, ident, taken=set(int(v) for v in sb_info["simbad_oid"].dropna()))
         s = pd.concat([s, sb_info], axis=1)
+        # double stars beyond 100 pc: their WDS numbers by HIP and Gaia number
+        try:
+            more = simbad.wds_of(s, simbad.load_wds(refresh))
+            missing = s["wds"].isna().to_numpy() & pd.notna(more)
+            s.loc[missing, "wds"] = more[missing]
+            log.info("SIMBAD: WDS numbers of %d more stars (beyond 100 pc)", int(missing.sum()))
+        except Exception as err:  # the systems within 100 pc are found without them
+            log.warning("SIMBAD WDS numbers unavailable: %s", err)
         no_spt = s["spect"].isna() & s["simbad_sp_type"].notna()
         s.loc[no_spt, "spect"] = s.loc[no_spt, "simbad_sp_type"]
         otype = s["simbad_otype"].astype(object)

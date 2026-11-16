@@ -2,6 +2,16 @@
 
 Every round of changes that goes live raises the version by 0.01 (README, *Versions*).
 
+## 1.16 (2026-11-16)
+
+* Multiple systems cleaned up: a double-star catalogue pair counts as a system only if the proper
+  motions allow an orbit, not only the distances (with a very uncertain distance, almost any
+  distance agreed). "Aldebaran C", a background star 2.7 times as far away, is no longer a member
+  of the Aldebaran system. Every member is also checked against its system's best-measured star,
+  so that chains of links no longer join stars that do not belong together.
+* Double stars beyond 100 pc are recognised from the catalogue too: Beta¹ and Beta² Scorpii
+  (Acrab and Acrab B) form one system now.
+
 ## 1.15 (2026-11-15)
 
 * Zooming out is smooth again: since 1.13 most stars vanished for a moment and came back, because
