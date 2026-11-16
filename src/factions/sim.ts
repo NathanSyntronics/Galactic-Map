@@ -475,6 +475,8 @@ export class FactionsSim {
   year: number;
   /** A year begun (incomes paid) but not finished: its purchases go on in the next call. */
   private pending: number | null = null;
+  /** The faction whose turn it is to buy in the year begun. */
+  private turn = 0;
   /** Purchases checked against the deadline in groups of this many. */
   private static readonly CHECK_EVERY = 4;
   private readonly places: Map<number, number>[];
@@ -517,28 +519,36 @@ export class FactionsSim {
   advanceTo(year: number, deadline = Infinity): void {
     const last = Math.min(year, this.year + 1 + MAX_YEARS);
     let bought = 0;
+    // (every call gets on by at least a year or a few purchases, whatever the deadline)
+    let worked = false;
     while (this.year < last) {
-      if (performance.now() > deadline) return;
+      if (worked && performance.now() > deadline) return;
       const y = this.year + 1;
       if (this.pending !== y) {
         for (const s of this.sims) s.beginYear(y);
         this.pending = y;
+        this.turn = 0;
       }
-      // purchases in turn; a year with many of them is continued in the next call
-      for (let progress = true; progress; ) {
-        progress = false;
-        for (let i = 0; i < this.sims.length; i++) {
-          const p = this.sims[i].buy(y);
-          if (p >= 0) {
-            progress = true;
-            this.taken(i, p);
-            if (++bought % FactionsSim.CHECK_EVERY === 0 && performance.now() > deadline) return;
-          }
+      // purchases in turn (one each, round and round) until none of them can buy any more: as many
+      // tries without a purchase in a row as there are factions. A pause mid-year keeps whose turn
+      // it is, so that a year continued in the next call goes on exactly as in one go
+      const n = this.sims.length;
+      for (let idle = 0; idle < n; ) {
+        const i = this.turn;
+        this.turn = (i + 1) % n;
+        const p = this.sims[i].buy(y);
+        if (p < 0) {
+          idle++;
+          continue;
         }
+        idle = 0;
+        this.taken(i, p);
+        if (++bought % FactionsSim.CHECK_EVERY === 0 && performance.now() > deadline) return;
       }
       for (const s of this.sims) s.endYear(y);
       this.pending = null;
       this.year = y;
+      worked = true;
     }
   }
 }
