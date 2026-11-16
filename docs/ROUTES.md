@@ -35,6 +35,25 @@ This document is the specification the implementation follows.
 * Ties beyond that are broken deterministically (by the places' stable keys), so the same stars
   and settings always give the same route.
 
+### Jump costs
+
+In both modes a jump counts with its length d, or, set under *Layers → Jump network → Cost of a
+jump in routes*, with a cost that makes long jumps dearer (`jumpCostFn` in
+`src/network/route.ts`; R is the jump range):
+
+| setting | cost of a jump of length d |
+|---|---|
+| linear (default) | d |
+| polynomial, exponent p (0.5 to 5) | R · (d / R)^p |
+| exponential, factor k (0.5 to 10) | R · (e^(k·d/R) − 1) / (e^k − 1) |
+
+A jump of the full range costs R either way, and every jump costs more than nothing, so the
+search stays a Dijkstra search. The larger p or k, the more a route prefers several short jumps
+to one long one (p below 1 does the opposite). With *fewest jumps* the costs only decide between
+routes with the same number of jumps. The lengths and totals shown stay the distances. From the
+Sun to Vega (jump range 9 ly): linear 7 jumps and 53.4 ly, polynomial (p = 3) 9 jumps and 58.2
+ly, exponential (k = 6) 11 jumps and 70.9 ly.
+
 ## The corridor
 
 The network is only known where stars are loaded. A route is therefore searched in a corridor

@@ -155,7 +155,7 @@ function parseStarKey(key: string): { path: string; i: number } {
 }
 
 /** Settings that change which stars are shown (and so the jump network). */
-const VISIBILITY_KEYS: (keyof Settings)[] = ['showBrownDwarfs', 'showWhiteDwarfs', 'maxDistErr', 'colorBy', 'sizeBy', 'missingStyle'];
+const VISIBILITY_KEYS: (keyof Settings)[] = ['showBrownDwarfs', 'showWhiteDwarfs', 'maxDistErr', 'namedAlways', 'colorBy', 'sizeBy', 'missingStyle'];
 /** Settings that change the jump network (the radius only when the network no longer serves, see networkServes). */
 const JUMP_KEYS: (keyof Settings)[] = ['jumps', 'jumpRange', 'jumpFaint', 'jumpSun', 'jumpBright', 'jumpBy', 'jumpHub', 'jumpConnect'];
 /** Settings that change the route (besides hiding stars without a value of the data layers). */
@@ -170,7 +170,11 @@ const ROUTE_KEYS: (keyof Settings)[] = [
   'showBrownDwarfs',
   'showWhiteDwarfs',
   'maxDistErr',
+  'namedAlways',
   'missingStyle',
+  'jumpCost',
+  'jumpCostPower',
+  'jumpCostFactor',
 ];
 /** The route is computed again this long after the last change of a setting (sliders change continuously). */
 const ROUTE_DELAY_MS = 400;
@@ -530,7 +534,14 @@ export class App {
         retry: (path) => this.loader?.retry(path),
         options: () => {
           const s = this.store.get();
-          return { range: s.jumpRange, hub: s.jumpHub, kSun: s.jumpSun, connect: s.jumpConnect, capacity: this.capacityRule(s) };
+          return {
+            range: s.jumpRange,
+            hub: s.jumpHub,
+            kSun: s.jumpSun,
+            connect: s.jumpConnect,
+            capacity: this.capacityRule(s),
+            cost: { kind: s.jumpCost, power: s.jumpCostPower, factor: s.jumpCostFactor },
+          };
         },
         style: (data, colors, sizes) => computeStyle(data, this.store.get(), this.stylePlan, colors, sizes),
         fresh: (data) => {
@@ -992,7 +1003,7 @@ export class App {
       this.nav.setTourStep(s.flybyStep);
     }
     if (has('colorBy', 'sizeBy', 'missingStyle')) this.stylePlan = this.planOf(s);
-    if (has('showBrownDwarfs', 'showWhiteDwarfs', 'maxDistErr', 'saturation', 'colorBy', 'sizeBy', 'missingStyle')) {
+    if (has('showBrownDwarfs', 'showWhiteDwarfs', 'maxDistErr', 'namedAlways', 'saturation', 'colorBy', 'sizeBy', 'missingStyle')) {
       this.styleDirty = true;
     }
     if (has('colorBy', 'sizeBy', 'missingStyle', 'legend', 'lang', 'jumps', 'jumpRange', 'jumpColor')) this.updateLegend();

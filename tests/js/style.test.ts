@@ -159,3 +159,20 @@ describe('stars by their planets', () => {
     setHabitableHosts([]);
   });
 });
+
+describe('named stars and the distance uncertainty', () => {
+  it('shows named stars whatever their uncertainty, if so set', async () => {
+    const { isStarVisible } = await import('../../src/render/starfield');
+    const d = node();
+    // star 1: 2 % uncertain; named or not
+    d.flags[1] |= Flag.NAMED;
+    const strict = settings({ maxDistErr: 1 });
+    expect(isStarVisible(d, 1, strict)).toBe(true);
+    expect(isStarVisible(d, 1, settings({ maxDistErr: 1, namedAlways: false }))).toBe(false);
+    d.flags[1] &= ~Flag.NAMED;
+    expect(isStarVisible(d, 1, strict)).toBe(false);
+    // the filter of brown and white dwarfs is not affected
+    d.flags[0] |= Flag.NAMED | Flag.BROWN_DWARF;
+    expect(isStarVisible(d, 0, settings({ showBrownDwarfs: false }))).toBe(false);
+  });
+});

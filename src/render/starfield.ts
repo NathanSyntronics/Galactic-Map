@@ -347,7 +347,8 @@ export function isStarVisible(node: NodeData, i: number, s: Settings): boolean {
   if (f & Flag.WHITE_DWARF && !s.showWhiteDwarfs) return false;
   if (s.maxDistErr < 100) {
     const e = node.distErr[i];
-    if (e !== 255 && e / 2 > s.maxDistErr) return false;
+    // (named stars stay, if so set: Betelgeuse's distance is uncertain by 12.5 %)
+    if (e !== 255 && e / 2 > s.maxDistErr && !(s.namedAlways && f & Flag.NAMED)) return false;
   }
   return true;
 }

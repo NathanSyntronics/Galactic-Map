@@ -3,6 +3,8 @@ export type Lang = 'en' | 'de';
 export type Quality = 'low' | 'medium' | 'high' | 'ultra';
 export type MissingStyle = 'dim' | 'hide' | 'normal';
 export type JumpColor = 'stars' | 'uniform' | 'length';
+/** How a jump's length counts when routes are compared (network/route JumpCost). */
+export type JumpCostKind = 'linear' | 'poly' | 'exp';
 
 export interface Settings {
   lang: Lang;
@@ -19,6 +21,8 @@ export interface Settings {
   showWhiteDwarfs: boolean;
   /** Hide stars whose relative distance uncertainty exceeds this (percent); >= 100 disables the filter. */
   maxDistErr: number;
+  /** Named stars are shown whatever their distance uncertainty (Betelgeuse, 12.5 %). */
+  namedAlways: boolean;
   starSize: number;
   brightness: number;
   saturation: number;
@@ -64,6 +68,12 @@ export interface Settings {
   jumpConnect: boolean;
   jumpColor: JumpColor;
   jumpOpacity: number;
+  /** Route costs: a jump's length as it is, or long jumps dearer (polynomial, exponential). */
+  jumpCost: JumpCostKind;
+  /** Exponent of the polynomial cost. */
+  jumpCostPower: number;
+  /** Factor of the exponential cost. */
+  jumpCostFactor: number;
   /** Route flyby: seconds per star. */
   flybyStep: number;
 }
@@ -78,6 +88,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showBrownDwarfs: false,
   showWhiteDwarfs: true,
   maxDistErr: 20,
+  namedAlways: true,
   starSize: 4,
   brightness: 1,
   saturation: 1.6,
@@ -106,6 +117,9 @@ export const DEFAULT_SETTINGS: Settings = {
   jumpConnect: true,
   jumpColor: 'length',
   jumpOpacity: 0.6,
+  jumpCost: 'linear',
+  jumpCostPower: 2,
+  jumpCostFactor: 3,
   flybyStep: 2.5,
 };
 
@@ -148,6 +162,7 @@ const CHOICES: Partial<Record<keyof Settings, readonly unknown[]>> = {
   quality: ['low', 'medium', 'high', 'ultra'],
   missingStyle: ['dim', 'hide', 'normal'],
   jumpColor: ['stars', 'uniform', 'length'],
+  jumpCost: ['linear', 'poly', 'exp'],
   planetSpeed: PLANET_SPEEDS,
   flybyStep: [0.5, 1, 2.5, 5],
 };
@@ -161,6 +176,8 @@ const RANGES: Partial<Record<keyof Settings, [number, number]>> = {
   jumpBright: [0, 20],
   jumpHub: [0, 2],
   jumpOpacity: [0.05, 1],
+  jumpCostPower: [0.5, 5],
+  jumpCostFactor: [0.5, 10],
 };
 
 export const QUALITY_BUDGET: Record<Quality, number> = {

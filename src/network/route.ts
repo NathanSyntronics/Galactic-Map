@@ -9,6 +9,33 @@ import { jumpMargin } from './places';
 /** 'jumps': fewest jumps, then shortest distance; 'distance': shortest distance, then fewest jumps. */
 export type RouteMode = 'jumps' | 'distance';
 
+/**
+ * How a jump's length counts when routes are compared (docs/ROUTES.md, "Jump costs"): 'linear'
+ * the length itself; 'poly' R · (d / R)^power; 'exp' R · (e^(factor · d / R) − 1) / (e^factor − 1),
+ * with R the jump range. A jump of the full range costs R either way; above 1, the power or the
+ * factor makes long jumps dearer, so that routes take more, shorter jumps. The lengths shown stay
+ * the distances.
+ */
+export type JumpCostKind = 'linear' | 'poly' | 'exp';
+export interface JumpCost {
+  kind: JumpCostKind;
+  power: number;
+  factor: number;
+}
+
+/** The cost of a jump of length d (see JumpCost); positive for every d > 0. */
+export function jumpCostFn(cost: JumpCost | undefined, range: number): (d: number) => number {
+  if (!cost || cost.kind === 'linear' || !(range > 0)) return (d) => d;
+  if (cost.kind === 'poly') {
+    const p = cost.power;
+    return p === 1 ? (d) => d : (d) => range * Math.pow(d / range, p);
+  }
+  const k = cost.factor;
+  if (!(k > 1e-6)) return (d) => d;
+  const norm = range / Math.expm1(k);
+  return (d) => norm * Math.expm1((k * d) / range);
+}
+
 /** Widest search corridor in light years. */
 export const MAX_CORRIDOR = 128;
 
@@ -51,6 +78,8 @@ export interface RouteGraph {
 
 export interface PathOptions {
   mode: RouteMode;
+  /** The cost of a jump of length d (jumpCostFn; default: d). */
+  cost?: (d: number) => number;
   /** Only places within `width` of the segment from–to take part (start and goal always do). */
   corridor?: { from: Vec3; to: Vec3; width: number };
 }
@@ -179,7 +208,15 @@ class Heap {
  * all best predecessors of a place are settled before it; among them the one with the smallest
  * key is kept, whatever the order of the links.
  */
-function search(graph: RouteGraph, adj: Adjacency, from: number, to: number, mode: RouteMode, before: (p: number, q: number) => boolean): Path {
+function search(
+  graph: RouteGraph,
+  adj: Adjacency,
+  from: number,
+  to: number,
+  mode: RouteMode,
+  before: (p: number, q: number) => boolean,
+  cost: (d: number) => number = (d) => d,
+): Path {
   const n = graph.count;
   const lens = graph.links.length;
   const c1 = new Float64Array(n).fill(Infinity);
@@ -206,7 +243,8 @@ function search(graph: RouteGraph, adj: Adjacency, from: number, to: number, mod
     for (let k = adj.start[u], e = adj.start[u + 1]; k < e; k++) {
       const v = adj.to[k];
       if (done[v]) continue;
-      const len = +lens[adj.link[k]];
+      // (the cost of the jump: its length, or more for long jumps, see JumpCost)
+      const len = cost(+lens[adj.link[k]]);
       const n1 = byJumps ? c1[u] + 1 : c1[u] + len;
       const n2 = byJumps ? c2[u] + len : c2[u] + 1;
       if (n1 < c1[v] || (n1 === c1[v] && n2 < c2[v])) {
@@ -290,7 +328,7 @@ export function findPath(graph: RouteGraph, start: number, goal: number, opt: Pa
 
   let path: Path | null = null;
   if (before(goal, start)) {
-    const back = search(graph, adj, goal, start, opt.mode, before);
+    const back = search(graph, adj, goal, start, opt.mode, before, opt.cost);
     if (back.found) {
       path = {
         ...back,
@@ -301,7 +339,7 @@ export function findPath(graph: RouteGraph, start: number, goal: number, opt: Pa
       };
     }
   }
-  path ??= search(graph, adj, start, goal, opt.mode, before);
+  path ??= search(graph, adj, start, goal, opt.mode, before, opt.cost);
   path.searched = searched;
   return path;
 }
@@ -333,6 +371,8 @@ export interface RouteRequest {
   /** Jump range of the network. */
   range: number;
   mode: RouteMode;
+  /** How a jump's length counts (default: linear). */
+  cost?: JumpCost;
   /** Widest search corridor (default MAX_CORRIDOR). */
   maxWidth?: number;
   signal?: AbortSignal;
@@ -367,6 +407,7 @@ export async function planRoute<G extends CorridorGraph>(
 ): Promise<RoutePlan<G>> {
   const tried: number[] = [];
   let last: RouteTry<G> | null = null;
+  const cost = jumpCostFn(req.cost, req.range);
   for (const width of corridorWidths(req.range, req.maxWidth ?? MAX_CORRIDOR)) {
     if (req.signal?.aborted) return { status: 'cancelled', tried };
     tried.push(width);
@@ -377,6 +418,7 @@ export async function planRoute<G extends CorridorGraph>(
     if (answer.goal < 0) return { status: 'missing', end: 'goal', tried };
     const path = findPath(answer, answer.start, answer.goal, {
       mode: req.mode,
+      cost,
       corridor: { from: req.from, to: req.to, width },
     });
     last = { width, graph: answer, path };

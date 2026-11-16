@@ -117,7 +117,8 @@ The settings panel (☰) has five tabs (the last one open is remembered in the b
   the Earth (the inner Solar System, 2 AU around the Sun) and the Sun (10 ly), both seen straight
   down onto the ecliptic with the Galactic Centre to the left, and the Galaxy (the Milky Way from
   above, 100,000 ly); the labels; the galactic grid and the height lines (the Sun's too).
-* **Stars:** brown dwarfs (off by default) and white dwarfs; a maximum distance uncertainty; star
+* **Stars:** brown dwarfs (off by default) and white dwarfs; a maximum distance uncertainty, which
+  named stars ignore unless switched off (Betelgeuse's distance is uncertain by 12.5 %); star
   size (0.2× to 12×, 4× by default), brightness and colour saturation; the level of detail (how
   many stars may be loaded at once; it matters only for view radii of a few hundred light years and
   more).
@@ -351,7 +352,9 @@ specified in [`docs/ROUTES.md`](docs/ROUTES.md):
 * **Best route.** *Fewest jumps* (default; among those the shortest distance) or *shortest
   distance* (among those the fewest jumps); ties are broken by the stars' stable keys, so the same
   stars and settings always give the same route, and swapping start and destination gives it
-  reversed.
+  reversed. A jump can count with its length (linear, the default) or with a cost that makes long
+  jumps dearer: polynomial with an exponent, or exponential with a factor (settings under the jump
+  network; [`docs/ROUTES.md`](docs/ROUTES.md), "Jump costs").
 * **Long routes.** The network is computed along a corridor around the straight line, from the
   shown stars within `w + 3 · range` of it, and the path is searched among the places within `w`.
   `w` starts at twice the jump range and is doubled while there is no path, up to 128 ly. The

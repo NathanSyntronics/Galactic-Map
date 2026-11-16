@@ -2,6 +2,16 @@
 
 Every round of changes that goes live raises the version by 0.01 (README, *Versions*).
 
+## 1.17 (2026-11-16)
+
+* "Always show named stars" (Stars, under the distance uncertainty; on by default): with the
+  uncertainty set to 1 %, Betelgeuse, Rigel, Deneb and the other named stars stay on the map.
+* Route costs: a new slider under the jump network sets how a jump's length counts when routes are
+  compared: linear (as before), polynomial (with an exponent) or exponential (with a factor). The
+  dearer long jumps are, the more short jumps a route takes: from the Sun to Vega 7 jumps
+  linear, 9 polynomial (exponent 3), 11 exponential (factor 6). The distances shown stay the real
+  ones.
+
 ## 1.16 (2026-11-16)
 
 * Multiple systems cleaned up: a double-star catalogue pair counts as a system only if the proper

@@ -5,6 +5,7 @@ import {
   MAX_CORRIDOR,
   corridorWidths,
   findPath,
+  jumpCostFn,
   networkWidth,
   planRoute,
   type CorridorGraph,
@@ -485,5 +486,42 @@ describe('route through a computed corridor network', () => {
     const sphere = buildPlaces([src], { ...opt, to: { x: 0, y: 0, z: 0 } });
     expect(sphere.count).toBe(1);
     expect(capacityFromLogL(0, 2, 6, 12)).toBe(p.capacities[0]);
+  });
+});
+
+describe('jump costs', () => {
+  it('costs a jump of the full range R either way, long jumps dearer with a larger exponent or factor', () => {
+    const R = 9;
+    const lin = jumpCostFn({ kind: 'linear', power: 2, factor: 3 }, R);
+    const poly = jumpCostFn({ kind: 'poly', power: 2, factor: 3 }, R);
+    const exp = jumpCostFn({ kind: 'exp', power: 2, factor: 3 }, R);
+    for (const f of [lin, poly, exp]) expect(f(R)).toBeCloseTo(R, 9);
+    expect(lin(4)).toBe(4);
+    expect(poly(4.5)).toBeCloseTo(9 * 0.25, 9);
+    expect(exp(4.5)).toBeCloseTo((9 * Math.expm1(1.5)) / Math.expm1(3), 9);
+    // positive and growing
+    for (const f of [poly, exp]) {
+      expect(f(0.01)).toBeGreaterThan(0);
+      expect(f(2)).toBeLessThan(f(3));
+    }
+    // exponent 1 and a tiny factor are linear
+    expect(jumpCostFn({ kind: 'poly', power: 1, factor: 3 }, R)(3.3)).toBe(3.3);
+    expect(jumpCostFn({ kind: 'exp', power: 2, factor: 1e-9 }, R)(3.3)).toBe(3.3);
+    expect(jumpCostFn(undefined, R)(3.3)).toBe(3.3);
+  });
+
+  it('makes routes take more, shorter jumps; the lengths shown stay the distances', () => {
+    // start 0 and goal 1 eight light years apart, linked directly and through 2 (a little off the line)
+    const g = graph([[0, 0, 0], [8, 0, 0], [4, 0.9, 0]], [[0, 1], [0, 2], [2, 1]]);
+    const linear = findPath(g, 0, 1, { mode: 'distance' });
+    expect(linear.places).toEqual([0, 1]);
+    for (const kind of ['poly', 'exp'] as const) {
+      const p = findPath(g, 0, 1, { mode: 'distance', cost: jumpCostFn({ kind, power: 2, factor: 3 }, 9) });
+      expect(p.places).toEqual([0, 2, 1]);
+      expect(p.total).toBeCloseTo(2 * Math.hypot(4, 0.9), 5);
+      expectValid(g, p, 0);
+    }
+    // fewest jumps: the costs only decide between routes with as many jumps
+    expect(findPath(g, 0, 1, { mode: 'jumps', cost: jumpCostFn({ kind: 'poly', power: 3, factor: 3 }, 9) }).places).toEqual([0, 1]);
   });
 });

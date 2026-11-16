@@ -6,7 +6,7 @@
 import { designationOf, type NodeData } from '../data/format';
 import { nodesInCapsule, type Aabb, type Vec3 } from './capsule';
 import { MAX_PAIRS, MAX_PLACES, computeNetwork, placeOfStar, type CapacityRule, type JumpNetwork, type PlaceSource, type PlaceSet } from './places';
-import { planRoute, type CorridorGraph, type RouteMode, type RouteTry } from './route';
+import { planRoute, type CorridorGraph, type JumpCost, type RouteMode, type RouteTry } from './route';
 
 /** A corridor whose nodes hold more data than this is refused before loading (Sun–Betelgeuse at w = 128: 25 MB). */
 export const MAX_CORRIDOR_BYTES = 64e6;
@@ -41,6 +41,8 @@ export interface RouteNetworkOptions {
   kSun: number;
   connect: boolean;
   capacity: CapacityRule;
+  /** How a jump's length counts when routes are compared (default: linear). */
+  cost?: JumpCost;
 }
 
 export interface PlannerHost<N extends CorridorNode> {
@@ -424,7 +426,7 @@ export class RoutePlanner<N extends CorridorNode> {
     let corridor: N[] = [];
     let searchStart = 0;
 
-    const plan = await planRoute<CorridorNet>({ from: from.pos, to: to.pos, range: opt.range, mode, signal }, async (c) => {
+    const plan = await planRoute<CorridorNet>({ from: from.pos, to: to.pos, range: opt.range, mode, cost: opt.cost, signal }, async (c) => {
       if (searchStart) stats.searchMs += now() - searchStart;
       await this.host.expand?.(from.pos, to.pos, c.networkWidth);
       if (signal.aborted) return { refused: 'cancelled' };
