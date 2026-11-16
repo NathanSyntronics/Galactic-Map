@@ -56,11 +56,12 @@ export function placeMembers(net: JumpNetwork): PlaceMembers {
  * The faction's graph of a network: its places and links; a place is settled when its brightest
  * shown star is of one of the classes, and (singleOnly) when it is a star of its own, not a system.
  * With the network's node keys (see buildPlaces) a star's key finds its place directly.
+ * `growable`: the region can grow (FactionGraph.growable).
  */
-export function factionWorld(net: JumpNetwork, def: Pick<FactionDef, 'targets' | 'singleOnly'>, nodeKey?: (path: string) => number): FactionWorld {
+export function factionWorld(net: JumpNetwork, def: Pick<FactionDef, 'targets' | 'singleOnly'>, nodeKey?: (path: string) => number, growable = false): FactionWorld {
   const { places, links } = net;
   const members = placeMembers(net);
-  const graph: FactionGraph = { count: places.count, keys: places.keys, links, target: targetsOf(net, members, def) };
+  const graph: FactionGraph = { count: places.count, keys: places.keys, links, target: targetsOf(net, members, def), growable };
   if (nodeKey) {
     const byKey = new Map<number, Int32Array>();
     for (const [path, own] of places.starPlace) byKey.set(nodeKey(path), own);
@@ -88,8 +89,22 @@ export function targetsOf(net: JumpNetwork, members: PlaceMembers, def: Pick<Fac
 
 /** (Version 1.19 stored other parameters: those are not read.) */
 const STORE_KEY = 'galactic-map:factions:v2';
-/** Largest region (ly): 500 ly around the Sun hold some 900,000 places (docs/FACTIONS.md, "The region"). */
-export const MAX_REGION = 500;
+/**
+ * The region a faction grows in (docs/FACTIONS.md, "The region"): first this radius (ly) around
+ * its home, then larger by this factor whenever nothing is left within reach in it, at most
+ * REGION_MAX (500 ly around the Sun hold some 900,000 places).
+ */
+export const REGION_START = 100;
+export const REGION_GROWTH = 1.25;
+export const REGION_MAX = 500;
+
+/** The next region's radius: REGION_GROWTH times larger, at most REGION_MAX (also when it would be nearly as large). */
+export function nextRegion(radius: number): number {
+  const r = Math.round(radius * REGION_GROWTH);
+  return r > 0.9 * REGION_MAX ? REGION_MAX : r;
+}
+/** Most colonies a faction may be given. */
+export const MAX_COLONIES = 1_000_000;
 /** At most this many factions (the star shader has as many rim colours). */
 export const MAX_FACTIONS = 8;
 /** Colours of new factions, in turn (the Solar Empire's first). */
@@ -111,7 +126,7 @@ export function readDef(v: unknown, base: FactionDef = SOLAR_EMPIRE): FactionDef
     maxIncome: num(o.maxIncome, 0, 1e9, base.maxIncome),
     targets: Array.isArray(o.targets) ? CLASS_KEYS.filter((k) => o.targets!.includes(k)) : [...base.targets],
     singleOnly: typeof o.singleOnly === 'boolean' ? o.singleOnly : base.singleOnly,
-    region: num(o.region, 20, MAX_REGION, base.region),
+    maxColonies: Math.round(num(o.maxColonies, 1, MAX_COLONIES, base.maxColonies)),
   };
   if (typeof o.homeName === 'string' && o.homeName) out.homeName = o.homeName;
   if (hint && typeof hint === 'object' && typeof hint.path === 'string' && [hint.x, hint.y, hint.z].every((c) => typeof c === 'number' && Number.isFinite(c))) {

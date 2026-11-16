@@ -29,8 +29,8 @@ legend), and set the clock (top left) to a year per second or faster to watch th
   system one faction holds (colony or station) is closed to all others: their routes go around it,
   and a route that it cuts is planned anew. A faction whose home system another one already holds
   never starts.
-* **End.** When no suitable place is left in the faction's region, it stops growing (*nothing left
-  to settle within the region*); its credits keep adding up.
+* **End.** A faction stops growing when it has its *most colonies* (50,000 by default) or when no
+  suitable place is left within reach in a region of 500 ly; its credits keep adding up.
 
 Ties (equal costs) go to the place with the smaller stable key, so the same stars and settings
 always give the same history.
@@ -40,15 +40,21 @@ always give the same history.
 *New faction* asks for a name and a home star: a named star by its name or designation
 ("Vega", "HR 7001"), or any star selected on the map. A new faction gets the Solar Empire's
 parameters and the next free colour (turquoise, red, yellow, purple, green, orange, blue, pink); its
-name, first year, income, classes, region and colour can be changed under *Parameters*, where it
+name, first year, income, classes, most colonies and colour can be changed under *Parameters*, where it
 can also be deleted. At most eight factions. They are stored in the browser.
 
 ## The region
 
-The faction grows in the jump network of the stars within its *region* around its home: 150 ly by
-default, at most 500 ly. The network is computed with the settings of the jump network (range,
-links per star, hubs, connecting groups) and from the stars shown (brown and white dwarfs,
-distance uncertainty). Changing them computes it again. Its size around the Sun:
+The faction grows in the jump network of the stars within its *region* around its home, computed
+with the settings of the jump network (range, links per star, hubs, connecting groups) and from
+the stars shown (brown and white dwarfs, distance uncertainty); changing them starts it again.
+The region starts at 100 ly. Once nothing is left within reach in it, it grows by a quarter (125,
+156, 195, 244, 305, 381 ly, then 500 ly at most) and the faction goes on there; meanwhile its
+simulation waits (the panel says *its region grows to … ly*). The history so far stays as it was.
+A region that grew only as far as a search reached (instead of being filled first) turned out much
+larger: a faction's territory has far-reaching arms, and the farthest one decided the size.
+
+Its size around the Sun:
 
 | region | places | data loaded | network (desktop) |
 |---|---|---|---|
@@ -58,17 +64,20 @@ distance uncertainty). Changing them computes it again. Its size around the Sun:
 | 500 ly | 902,000 | 84 MB | 2 s |
 
 The network is computed while the map goes on (in pieces between frames, its links in a worker).
-A large region needs memory: one faction with a 500 ly region takes about 0.4 GB in all, two
-about 0.7 GB (on a phone with little memory, smaller regions are safer). Two factions in 500 ly
-regions around the Sun and Arcturus settle 163,000 systems (by 2372); their simulation takes
-about 2.5 s, spread over the frames.
+A large region needs memory: one faction with a 500 ly region takes about 0.4 GB in all. Two
+factions around the Sun and Arcturus grow to 500 ly by 2150 and stop there in 2157 with 52,000
+colonies together (nothing left within reach), in about 0.8 GB; a smaller *most colonies* keeps
+them smaller.
 
-The Solar Empire alone in its 150 ly region, with the default parameters:
+The Solar Empire alone, with the default parameters (50,000 colonies at most):
 
-| jump costs | first steps | 2100 | 2200 | region settled |
-|---|---|---|---|---|
-| linear (default) | station Lalande 21185 (2039), colony Groombridge 1618 (2044), Epsilon Eridani (2051), Tau Ceti (2052) | 335 colonies, 240 stations | (all) | 2128 |
-| exponential, k = 2 | stations Alpha Centauri (2040), Luhman 16 (2044), Sirius (2076), …, colony Pi³ Orionis (2089) | 4 colonies, 11 stations | 96 colonies, 188 stations | 2319 |
+| jump costs | first steps | 2100 | 2200 | regions settled (100, 125, 156, 195, 244, 305, 381 ly) | 50,000 colonies |
+|---|---|---|---|---|---|
+| linear (default) | station Lalande 21185 (2039), colony Groombridge 1618 (2044), Epsilon Eridani (2051), Tau Ceti (2052) | 276 colonies, 250 stations | (done) | 2116, 2124, 2132, 2139, 2145, 2152, 2158 | 2166 (with 101,865 stations) |
+| exponential, k = 2 | stations Alpha Centauri (2040), Luhman 16 (2044), Sirius (2076), …, colony Pi³ Orionis (2089) | 4 colonies, 11 stations | 91 colonies, 197 stations | 2285, 2309, 2331, 2352, 2372, 2392, 2411 | 2434 |
+
+A settled region holds the same number of colonies whatever the costs (1,065 within 100 ly,
+33,404 within 381 ly): every place to settle within reach is taken before it grows.
 
 ## On the map
 
@@ -108,8 +117,15 @@ or station, and since when.
   the jumps drawn go straight into a growing vertex buffer, of which only the new part is uploaded.
 * `src/network/links-async.ts` and `links-worker.ts`: the faction's links computed in a worker;
   `placeSteps` (`src/network/places.ts`) groups the stars into places in steps between frames.
+* Growth (1.25): a faction whose search finds nothing left in a region that can grow
+  (`FactionGraph.growable`) returns `GROW`; `FactionsSim` waits (`growing`) until the app has
+  computed the larger region (`nextRegion`) and moved the faction onto it (`FactionSim.moveTo`:
+  its systems, the places closed to it and its events found again by their stars, the search
+  started again), or marked it final (`finalRegion`), then `grown` closes the other factions'
+  systems in its new places and the simulation goes on.
 * `src/factions/world.ts`: the faction's graph from a jump network (which places it settles, the
-  stars of each place), and the stored parameters (`localStorage`, `galactic-map:factions`).
+  stars of each place), the region's radii, and the stored parameters (`localStorage`,
+  `galactic-map:factions`).
 * `src/app.ts` (*factions*): loads the region's nodes, computes the network and runs the
   simulation; draws the rims (`MARK_FACTION` codes in the star shader) and the lines
   (`src/render/faction-lines.ts`).

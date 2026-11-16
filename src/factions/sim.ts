@@ -27,8 +27,8 @@ export interface FactionDef {
   targets: ClassKey[];
   /** Only stars that are not part of a multiple system. */
   singleOnly: boolean;
-  /** Radius (ly) of the jump network around the home star the faction grows in. */
-  region: number;
+  /** Most colonies: then it stops growing (its region grows as far as needed, see FactionGraph.growable). */
+  maxColonies: number;
 }
 
 export const SOLAR_EMPIRE: FactionDef = {
@@ -41,7 +41,7 @@ export const SOLAR_EMPIRE: FactionDef = {
   maxIncome: 10,
   targets: ['F', 'G', 'K'],
   singleOnly: true,
-  region: 150,
+  maxColonies: 50_000,
 };
 
 /** The faction's world: places, their links and which places it may settle. */
@@ -57,12 +57,19 @@ export interface FactionGraph {
    * otherwise the keys are indexed (KeyIndex).
    */
   placeOf?: (key: number) => number;
+  /**
+   * The graph is the network of a region that can grow: once nothing is left within reach in it,
+   * the faction asks for a larger one (GROW) instead of stopping.
+   */
+  growable?: boolean;
 }
 
 export const COLONY = 1;
 export const STATION = 2;
 /** buy(): the search for the next route reached the deadline; it goes on in the next call. */
 export const SEARCHING = -2;
+/** buy(): nothing is left in the faction's region: it goes on once the graph is larger (moveTo) or final (finalRegion). */
+export const GROW = -3;
 
 /** A system becomes the faction's: a station on the way or a colony at the end of a route. */
 export interface FactionEvent {
@@ -183,16 +190,17 @@ export class FactionSim {
   static SEARCH_BATCH = 2048;
   readonly events: FactionEvent[] = [];
   /** Owner state per place: 0, COLONY or STATION. */
-  readonly owned: Uint8Array;
+  owned: Uint8Array;
   /** The last year simulated (its income and spending done); startYear - 1 before the start. */
   year: number;
   credits = 0;
-  /** No suitable place is left within reach (the region is exhausted). */
+  /** No suitable place is left within reach, or it has its most colonies (capped). */
   exhausted = false;
+  capped = false;
   /** Its home system belongs to another faction (it never starts). */
   homeTaken = false;
   /** Places another faction holds: closed to this one. */
-  readonly blocked: Uint8Array;
+  blocked: Uint8Array;
   /**
    * From this year on nothing changes but the pool: nothing is left to settle and every colony
    * earns its maximum. Later years are not simulated one by one (see creditsAt).
@@ -201,8 +209,8 @@ export class FactionSim {
   /** Places were closed since the costs were computed (some costs may be too low now). */
   private closed = false;
   /** Adjacency (both directions): the links of place p are link[start[p] .. start[p + 1] - 1]. */
-  private readonly start: Int32Array;
-  private readonly link: Int32Array;
+  private start = new Int32Array(1);
+  private link = new Int32Array(0);
   private readonly cost: (d: number) => number;
   private route: Step[] | null = null;
   private routePos = 0;
@@ -212,9 +220,9 @@ export class FactionSim {
    * simulation, only as far as the next route needs: a new system enters its frontier at cost 0,
    * and costs only fall, so no place is searched again unless its cost fell.
    */
-  private readonly best: Float64Array;
-  private readonly pred: Int32Array;
-  private readonly jump: Float64Array;
+  private best: Float64Array;
+  private pred: Int32Array;
+  private jump: Float64Array;
   /** The search's frontier: places by cost (stale entries are skipped). */
   private readonly work = new MinHeap();
   /** Colonies' first income years in order (nondecreasing), for the income in O(1). */
@@ -226,8 +234,8 @@ export class FactionSim {
   private readonly incomes: number[] = [];
 
   constructor(
-    readonly graph: FactionGraph,
-    readonly home: number,
+    public graph: FactionGraph,
+    public home: number,
     readonly def: FactionDef,
     cost?: JumpCost,
   ) {
@@ -239,9 +247,22 @@ export class FactionSim {
     this.jump = new Float64Array(n);
     this.year = def.startYear - 1;
     this.cost = jumpCostFn(cost);
-    // adjacency (both directions)
+    this.adjacency();
+    if (home >= 0 && home < n) {
+      this.owned[home] = COLONY;
+      this.events.push({ year: def.startYear, place: home, from: -1, kind: COLONY, cost: 0 });
+      this.addColony(def.startYear);
+      this.relax([home]);
+    } else {
+      this.exhausted = true;
+    }
+  }
+
+  /** The links of each place (both directions). */
+  private adjacency(): void {
+    const n = this.graph.count;
     const deg = new Int32Array(n + 1);
-    const L = graph.links;
+    const L = this.graph.links;
     for (let i = 0; i < L.count; i++) {
       deg[L.a[i] + 1]++;
       deg[L.b[i] + 1]++;
@@ -254,14 +275,56 @@ export class FactionSim {
       this.link[fill[L.a[i]]++] = i;
       this.link[fill[L.b[i]]++] = i;
     }
-    if (home >= 0 && home < n) {
-      this.owned[home] = COLONY;
-      this.events.push({ year: def.startYear, place: home, from: -1, kind: COLONY, cost: 0 });
-      this.addColony(def.startYear);
-      this.relax([home]);
-    } else {
-      this.exhausted = true;
+  }
+
+  /** Number of colonies (the home system included). */
+  get colonies(): number {
+    return this.firstYears.length;
+  }
+
+  /**
+   * The same faction on a larger graph (its region grown): its systems, the places closed to it,
+   * its events and its route mapped by `map` (old place to new, -1: gone); the search for the next
+   * route starts again from all its systems. Its history so far stays as it was.
+   */
+  moveTo(graph: FactionGraph, map: (place: number) => number): void {
+    const n = graph.count;
+    const owned = new Uint8Array(n);
+    const blocked = new Uint8Array(n);
+    for (let p = 0; p < this.graph.count; p++) {
+      if (!this.owned[p] && !this.blocked[p]) continue;
+      const q = map(p);
+      if (q < 0) continue;
+      if (this.owned[p]) owned[q] = this.owned[p];
+      else blocked[q] = 1;
     }
+    const at = (p: number) => (p < 0 ? -1 : map(p));
+    for (const e of this.events) {
+      e.place = at(e.place);
+      e.from = at(e.from);
+    }
+    if (this.route) {
+      for (const st of this.route) {
+        st.place = at(st.place);
+        st.from = at(st.from);
+      }
+      // (a route with a place gone is planned anew)
+      if (this.route.some((st) => st.place < 0)) this.route = null;
+    }
+    this.home = at(this.home);
+    this.graph = graph;
+    this.owned = owned;
+    this.blocked = blocked;
+    this.best = new Float64Array(n);
+    this.pred = new Int32Array(n);
+    this.jump = new Float64Array(n);
+    this.adjacency();
+    this.recompute();
+  }
+
+  /** The graph's region cannot grow any more: with nothing left in it, the faction stops. */
+  finalRegion(): void {
+    this.graph.growable = false;
   }
 
   private addColony(firstYear: number): void {
@@ -364,8 +427,15 @@ export class FactionSim {
     if (year < this.def.startYear || this.homeTaken) return -1;
     if (!this.route) {
       if (this.exhausted) return -1;
+      if (this.firstYears.length >= this.def.maxColonies) {
+        this.exhausted = true;
+        this.capped = true;
+        return -1;
+      }
       const route = this.nextRoute(deadline);
       if (route === false) return SEARCHING;
+      // nothing left in its region: a larger one first, where it can grow
+      if (!route && this.graph.growable) return GROW;
       this.route = route;
       this.routePos = 0;
       if (!this.route) {
@@ -559,17 +629,15 @@ export class FactionsSim {
   private static readonly CHECK_EVERY = 4;
   /** Each faction's places by key (only with several factions). */
   private readonly placeOf: ((key: number) => number)[];
+  /**
+   * The faction (index) whose search reached the edge of its region: the simulation waits until
+   * its graph is larger or final (FactionSim.moveTo or finalRegion, then grown).
+   */
+  growing: number | null = null;
 
   constructor(readonly sims: FactionSim[]) {
     this.year = Math.min(...sims.map((s) => s.def.startYear)) - 1;
-    this.placeOf =
-      sims.length > 1
-        ? sims.map((s) => {
-            if (s.graph.placeOf) return s.graph.placeOf;
-            const index = new KeyIndex(s.graph.keys, s.graph.count);
-            return (key: number) => index.get(key);
-          })
-        : [];
+    this.placeOf = sims.length > 1 ? sims.map((s) => FactionsSim.lookup(s.graph)) : [];
     // the homes, in order: a later faction whose home another one holds never starts
     const homes = new Set<number>();
     sims.forEach((s, i) => {
@@ -582,6 +650,32 @@ export class FactionsSim {
       homes.add(key);
       this.taken(i, s.home);
     });
+  }
+
+  private static lookup(graph: FactionGraph): (key: number) => number {
+    if (graph.placeOf) return graph.placeOf;
+    const index = new KeyIndex(graph.keys, graph.count);
+    return (key: number) => index.get(key);
+  }
+
+  /**
+   * Faction i's graph grew (or became final): the others' systems are closed to it in its new
+   * places too, and the simulation goes on.
+   */
+  grown(i: number): void {
+    const s = this.sims[i];
+    if (this.placeOf.length) {
+      const look = (this.placeOf[i] = FactionsSim.lookup(s.graph));
+      this.sims.forEach((o, j) => {
+        if (j === i) return;
+        for (const e of o.events) {
+          if (e.place < 0) continue;
+          const p = look(o.graph.keys[e.place]);
+          if (p >= 0) s.block(p);
+        }
+      });
+    }
+    if (this.growing === i) this.growing = null;
   }
 
   /** Faction i took one of its places: closed to the others. */
@@ -599,6 +693,7 @@ export class FactionsSim {
    * that a frame never waits long: the rest follows in the next frames.
    */
   advanceTo(year: number, deadline = Infinity): void {
+    if (this.growing !== null) return;
     const last = Math.min(year, this.year + 1 + MAX_YEARS);
     let bought = 0;
     // (every call gets on by at least a year or a few purchases, whatever the deadline)
@@ -627,6 +722,10 @@ export class FactionsSim {
         const i = this.turn;
         const p = this.sims[i].buy(y, deadline);
         if (p === SEARCHING) return;
+        if (p === GROW) {
+          this.growing = i;
+          return;
+        }
         this.turn = (i + 1) % n;
         if (p < 0) {
           this.tries++;

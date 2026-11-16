@@ -110,7 +110,7 @@ import { SettingsPanel } from './ui/panel';
 import { FilterBox, type FilterAttribute, type FilterRow } from './ui/filter-box';
 import { FactionBox, factionName, type FactionChange, type HomeStar } from './ui/faction-box';
 import { COLONY, FactionSim, FactionsSim, type FactionDef, type FactionEvent } from './factions/sim';
-import { factionWorld, readDefs, saveDefs, targetsOf, type FactionWorld } from './factions/world';
+import { REGION_MAX, REGION_START, factionWorld, nextRegion, readDefs, saveDefs, targetsOf, type FactionWorld } from './factions/world';
 import { FactionLines } from './render/faction-lines';
 import { RouteBox, type RouteNames } from './ui/route-box';
 import { CLOCK_MAX_JD, CLOCK_MIN_JD, PlanetTimeControl, formatClockDate, yearOfJd } from './ui/time-control';
@@ -225,6 +225,10 @@ interface FactionRun {
   stations: number;
   /** Nodes of the region loaded so far. */
   loaded: number;
+  /** Radius (ly) of its region around its home: of its world, or of the larger one being made (growing). */
+  radius: number;
+  /** A larger region is being loaded and computed (nothing was left within reach in its world). */
+  growing: boolean;
   /** Its network is being computed. */
   building: boolean;
   error: 'noHome' | 'network' | null;
@@ -1265,7 +1269,7 @@ export class App {
     if (fr) for (const n of fr.nodes) if (!this.selectedPaths.has(n.path) && n !== pending && (!fr.done || fr.set.has(n.path))) extra.push(n);
     // the factions' regions while their networks are computed, then the nodes of their systems
     for (const run of this.factionRuns) {
-      for (const n of run.nodes) if (!this.selectedPaths.has(n.path) && (!run.world || this.factionPaths.has(n.path))) extra.push(n);
+      for (const n of run.nodes) if (!this.selectedPaths.has(n.path) && (!run.world || run.growing || this.factionPaths.has(n.path))) extra.push(n);
     }
     // the root node holds the Sun, whose label stays while the stars are hidden (not drawn)
     if (hidden && starLabelMode(s.radius) === 'sun' && !extra.includes(this.octree.root)) extra.push(this.octree.root);
@@ -3001,7 +3005,7 @@ export class App {
     }
     this.applyFactionColours();
     for (const def of this.factionDefs.slice(0, MAX_FACTION_COLOURS)) {
-      const run: FactionRun = { def, centre: new Vector3(), home: null, nodes: [], world: null, sim: null, shown: 0, error: null, loaded: 0, building: false, colonies: 0, stations: 0 };
+      const run: FactionRun = { def, centre: new Vector3(), home: null, nodes: [], world: null, sim: null, shown: 0, error: null, loaded: 0, radius: REGION_START, growing: false, building: false, colonies: 0, stations: 0 };
       this.factionRuns.push(run);
       void this.prepareFaction(run, token);
     }
@@ -3069,9 +3073,16 @@ export class App {
     }
     run.home = { path: home.path, index: home.index };
     run.centre.copy(home.pos);
+    await this.loadFactionRegion(run, token);
+  }
+
+  /** The nodes of a faction's region (run.radius) requested; its network follows once they are loaded (factionProgress). */
+  private async loadFactionRegion(run: FactionRun, token: number): Promise<void> {
+    const oct = this.octree;
+    if (!oct || !run.home) return;
     // the region's sub-manifests and nodes, coarse to fine, up to FACTION_MAX_BYTES
     for (let k = 0; k < 64; k++) {
-      const todo = sphereNodes(oct.root, run.centre, def.region, FACTION_MAX_BYTES).nodes.filter((n) => Octree.hasUnloaded(n));
+      const todo = sphereNodes(oct.root, run.centre, run.radius, FACTION_MAX_BYTES).nodes.filter((n) => Octree.hasUnloaded(n));
       if (!todo.length) break;
       try {
         await Promise.all(todo.map((n) => oct.loadSub(n, this.fetchRows)));
@@ -3081,13 +3092,62 @@ export class App {
       }
       if (token !== this.factionToken) return;
     }
-    run.nodes = sphereNodes(oct.root, run.centre, def.region, FACTION_MAX_BYTES).nodes;
+    const nodes = sphereNodes(oct.root, run.centre, run.radius, FACTION_MAX_BYTES).nodes;
     // (and the home star's own node, wherever the budget ends)
-    const own = await this.reachNode(home.path);
+    const own = await this.reachNode(run.home.path);
     if (token !== this.factionToken) return;
-    if (own && !run.nodes.includes(own)) run.nodes.push(own);
+    if (own && !nodes.includes(own)) nodes.push(own);
+    run.nodes = nodes;
+    run.loaded = 0;
     this.lodDirty = true;
     this.factionProgress();
+  }
+
+  /**
+   * Nothing is left within reach in faction i's region (FactionsSim.growing): the region grows by
+   * REGION_GROWTH (its nodes loaded, its network computed, the simulation moved onto it), or, at
+   * REGION_MAX, it becomes final. The simulation waits meanwhile.
+   */
+  private growFaction(i: number): void {
+    const all = this.factionSims;
+    const sim = all?.sims[i];
+    const run = this.factionRuns.find((r) => r.sim === sim);
+    if (!all || !sim || !run || run.growing) return;
+    if (run.radius >= REGION_MAX) {
+      sim.finalRegion();
+      all.grown(i);
+      return;
+    }
+    run.growing = true;
+    run.radius = nextRegion(run.radius);
+    // (no network of the old nodes meanwhile: factionProgress waits for the new list)
+    run.nodes = [];
+    run.loaded = 0;
+    this.factionStatusYear = NaN;
+    void this.loadFactionRegion(run, this.factionToken);
+  }
+
+  /** A faction's larger world: its simulation moved onto it (the same history), and on. */
+  private applyGrowth(run: FactionRun, world: FactionWorld | null): void {
+    const all = this.factionSims;
+    const sim = run.sim;
+    const old = run.world;
+    run.growing = false;
+    this.factionStatusYear = NaN;
+    if (!all || !sim || !old) {
+      if (world) run.world = world;
+      return;
+    }
+    if (world?.graph.placeOf) {
+      const keys = old.graph.keys;
+      const placeOf = world.graph.placeOf;
+      sim.moveTo(world.graph, (p) => placeOf(keys[p]));
+      run.world = world;
+    } else {
+      // (no larger network: the region stays as it is)
+      sim.finalRegion();
+    }
+    all.grown(all.sims.indexOf(sim));
   }
 
   /** Once a faction's region is loaded: its network and world; once all are there: the simulations. */
@@ -3095,7 +3155,7 @@ export class App {
     const loader = this.loader;
     if (!loader) return;
     for (const run of this.factionRuns) {
-      if (run.world || run.error || run.building || !run.nodes.length) continue;
+      if ((run.world && !run.growing) || run.error || run.building || !run.nodes.length) continue;
       let loaded = 0;
       let failed = 0;
       for (const n of run.nodes) {
@@ -3141,7 +3201,8 @@ export class App {
       if (performance.now() - slice > FACTION_FRAME_MS && !(await pause())) return;
     }
     const centre = { x: run.centre.x, y: run.centre.y, z: run.centre.z };
-    const steps = placeSteps(sources, { centre, radius: run.def.region, capacity: this.capacityRule(s), nodeKey: (path) => this.nodeKey(path) });
+    const radius = run.radius;
+    const steps = placeSteps(sources, { centre, radius, capacity: this.capacityRule(s), nodeKey: (path) => this.nodeKey(path) });
     let step = steps.next();
     while (!step.done) {
       if (performance.now() - slice > FACTION_FRAME_MS && !(await pause())) return;
@@ -3152,17 +3213,25 @@ export class App {
     const links = await computeJumpLinksAsync(places, { range: s.jumpRange, hub: s.jumpHub, kSun: s.jumpSun, connect: s.jumpConnect, maxCandidates: FACTION_MAX_PAIRS });
     if (token !== this.factionToken) return;
     run.building = false;
-    if (links.overflow) {
-      run.error = 'network';
-      this.factionStatusYear = NaN;
-    } else {
+    let world: FactionWorld | null = null;
+    if (!links.overflow) {
       // (the stars' colours and sizes are not needed any more)
       for (const src of sources) {
         src.colors = new Uint8Array(0);
         src.sizes = new Float32Array(0);
       }
-      const net: JumpNetwork = { places, centre, region: run.def.region, range: s.jumpRange, links, overflow: null };
-      run.world = factionWorld(net, run.def, (path) => this.nodeKey(path));
+      const net: JumpNetwork = { places, centre, region: radius, range: s.jumpRange, links, overflow: null };
+      // (below the largest region it grows once nothing is left in it)
+      world = factionWorld(net, run.def, (path) => this.nodeKey(path), radius < REGION_MAX);
+    }
+    if (run.growing) {
+      this.applyGrowth(run, world);
+      return;
+    }
+    if (world) run.world = world;
+    else {
+      run.error = 'network';
+      this.factionStatusYear = NaN;
     }
     this.startFactionSims();
   }
@@ -3174,6 +3243,7 @@ export class App {
     const all = this.factionSims;
     const clock = yearOfJd(this.planetJd());
     if (all && clock > all.year) all.advanceTo(clock, performance.now() + FACTION_FRAME_MS);
+    if (all && all.growing !== null) this.growFaction(all.growing);
     // the year drawn: the clock's, or the last one simulated while the simulation catches up
     const year = this.factionYear();
     let changed = false;
@@ -3247,6 +3317,7 @@ export class App {
     if (colony) run.colonies++;
     else run.stations++;
     const code = MARK_FACTION + 2 * f + (colony ? 0 : 1);
+    if (ev.place < 0) return;
     const { start, source, index } = world.members;
     const sources = world.net.places.sources;
     for (let j = start[ev.place]; j < start[ev.place + 1]; j++) {
@@ -3373,7 +3444,10 @@ export class App {
       } else {
         const sim = run.sim;
         let text = t('factionState', { year, colonies, stations, credits, income: formatNumber(sim.incomeAt(year), 1) });
-        if (sim.exhausted && run.shown === sim.events.length) text += ` · ${t('factionExhausted')}`;
+        const done = run.shown === sim.events.length;
+        if (sim.capped && done) text += ` · ${t('factionCapped')}`;
+        else if (sim.exhausted && done) text += ` · ${t('factionExhausted')}`;
+        else if (run.growing) text += ` · ${t('factionGrowing', { radius: formatNumber(run.radius), loaded: run.loaded, total: run.nodes.length || '…' })}`;
         // (the simulation is behind the clock: a fast clock or a jump ahead)
         else if (this.factionSims && yearOfJd(this.planetJd()) > this.factionSims.year + 1) text += ` · ${t('factionCatchingUp')}`;
         say(text);

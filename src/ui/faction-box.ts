@@ -3,7 +3,7 @@
 import { CLASS_KEYS, type ClassKey } from '../data/filter';
 import { parseNumber } from '../data/csv';
 import { SOLAR_EMPIRE, type FactionDef } from '../factions/sim';
-import { MAX_FACTIONS, MAX_REGION, newFaction } from '../factions/world';
+import { MAX_COLONIES, MAX_FACTIONS, newFaction } from '../factions/world';
 import { getLang, numberText, t, type MessageKey } from '../i18n';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -269,8 +269,8 @@ export class FactionBox {
     singleBox.addEventListener('change', () => set({ singleOnly: singleBox.checked }, 'sim'));
     single.append(singleBox, el('span', '', t('filterSystemsSingle')));
     details.appendChild(single);
-    details.appendChild(num('factionRegion', d.region, 20, MAX_REGION, (v) => set({ region: Math.round(v) }, 'world'), true));
-    details.appendChild(el('p', 'hint', t('factionRegionHint')));
+    details.appendChild(num('factionMaxColonies', d.maxColonies, 1, MAX_COLONIES, (v) => set({ maxColonies: Math.round(v) }, 'sim'), true));
+    details.appendChild(el('p', 'hint', t('factionMaxColoniesHint')));
     const colour = el('label', 'row select');
     colour.appendChild(el('span', '', t('factionColor')));
     const pick = el('input', 'faction-color');

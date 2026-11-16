@@ -1,6 +1,52 @@
 import { describe, expect, it } from 'vitest';
 import { COLONY, FactionSim, FactionsSim, SOLAR_EMPIRE, STATION, colonyIncome, type FactionDef, type FactionGraph } from '../../src/factions/sim';
 
+/**
+ * A grid of w x w places (keys: their numbers), links to the right and down with varied lengths,
+ * every seventh place to settle; `part(cx, cy, r)` is its part within r of (cx, cy) as its own
+ * graph that can grow, with the part's place of each grid key.
+ */
+function grid(w: number) {
+  const a: number[] = [];
+  const b: number[] = [];
+  const len: number[] = [];
+  for (let y = 0; y < w; y++) for (let x = 0; x < w; x++) {
+    const p = y * w + x;
+    if (x + 1 < w) a.push(p), b.push(p + 1), len.push(1 + ((p * 7) % 5) / 4);
+    if (y + 1 < w) a.push(p), b.push(p + w), len.push(1 + ((p * 3) % 5) / 4);
+  }
+  const target = new Uint8Array(w * w);
+  for (let p = 3; p < w * w; p += 7) target[p] = 1;
+  const full: FactionGraph = { count: w * w, keys: Array.from({ length: w * w }, (_, k) => k), links: { count: a.length, a, b, length: len }, target };
+  const part = (cx: number, cy: number, r: number): FactionGraph => {
+    const index = new Map<number, number>();
+    const keys: number[] = [];
+    for (let p = 0; p < w * w; p++) {
+      if (Math.hypot((p % w) - cx, Math.floor(p / w) - cy) > r) continue;
+      index.set(p, keys.length);
+      keys.push(p);
+    }
+    const pa: number[] = [];
+    const pb: number[] = [];
+    const pl: number[] = [];
+    for (let i = 0; i < a.length; i++) {
+      const u = index.get(a[i]);
+      const v = index.get(b[i]);
+      if (u === undefined || v === undefined) continue;
+      pa.push(u), pb.push(v), pl.push(len[i]);
+    }
+    return {
+      count: keys.length,
+      keys,
+      links: { count: pa.length, a: pa, b: pb, length: pl },
+      target: Uint8Array.from(keys, (k) => target[k]),
+      placeOf: (key) => index.get(key) ?? -1,
+      growable: true,
+    };
+  };
+  return { full, part };
+}
+
 /** Places 0 (home), 1 (on the way), 2 and 3 (to settle); links 0-1 and 1-2 of 2 ly, 0-3 of 5 ly. */
 function graph(): FactionGraph {
   return {
@@ -115,6 +161,61 @@ describe('factions', () => {
   });
 });
 
+describe('growing regions', () => {
+  it('fills its region, then grows it, keeping its history, whatever the steps', () => {
+    const w = 41;
+    const { part } = grid(w);
+    const homes = [20 * w + 10, 20 * w + 30];
+    const history = (sims: FactionSim[]) => sims.map((s) => s.events.map((e) => `${e.year}:${s.graph.keys[e.place]}:${e.kind}`).join(' '));
+    const run = (chunked: boolean) => {
+      const radius = [4, 4];
+      const sims = homes.map((h, i) => {
+        const g = part(h % w, Math.floor(h / w), radius[i]);
+        return new FactionSim(g, g.placeOf!(h), { ...def, id: `f${i}`, incomeStep: 0.5 }, { exp: false, k: 1 });
+      });
+      const all = new FactionsSim(sims);
+      const before: string[][] = [];
+      for (let k = 0; k < 1_000_000 && all.year < 3000; k++) {
+        all.advanceTo(3000, chunked && k % 3 === 0 ? -1 : Infinity);
+        const i = all.growing;
+        if (i === null) continue;
+        const s = sims[i];
+        // grown only when nothing is left in it: every target in reach is taken
+        before.push(history(sims));
+        radius[i] *= 1.5;
+        if (radius[i] > 50) s.finalRegion();
+        else {
+          const g = part(homes[i] % w, Math.floor(homes[i] / w), radius[i]);
+          const old = s.graph;
+          s.moveTo(g, (p) => g.placeOf!(old.keys[p] as number));
+        }
+        all.grown(i);
+        // the history so far is the same on the larger graph
+        expect(history(sims)).toEqual(before[before.length - 1]);
+      }
+      return { history: history(sims), growths: before.length, sims };
+    };
+    const whole = run(false);
+    expect(whole.growths).toBeGreaterThan(6);
+    expect(run(true).history).toEqual(whole.history);
+    // in the end every place to settle is a colony, and no place belongs to both
+    const [pa, pb] = whole.history.map((h) => new Set(h.split(' ').map((e) => e.split(':')[1])));
+    expect([...pa].filter((p) => pb.has(p))).toEqual([]);
+    const colonies = new Set(whole.history.flatMap((h) => h.split(' ').filter((e) => e.endsWith(`:${COLONY}`)).map((e) => Number(e.split(':')[1]))));
+    for (let p = 3; p < w * w; p += 7) expect(colonies.has(p)).toBe(true);
+    expect(whole.sims.every((s) => s.exhausted)).toBe(true);
+  });
+
+  it('stops at its most colonies', () => {
+    const { full } = grid(30);
+    const sim = new FactionSim(full, 15 * 30 + 15, { ...def, incomeStep: 1, maxColonies: 12 }, { exp: false, k: 1 });
+    sim.advanceTo(2300);
+    expect(sim.colonies).toBe(12);
+    expect(sim.capped).toBe(true);
+    expect(sim.events.filter((e) => e.kind === COLONY)).toHaveLength(12);
+  });
+});
+
 describe('faction world', () => {
   it('lists the stars of each place compactly and finds places by key', async () => {
     const { placeMembers } = await import('../../src/factions/world');
@@ -165,10 +266,16 @@ describe('faction world', () => {
     const { ungroup } = await import('../../src/ui/faction-box');
     expect(['2.027', '2,027', '2 027', '2027', '-1.000', '2.5', '12.34'].map(ungroup)).toEqual(['2027', '2027', '2027', '2027', '-1000', '2.5', '12.34']);
     // stored parameters are checked
-    const d = readDef({ startYear: 2100.4, incomeStep: -3, region: 1e6, targets: ['G', 'X'], color: 'red' });
+    const d = readDef({ startYear: 2100.4, incomeStep: -3, maxColonies: 1e9, targets: ['G', 'X'], color: 'red' });
     expect(d.startYear).toBe(2100);
     expect(d.incomeStep).toBe(0.001);
-    expect(d.region).toBe(500);
+    expect(d.maxColonies).toBe(1_000_000);
+    expect(readDef({ region: 250 }).maxColonies).toBe(SOLAR_EMPIRE.maxColonies);
+    // the region grows from 100 ly by a quarter each time, to 500 ly
+    const { nextRegion, REGION_START } = await import('../../src/factions/world');
+    const radii = [REGION_START];
+    while (radii.length < 20 && radii[radii.length - 1] < 500) radii.push(nextRegion(radii[radii.length - 1]));
+    expect(radii).toEqual([100, 125, 156, 195, 244, 305, 381, 500]);
     expect(d.targets).toEqual(['G']);
     expect(d.color).toBe(SOLAR_EMPIRE.color);
   });

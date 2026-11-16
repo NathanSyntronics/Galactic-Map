@@ -2,6 +2,14 @@
 
 Every round of changes that goes live raises the version by 0.01 (README, *Versions*).
 
+## 1.25 (2026-11-16)
+
+* A faction no longer has a fixed region: it starts in 100 ly around its home, and once nothing is
+  left within reach there, its region grows by a quarter (up to 500 ly) and it goes on. It stops
+  at its *most colonies* (a new parameter, 50,000 by default, in place of the region) or when
+  nothing is left within reach in 500 ly. The Solar Empire alone has 50,000 colonies in 2166.
+* While a region grows, the faction's simulation waits; the panel says so.
+
 ## 1.24 (2026-11-16)
 
 * Large factions no longer dim the other stars at any zoom: the stars shown only because a faction

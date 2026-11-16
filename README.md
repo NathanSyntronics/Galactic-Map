@@ -271,7 +271,8 @@ route costs), with a station on every system on the way and a colony at the end.
 for the date on the clock: switch the factions on under *Layers → Factions* and set the clock to a
 year per second or faster to watch the **Solar Empire** spread from the Sun from 2027 on. *New
 faction* adds factions with any home star; they grow together, and a system belongs to one of
-them at most. Colonies get a wide rim in the faction's colour, stations a thin one, and the jumps
+them at most. A faction's region grows with it (from 100 ly around its home up to 500 ly) until it
+has its most colonies (50,000 by default) or nothing is left within reach. Colonies get a wide rim in the faction's colour, stations a thin one, and the jumps
 are drawn as lines; the legend shows each faction's colour, colonies, stations, income per
 year and pool, a star's card its faction. See [`docs/FACTIONS.md`](docs/FACTIONS.md).
 
