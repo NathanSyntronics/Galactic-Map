@@ -72,6 +72,8 @@ export interface Settings {
   jumpCostK: number;
   /** Route flyby: seconds per star. */
   flybyStep: number;
+  /** The factions (docs/FACTIONS.md) drawn for the year on the clock. */
+  factions: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -116,6 +118,7 @@ export const DEFAULT_SETTINGS: Settings = {
   jumpCostExp: false,
   jumpCostK: 1,
   flybyStep: 2.5,
+  factions: true,
 };
 
 /**

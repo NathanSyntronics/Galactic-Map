@@ -3,6 +3,7 @@ import {
   BufferAttribute,
   BufferGeometry,
   Camera,
+  Color,
   Group,
   Matrix3,
   Points,
@@ -42,6 +43,7 @@ uniform float uDt;
 uniform float uImpCut;
 uniform float uMarks;
 uniform float uMarkedOnly;
+uniform vec3 uFactionColors[4];
 uniform float uPixelRatio;
 uniform vec3 uCamLocal;
 uniform vec3 uCamRest;
@@ -61,6 +63,8 @@ varying float vBody;
 varying float vFade;
 varying float vMark;
 varying float vRing;
+varying vec4 vRingColor;
+varying float vRingWidth;
 void main() {
   // the epoch position (exact relative to the camera close by) plus the motion since then
   vec3 rel = (position - uCamLocal) + aVel * uDt;
@@ -84,6 +88,8 @@ void main() {
     vFade = 0.0;
     vMark = 0.0;
     vRing = 0.0;
+    vRingColor = vec4(0.0);
+    vRingWidth = 0.0;
     return;
   }
   vec4 mv = vec4(mat3(modelViewMatrix) * rel + uCamRest, 1.0);
@@ -102,6 +108,8 @@ void main() {
   vBody = px;
   vMark = 0.0;
   vRing = 0.0;
+  vRingColor = vec4(0.0);
+  vRingWidth = 0.0;
   if ((uMarks > 0.5 && aMark > 0.5) || found) {
     // a thin rim just outside the star's visible body (its core on a large sprite, the soft disk
     // on a small one): the sprite grows to hold it
@@ -109,6 +117,20 @@ void main() {
     vRing = mix(0.4, 0.14, large) * px + 2.0 * uPixelRatio;
     px = max(px, 2.0 * (vRing + 1.5 * uPixelRatio));
     vMark = aMark;
+    // the rim's colour and width: a faction's colony (wide) or station (thin, fainter); found by the
+    // filter (gold); planets (blue, green with a potentially habitable one)
+    if (aMark > 7.5) {
+      float m = aMark - 8.0;
+      bool station = mod(m, 2.0) > 0.5;
+      vRingColor = vec4(uFactionColors[int(floor(m * 0.5 + 0.01))], station ? 0.75 : 1.0);
+      vRingWidth = station ? 0.6 : 1.4;
+    } else if (aMark > 2.5) {
+      vRingColor = vec4(1.0, 0.76, 0.24, 1.0);
+      vRingWidth = 1.0;
+    } else {
+      vRingColor = aMark > 1.5 ? vec4(0.31, 0.88, 0.54, 1.0) : vec4(0.35, 0.65, 1.0, 1.0);
+      vRingWidth = 0.75;
+    }
   }
   gl_PointSize = px;
   gl_Position = projectionMatrix * mv;
@@ -129,6 +151,8 @@ varying float vBody;
 varying float vFade;
 varying float vMark;
 varying float vRing;
+varying vec4 vRingColor;
+varying float vRingWidth;
 void main() {
   vec2 c = gl_PointCoord * 2.0 - 1.0;
   float rc2 = dot(c, c);
@@ -152,9 +176,9 @@ void main() {
   if (vMark > 0.5) {
     // the planets' rim: blue, green with a potentially habitable planet; gold: found by the filter
     // (fades with the sphere only)
-    float w = (vMark > 2.5 ? 1.0 : 0.75) * uPixelRatio;
-    float ring = (1.0 - smoothstep(w * 0.5, w * 1.5, abs(rp - vRing))) * 0.9 * vFade * min(uBrightness, 1.0);
-    vec3 rc = vMark > 2.5 ? vec3(1.0, 0.76, 0.24) : vMark > 1.5 ? vec3(0.31, 0.88, 0.54) : vec3(0.35, 0.65, 1.0);
+    float w = vRingWidth * uPixelRatio;
+    float ring = (1.0 - smoothstep(w * 0.5, w * 1.5, abs(rp - vRing))) * 0.9 * vRingColor.a * vFade * min(uBrightness, 1.0);
+    vec3 rc = vRingColor.rgb;
     float t = a + ring;
     if (t > 0.0) col = (col * a + rc * ring) / t;
     a = min(t, 1.0);
@@ -240,6 +264,7 @@ export function createStarMaterial(): ShaderMaterial {
       uBrightness: { value: 1 },
       uPixelRatio: { value: 1 },
       uMarks: { value: 0 },
+      uFactionColors: { value: [new Color(), new Color(), new Color(), new Color()] },
       uMarkedOnly: { value: 0 },
       uDt: { value: 0 },
       uImpCut: { value: NO_CUT },
@@ -369,6 +394,9 @@ function temperatureStyle(node: NodeData, i: number, s: Settings, colors: Uint8A
 
 /** The rim of a star the filter found (gold, drawn whatever the completeness cut and the planet rims). */
 export const MARK_FILTER = 3;
+/** Rims of the factions' systems: 8 + 2 · faction for a colony, one more for a station (four factions). */
+export const MARK_FACTION = 8;
+export const MAX_FACTION_COLOURS = 4;
 /** Colour factor of the stars the filter did not find (option "dim the others"). */
 export const FILTER_DIM = 0.28;
 
@@ -401,6 +429,11 @@ export function computeStyle(
       continue;
     }
     if (marks && node.planets.get(i)) marks[i] = planetMark(node, i);
+    // a faction's system (see MARK_FACTION) before the planets' rim, the filter's before both
+    if (marks && plan.factionMark) {
+      const f = plan.factionMark(node, i);
+      if (f) marks[i] = f;
+    }
     styleStar(node, i, s, plan, colors, sizes, missing);
     const h = plan.highlight;
     if (h) {
@@ -591,6 +624,16 @@ export class Starfield {
 
   get(path: string): RenderedNode | undefined {
     return this.rendered.get(path);
+  }
+
+  /** Recompute the colours, sizes and rims of one node (a faction's systems changed). */
+  restyleNode(path: string): void {
+    const r = this.rendered.get(path);
+    if (!r) return;
+    computeStyle(r.data, this.settings(), this.plan(), r.colors, r.sizes, r.marks, r.missing);
+    (r.points.geometry.getAttribute('aColor') as BufferAttribute).needsUpdate = true;
+    (r.points.geometry.getAttribute('aSize') as BufferAttribute).needsUpdate = true;
+    (r.points.geometry.getAttribute('aMark') as BufferAttribute).needsUpdate = true;
   }
 
   /** Recompute colours/sizes of all nodes (after a style or filter change). */

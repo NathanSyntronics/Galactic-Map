@@ -40,7 +40,7 @@ void main() {
 }
 `;
 
-function lineMaterial(): ShaderMaterial {
+export function lineMaterial(): ShaderMaterial {
   return new ShaderMaterial({
     vertexShader,
     fragmentShader,
@@ -56,7 +56,7 @@ function lineMaterial(): ShaderMaterial {
   });
 }
 
-function segments(material: ShaderMaterial, renderOrder: number): LineSegments {
+export function segments(material: ShaderMaterial, renderOrder: number): LineSegments {
   const l = new LineSegments(new BufferGeometry(), material);
   l.frustumCulled = false;
   // before the stars (renderOrder >= 0), which are drawn additively on top

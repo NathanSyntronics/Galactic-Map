@@ -2,6 +2,17 @@
 
 Every round of changes that goes live raises the version by 0.01 (README, *Versions*).
 
+## 1.19 (2026-11-16)
+
+* Factions: the Solar Empire grows from the Sun along the jump network, for the date on the clock.
+  Every colony earns credits (1 in its first year, 0.2 more each year, at most 100; the Sun from
+  2027), and the pool pays for the jumps of the cheapest route to the next F, G or K single star
+  (exponential costs, k = 2): a station on every system on the way, a colony at the end. With the
+  clock at a year per second or faster you watch it spread: the first station at Alpha Centauri
+  in 2033, the first colony at Pi³ Orionis in 2067, 15 colonies by 2100, and the 150 ly region
+  settled by about 2213. Colonies get a wide rim in the faction's colour, stations a thin one, and
+  the jumps are drawn as lines. All of it can be set under Layers → Factions.
+
 ## 1.18 (2026-11-16)
 
 * Route costs simpler: a jump of d light years costs d^k (polynomial) or k^(d − 1) (exponential,

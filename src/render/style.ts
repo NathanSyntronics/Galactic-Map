@@ -286,6 +286,8 @@ export interface StylePlan {
   missing: MissingStyle;
   /** The stars a filter found (gold rim, see starfield MARK_FILTER); `dim`: the others darker. */
   highlight?: Highlight | null;
+  /** The rim of a faction's system (starfield MARK_FACTION codes; 0: none). */
+  factionMark?: ((node: NodeData, i: number) => number) | null;
 }
 
 export interface Highlight {

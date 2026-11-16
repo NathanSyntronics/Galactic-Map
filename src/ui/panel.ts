@@ -82,6 +82,8 @@ export class SettingsPanel {
   private readonly layers = el('div', 'layers');
   /** The Filter tab's content (ui/filter-box), owned by the app. */
   private filterContent: HTMLElement | null = null;
+  /** The factions' section of the Layers tab (ui/faction-box), owned by the app. */
+  private factionContent: HTMLElement | null = null;
   /** The jump network controls; rebuilt when the network is switched or its attribute changes. */
   private readonly jumpBox = el('div', 'jumps');
   /** Link count or the reason why there is no network (kept across rebuilds). */
@@ -173,6 +175,12 @@ export class SettingsPanel {
   attributesChanged(): void {
     this.renderLayers();
     this.renderJumps();
+  }
+
+  /** The factions' section of the Layers tab. */
+  setFactionContent(content: HTMLElement): void {
+    this.factionContent = content;
+    document.getElementById('panel-factions')?.replaceChildren(content);
   }
 
   /** The content of the Filter tab. */
@@ -348,6 +356,10 @@ export class SettingsPanel {
     layers.appendChild(el('h3', '', t('jumpSection')));
     layers.appendChild(this.jumpBox);
     this.renderJumps();
+    const factions = el('div', 'faction-slot');
+    factions.id = 'panel-factions';
+    if (this.factionContent) factions.appendChild(this.factionContent);
+    layers.appendChild(factions);
 
     // --- Filter: the stars that meet criteria, as a list and on the map
     const filter = page('filter');
