@@ -2,6 +2,14 @@
 
 Every round of changes that goes live raises the version by 0.01 (README, *Versions*).
 
+## 1.22 (2026-11-16)
+
+* Factions no longer freeze the map at a fast clock: their simulation is several hundred times
+  faster (two factions in 150 ly regions until both are settled: about 0.1 s instead of nearly
+  three minutes), it takes at most a few milliseconds per frame and catches up over the next
+  frames (the panel says so meanwhile), and new colonies and stations are added to the drawing
+  instead of drawing all again.
+
 ## 1.21 (2026-11-16)
 
 * The legend shows each faction's income per year ("+3,591.6 credits a year"), with the credits in

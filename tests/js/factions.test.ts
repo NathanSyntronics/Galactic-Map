@@ -161,3 +161,39 @@ describe('faction world', () => {
     expect(stations.every((e) => !target[e.place])).toBe(true);
   });
 });
+
+describe('factions in steps', () => {
+  it('gives the same history when simulated in small steps (pausing mid-year)', () => {
+    // a grid of 60 x 60 places with two factions in opposite corners, every seventh place to settle
+    const w = 60;
+    const n = w * w;
+    const a: number[] = [];
+    const b: number[] = [];
+    const len: number[] = [];
+    for (let y = 0; y < w; y++) for (let x = 0; x < w; x++) {
+      const p = y * w + x;
+      if (x + 1 < w) a.push(p), b.push(p + 1), len.push(1 + ((p * 7) % 5) / 4);
+      if (y + 1 < w) a.push(p), b.push(p + w), len.push(1 + ((p * 3) % 5) / 4);
+    }
+    const target = new Uint8Array(n);
+    for (let p = 3; p < n; p += 7) target[p] = 1;
+    const g: FactionGraph = { count: n, keys: Array.from({ length: n }, (_, k) => k), links: { count: a.length, a, b, length: len }, target };
+    const run = (chunked: boolean) => {
+      const sims = [
+        new FactionSim(g, 0, { ...def, id: 'a', incomeStep: 0.5 }, { exp: false, k: 1 }),
+        new FactionSim(g, n - 1, { ...def, id: 'b', incomeStep: 0.5 }, { exp: false, k: 1 }),
+      ];
+      const all = new FactionsSim(sims);
+      if (!chunked) all.advanceTo(2400);
+      else for (let k = 0; k < 1e6 && all.year < 2400; k++) all.advanceTo(2400, performance.now() + 0.05);
+      return sims.map((s) => s.events.map((e) => `${e.year}:${e.place}:${e.kind}`).join(' '));
+    };
+    const whole = run(false);
+    expect(run(true)).toEqual(whole);
+    // both grew, and no place belongs to both
+    const [pa, pb] = whole.map((h) => new Set(h.split(' ').map((e) => e.split(':')[1])));
+    expect(pa.size).toBeGreaterThan(100);
+    expect(pb.size).toBeGreaterThan(100);
+    expect([...pa].filter((p) => pb.has(p))).toEqual([]);
+  });
+});

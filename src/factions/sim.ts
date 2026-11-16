@@ -73,34 +73,54 @@ export function colonyIncome(def: Pick<FactionDef, 'incomeStep' | 'maxIncome'>, 
   return n < 0 ? 0 : Math.min(def.incomeStep * (n + 1), def.maxIncome);
 }
 
+/** Binary min-heap of items by cost, then key (typed arrays, grown as needed). */
 class MinHeap {
-  private cost: number[] = [];
-  private key: number[] = [];
-  private item: number[] = [];
-
-  get size(): number {
-    return this.item.length;
-  }
+  private cost = new Float64Array(256);
+  private key = new Float64Array(256);
+  private item = new Int32Array(256);
+  size = 0;
 
   clear(): void {
-    this.cost.length = 0;
-    this.key.length = 0;
-    this.item.length = 0;
+    this.size = 0;
   }
 
   private less(i: number, j: number): boolean {
-    return this.cost[i] !== this.cost[j] ? this.cost[i] < this.cost[j] : this.key[i] < this.key[j];
+    const c = this.cost;
+    return c[i] !== c[j] ? c[i] < c[j] : this.key[i] < this.key[j];
   }
 
   private swap(i: number, j: number): void {
-    for (const a of [this.cost, this.key, this.item]) [a[i], a[j]] = [a[j], a[i]];
+    const c = this.cost;
+    const k = this.key;
+    const it = this.item;
+    const a = c[i];
+    c[i] = c[j];
+    c[j] = a;
+    const b = k[i];
+    k[i] = k[j];
+    k[j] = b;
+    const d = it[i];
+    it[i] = it[j];
+    it[j] = d;
   }
 
   push(item: number, cost: number, key: number): void {
-    this.cost.push(cost);
-    this.key.push(key);
-    this.item.push(item);
-    let i = this.item.length - 1;
+    if (this.size === this.item.length) {
+      const n = 2 * this.size;
+      const c = new Float64Array(n);
+      c.set(this.cost);
+      this.cost = c;
+      const k = new Float64Array(n);
+      k.set(this.key);
+      this.key = k;
+      const it = new Int32Array(n);
+      it.set(this.item);
+      this.item = it;
+    }
+    let i = this.size++;
+    this.cost[i] = cost;
+    this.key[i] = key;
+    this.item[i] = item;
     while (i > 0) {
       const up = (i - 1) >> 1;
       if (!this.less(i, up)) break;
@@ -109,23 +129,26 @@ class MinHeap {
     }
   }
 
-  pop(): { item: number; cost: number } {
-    const top = { item: this.item[0], cost: this.cost[0] };
-    const last = this.item.length - 1;
-    this.swap(0, last);
-    this.cost.pop();
-    this.key.pop();
-    this.item.pop();
-    let i = 0;
-    for (;;) {
-      const l = 2 * i + 1;
-      const r = l + 1;
-      let m = i;
-      if (l < last && this.less(l, m)) m = l;
-      if (r < last && this.less(r, m)) m = r;
-      if (m === i) break;
-      this.swap(i, m);
-      i = m;
+  /** The cheapest item (topCost: its cost); call only when size > 0. */
+  topCost = 0;
+
+  pop(): number {
+    const top = this.item[0];
+    this.topCost = this.cost[0];
+    const last = --this.size;
+    if (last > 0) {
+      this.swap(0, last);
+      let i = 0;
+      for (;;) {
+        const l = 2 * i + 1;
+        const r = l + 1;
+        let m = i;
+        if (l < last && this.less(l, m)) m = l;
+        if (r < last && this.less(r, m)) m = r;
+        if (m === i) break;
+        this.swap(i, m);
+        i = m;
+      }
     }
     return top;
   }
@@ -161,8 +184,8 @@ export class FactionSim {
   homeTaken = false;
   /** Places another faction holds: closed to this one. */
   readonly blocked: Uint8Array;
-  /** The costs must be computed again (a place on a cheapest path was closed). */
-  private stale = false;
+  /** Places were closed since the costs were computed (some costs may be too low now). */
+  private closed = false;
   private readonly start: number[];
   private readonly to: number[];
   private readonly len: number[];
@@ -170,15 +193,16 @@ export class FactionSim {
   private route: Step[] | null = null;
   private routePos = 0;
   /**
-   * The cheapest cost from the faction's systems to every place (0 for its own), with the place it
-   * is reached from and that jump's cost: kept up to date as systems are added (costs only fall),
-   * so a new route needs no search over the whole network.
+   * The cheapest known cost from the faction's systems to the places (0 for its own), with the
+   * place each is reached from and that jump's cost. One Dijkstra search runs on over the whole
+   * simulation, only as far as the next route needs: a new system enters its frontier at cost 0,
+   * and costs only fall, so no place is searched again unless its cost fell.
    */
   private readonly best: Float64Array;
   private readonly pred: Int32Array;
   private readonly jump: Float64Array;
-  /** The places to settle by their cost (stale entries are skipped). */
-  private readonly targets = new MinHeap();
+  /** The search's frontier: places by cost (stale entries are skipped). */
+  private readonly work = new MinHeap();
   /** Colonies' first income years in order (nondecreasing), for the income in O(1). */
   private readonly firstYears: number[] = [];
   private maxed = 0;
@@ -225,7 +249,7 @@ export class FactionSim {
       this.owned[home] = COLONY;
       this.events.push({ year: def.startYear, place: home, from: -1, kind: COLONY, cost: 0 });
       this.addColony(def.startYear);
-      this.claim(home);
+      this.relax([home]);
     } else {
       this.exhausted = true;
     }
@@ -328,7 +352,7 @@ export class FactionSim {
     const kind = last ? COLONY : STATION;
     this.owned[step.place] = kind;
     this.events.push({ year, place: step.place, from: step.from, kind, cost: step.cost });
-    this.claim(step.place);
+    this.relax([step.place]);
     this.routePos++;
     if (last) {
       this.addColony(year + 1);
@@ -357,60 +381,85 @@ export class FactionSim {
     if (this.blocked[place] || this.owned[place]) return;
     this.blocked[place] = 1;
     if (place === this.home) this.homeTaken = true;
-    if (this.route && this.route.slice(this.routePos).some((st) => st.place === place)) this.route = null;
-    // costs through it are no longer reachable: computed again before the next route
-    if (Number.isFinite(this.best[place])) this.stale = true;
+    if (this.route) {
+      for (let k = this.routePos; k < this.route.length; k++) {
+        if (this.route[k].place === place) {
+          // the route is planned anew; its target (taken from the search's frontier) goes back in
+          const t = this.route[this.route.length - 1].place;
+          if (!this.blocked[t] && !this.owned[t]) this.work.push(t, this.best[t], this.graph.keys[t]);
+          this.route = null;
+          break;
+        }
+      }
+    }
+    // the costs through it are too low now; they are checked when a route is chosen (nextRoute)
+    if (Number.isFinite(this.best[place])) this.closed = true;
   }
 
-  /** All costs computed again from the faction's systems, around the closed places. */
+  /** All costs computed again from the faction's systems (one search from all of them), around the closed places. */
   private recompute(): void {
     this.best.fill(Infinity);
     this.pred.fill(-1);
-    this.targets.clear();
-    for (let p = 0; p < this.graph.count; p++) if (this.owned[p]) this.claim(p);
-    this.stale = false;
+    this.work.clear();
+    const own: number[] = [];
+    for (let p = 0; p < this.graph.count; p++) if (this.owned[p]) own.push(p);
+    this.closed = false;
+    this.relax(own);
   }
 
-  /** A place becomes the faction's: cost 0, and the costs of the places around fall (Dijkstra). */
-  private claim(place: number): void {
+  /** Places become the faction's: cost 0, into the search's frontier (searched on when needed). */
+  private relax(sources: number[]): void {
     const keys = this.graph.keys;
-    const { best, pred, jump } = this;
-    best[place] = 0;
-    pred[place] = -1;
-    const work = new MinHeap();
-    work.push(place, 0, keys[place]);
-    while (work.size) {
-      const { item: u, cost } = work.pop();
-      if (cost > best[u]) continue;
-      for (let k = this.start[u]; k < this.start[u + 1]; k++) {
-        const v = this.to[k];
-        if (this.owned[v] || this.blocked[v]) continue;
-        const j = this.cost(this.len[k]);
-        const c = cost + j;
-        if (c < best[v] || (c === best[v] && pred[v] >= 0 && keys[u] < keys[pred[v]])) {
-          const fell = c < best[v];
-          best[v] = c;
-          pred[v] = u;
-          jump[v] = j;
-          if (fell) {
-            work.push(v, c, keys[v]);
-            if (this.graph.target[v]) this.targets.push(v, c, keys[v]);
-          }
-        }
+    for (const p of sources) {
+      this.best[p] = 0;
+      this.pred[p] = -1;
+      this.work.push(p, 0, keys[p]);
+    }
+  }
+
+  /** The costs of the places around u fall where u is the cheaper way to them. */
+  private expand(u: number, cost: number): void {
+    const keys = this.graph.keys;
+    const { best, pred, jump, work } = this;
+    for (let k = this.start[u]; k < this.start[u + 1]; k++) {
+      const v = this.to[k];
+      if (this.owned[v] || this.blocked[v]) continue;
+      const j = this.cost(this.len[k]);
+      const c = cost + j;
+      if (c < best[v] || (c === best[v] && pred[v] >= 0 && keys[u] < keys[pred[v]])) {
+        const fell = c < best[v];
+        best[v] = c;
+        pred[v] = u;
+        jump[v] = j;
+        if (fell) work.push(v, c, keys[v]);
       }
     }
   }
 
   /** The cheapest route from the faction's systems to a place it settles (null: none left). */
   private nextRoute(): Step[] | null {
-    if (this.stale) this.recompute();
-    const t = this.targets;
-    while (t.size) {
-      const { item: u, cost } = t.pop();
-      if (this.owned[u] || this.blocked[u] || cost > this.best[u] || !this.graph.target[u]) continue;
+    const w = this.work;
+    while (w.size) {
+      const u = w.pop();
+      const cost = w.topCost;
+      if (cost > this.best[u] || this.blocked[u]) continue;
+      this.expand(u, cost);
+      if (this.owned[u] || !this.graph.target[u]) continue;
       const steps: Step[] = [];
-      for (let p = u; !this.owned[p]; p = this.pred[p]) steps.push({ place: p, from: this.pred[p], cost: this.jump[p] });
-      return steps.reverse();
+      let open = true;
+      for (let p = u; !this.owned[p]; p = this.pred[p]) {
+        if (this.blocked[p] || p < 0) {
+          open = false;
+          break;
+        }
+        steps.push({ place: p, from: this.pred[p], cost: this.jump[p] });
+      }
+      // Costs only fall, except where another faction closed a place: they are lower bounds then.
+      // A route without a closed place costs what it says, so it is the cheapest; one through a
+      // closed place means computing the costs again (and the target again)
+      if (open) return steps.reverse();
+      if (!this.closed) return null;
+      this.recompute();
     }
     return null;
   }
@@ -424,6 +473,10 @@ export class FactionSim {
  */
 export class FactionsSim {
   year: number;
+  /** A year begun (incomes paid) but not finished: its purchases go on in the next call. */
+  private pending: number | null = null;
+  /** Purchases checked against the deadline in groups of this many. */
+  private static readonly CHECK_EVERY = 4;
   private readonly places: Map<number, number>[];
 
   constructor(readonly sims: FactionSim[]) {
@@ -457,22 +510,34 @@ export class FactionsSim {
     });
   }
 
-  advanceTo(year: number): void {
+  /**
+   * Simulates up to `year`, or until `deadline` (performance.now(); checked after each year), so
+   * that a frame never waits long: the rest follows in the next frames.
+   */
+  advanceTo(year: number, deadline = Infinity): void {
     const last = Math.min(year, this.year + 1 + MAX_YEARS);
+    let bought = 0;
     while (this.year < last) {
+      if (performance.now() > deadline) return;
       const y = this.year + 1;
-      for (const s of this.sims) s.beginYear(y);
+      if (this.pending !== y) {
+        for (const s of this.sims) s.beginYear(y);
+        this.pending = y;
+      }
+      // purchases in turn; a year with many of them is continued in the next call
       for (let progress = true; progress; ) {
         progress = false;
-        this.sims.forEach((s, i) => {
-          const p = s.buy(y);
+        for (let i = 0; i < this.sims.length; i++) {
+          const p = this.sims[i].buy(y);
           if (p >= 0) {
             progress = true;
             this.taken(i, p);
+            if (++bought % FactionsSim.CHECK_EVERY === 0 && performance.now() > deadline) return;
           }
-        });
+        }
       }
       for (const s of this.sims) s.endYear(y);
+      this.pending = null;
       this.year = y;
     }
   }

@@ -1,4 +1,4 @@
-import { Color, MathUtils, Matrix4, PerspectiveCamera, Scene, Vector3, WebGLRenderer } from 'three';
+import { BufferAttribute, Color, MathUtils, Matrix4, PerspectiveCamera, Scene, Vector3, WebGLRenderer } from 'three';
 import { Navigation } from './controls/navigation';
 import { medianJump, tourStart } from './controls/tour';
 import { LABELLED_RADIUS, PRECISE_PX, SPRITE_CORE, labelledWins, pickScore } from './controls/pick';
@@ -106,7 +106,7 @@ import { LabelLayer, TopK, labelUnder, labelledStarNear, milkyWayLabelPos, named
 import { SettingsPanel } from './ui/panel';
 import { FilterBox, type FilterAttribute, type FilterRow } from './ui/filter-box';
 import { FactionBox, factionName, type FactionChange, type HomeStar } from './ui/faction-box';
-import { COLONY, FactionSim, FactionsSim, type FactionDef } from './factions/sim';
+import { COLONY, FactionSim, FactionsSim, type FactionDef, type FactionEvent } from './factions/sim';
 import { factionWorld, readDefs, saveDefs, targetsOf, type FactionWorld } from './factions/world';
 import { FactionLines, type FactionJump } from './render/faction-lines';
 import { RouteBox, type RouteNames } from './ui/route-box';
@@ -196,6 +196,11 @@ const FACTION_MAX_BYTES = 48e6;
 const FACTION_DELAY_MS = 800;
 /** The factions' rims and links are drawn again at most this often while their systems change. */
 const FACTION_DRAW_MS = 150;
+/**
+ * Time per frame (ms) the factions' simulation may take: a fast clock (100 years a second) or a jump
+ * far ahead is caught up over the next frames, and the map shows the last year simulated meanwhile.
+ */
+const FACTION_FRAME_MS = 6;
 
 /** One faction's run: its region's nodes, then its world and simulation (docs/FACTIONS.md). */
 interface FactionRun {
@@ -308,6 +313,10 @@ export class App {
   private factionMarks = new Map<string, Uint8Array>();
   /** The faction of each star drawn ("path:index"): which, colony or station, since when. */
   private factionStars = new Map<string, { faction: number; kind: number; year: number }>();
+  /** The jumps drawn, in the order of the events. */
+  private factionJumps: FactionJump[] = [];
+  /** The selected star's faction as its card shows it ("faction:kind", '' none). */
+  private factionCardKey = '';
   /** Nodes drawn (also) for the factions' systems. */
   private factionPaths = new Set<string>();
   private factionTimer = 0;
@@ -3122,9 +3131,11 @@ export class App {
   private updateFactions(s: Settings): void {
     this.factionLines.visible = s.factions;
     if (!s.factions || !this.factionRuns.length) return;
-    const year = yearOfJd(this.planetJd());
     const all = this.factionSims;
-    if (all && year > all.year) all.advanceTo(year);
+    const clock = yearOfJd(this.planetJd());
+    if (all && clock > all.year) all.advanceTo(clock, performance.now() + FACTION_FRAME_MS);
+    // the year drawn: the clock's, or the last one simulated while the simulation catches up
+    const year = this.factionYear();
     let changed = false;
     for (const run of this.factionRuns) if (run.sim && run.sim.countAt(year) !== run.shown) changed = true;
     const now = performance.now();
@@ -3139,63 +3150,121 @@ export class App {
     this.factionLines.update(this.nav.target, s.radius);
   }
 
-  /** The rims and links of the factions' systems up to the year on the clock. */
-  private showFactions(force: boolean): void {
-    const year = yearOfJd(this.planetJd());
+  /** The year the factions are drawn for: the clock's, at most the last one simulated. */
+  private factionYear(): number {
+    const clock = yearOfJd(this.planetJd());
     const all = this.factionSims;
-    if (all && year > all.year) all.advanceTo(year);
-    const marks = new Map<string, Uint8Array>();
-    const stars = new Map<string, { faction: number; kind: number; year: number }>();
-    const jumps: FactionJump[] = [];
-    let origin: Vector3 | null = null;
+    return all ? Math.min(clock, Math.max(all.year, Math.min(...this.factionRuns.map((r) => r.def.startYear)) - 1)) : clock;
+  }
+
+  /**
+   * The rims and links of the factions' systems up to the year drawn (see factionYear). Going
+   * forward only the new systems are added (their rims set directly in the nodes); going back, or
+   * `force`, draws everything again.
+   */
+  private showFactions(force: boolean): void {
+    const year = this.factionYear();
+    const forward = !force && this.factionRuns.every((r) => !r.sim || r.sim.countAt(year) >= r.shown);
+    if (!forward) {
+      this.redrawFactions(year);
+      return;
+    }
+    const touched = new Set<string>();
+    let added = false;
     this.factionRuns.forEach((run, f) => {
       const { sim, world } = run;
+      if (!sim || !world) return;
+      const count = sim.countAt(year);
+      for (let e = run.shown; e < count; e++) {
+        this.drawFactionEvent(run, f, sim.events[e], touched);
+        added = true;
+      }
+      run.shown = count;
+    });
+    if (!added) return;
+    const fresh = [...touched].some((p) => !this.factionPaths.has(p));
+    for (const p of touched) this.factionPaths.add(p);
+    if (this.factionMarks.size && this.stylePlan.factionMark == null) this.stylePlan = this.planOf(this.store.get());
+    // the rims straight into the drawn nodes (the filter's gold rim stays)
+    for (const path of touched) {
+      const rn = this.starfield.get(path);
+      const m = this.factionMarks.get(path);
+      if (!rn || !m) continue;
+      for (let i = 0; i < m.length && i < rn.marks.length; i++) if (m[i] && rn.marks[i] !== MARK_FILTER) rn.marks[i] = m[i];
+      (rn.points.geometry.getAttribute('aMark') as BufferAttribute).needsUpdate = true;
+    }
+    this.factionLines.set(this.factionJumps, this.factionOrigin());
+    if (fresh) this.lodDirty = true;
+    this.candidatesDirty = true;
+    this.factionCardCheck();
+  }
+
+  /** One event: its stars' rims and faction, and the jump that reached it. */
+  private drawFactionEvent(run: FactionRun, f: number, ev: FactionEvent, touched: Set<string>): void {
+    const world = run.world!;
+    const colony = ev.kind === COLONY;
+    if (colony) run.colonies++;
+    else run.stations++;
+    const code = MARK_FACTION + 2 * f + (colony ? 0 : 1);
+    for (const m of world.members[ev.place]) {
+      let a = this.factionMarks.get(m.path);
+      if (!a) {
+        a = new Uint8Array(this.loader?.get(m.path)?.count ?? 8192);
+        this.factionMarks.set(m.path, a);
+      }
+      a[m.index] = code;
+      this.factionStars.set(`${m.path}:${m.index}`, { faction: f, kind: ev.kind, year: ev.year });
+      touched.add(m.path);
+    }
+    if (ev.from >= 0) {
+      const pos = world.net.places.positions;
+      const at = (p: number) => ({ x: pos[3 * p], y: pos[3 * p + 1], z: pos[3 * p + 2] });
+      this.factionJumps.push({ a: at(ev.from), b: at(ev.place), color: run.def.color, faint: !colony });
+    }
+  }
+
+  private factionOrigin(): { x: number; y: number; z: number } {
+    return this.factionRuns.find((r) => r.sim)?.centre ?? { x: 0, y: 0, z: 0 };
+  }
+
+  /** Everything drawn again for a year (going back in time, new simulations). */
+  private redrawFactions(year: number): void {
+    const before = this.factionMarks;
+    this.factionMarks = new Map();
+    this.factionStars = new Map();
+    this.factionJumps = [];
+    const touched = new Set<string>();
+    this.factionRuns.forEach((run, f) => {
       run.shown = 0;
       run.colonies = 0;
       run.stations = 0;
+      const { sim, world } = run;
       if (!sim || !world) return;
       const count = sim.countAt(year);
+      for (let e = 0; e < count; e++) this.drawFactionEvent(run, f, sim.events[e], touched);
       run.shown = count;
-      const pos = world.net.places.positions;
-      const at = (p: number) => ({ x: pos[3 * p], y: pos[3 * p + 1], z: pos[3 * p + 2] });
-      for (let e = 0; e < count; e++) {
-        const ev = sim.events[e];
-        const colony = ev.kind === COLONY;
-        if (colony) run.colonies++;
-        else run.stations++;
-        const code = MARK_FACTION + 2 * f + (colony ? 0 : 1);
-        for (const m of world.members[ev.place]) {
-          let a = marks.get(m.path);
-          if (!a) {
-            a = new Uint8Array(this.loader?.get(m.path)?.count ?? 8192);
-            marks.set(m.path, a);
-          }
-          a[m.index] = code;
-          stars.set(`${m.path}:${m.index}`, { faction: f, kind: ev.kind, year: ev.year });
-        }
-        if (ev.from >= 0) jumps.push({ a: at(ev.from), b: at(ev.place), color: run.def.color, faint: !colony });
-      }
-      origin ??= run.centre;
     });
-    const before = this.factionMarks;
-    const selectedBefore = this.selected ? this.factionStars.get(this.selected.key) : undefined;
-    this.factionMarks = marks;
-    this.factionStars = stars;
-    this.factionPaths = new Set(marks.keys());
-    if (before.size === 0 || marks.size === 0) this.stylePlan = this.planOf(this.store.get());
+    this.factionPaths = new Set(this.factionMarks.keys());
+    this.stylePlan = this.planOf(this.store.get());
     // only the nodes whose rims change
+    const marks = this.factionMarks;
     const same = (a: Uint8Array | undefined, b: Uint8Array | undefined) => !!a && !!b && a.length === b.length && a.every((v, k) => v === b[k]);
     for (const path of new Set([...before.keys(), ...marks.keys()])) {
-      if (force || !same(before.get(path), marks.get(path))) this.starfield.restyleNode(path);
+      if (!same(before.get(path), marks.get(path))) this.starfield.restyleNode(path);
     }
-    this.factionLines.set(jumps, origin ?? { x: 0, y: 0, z: 0 });
+    this.factionLines.set(this.factionJumps, this.factionOrigin());
     this.lodDirty = true;
     this.candidatesDirty = true;
-    // the selected star's card, when its faction changed
-    const selectedNow = this.selected ? this.factionStars.get(this.selected.key) : undefined;
-    if (this.selected && (selectedBefore?.faction !== selectedNow?.faction || selectedBefore?.kind !== selectedNow?.kind) && !this.info.editing) {
-      this.info.rerender(this.nav.target);
-    }
+    this.factionCardCheck();
+  }
+
+  /** The selected star's card again when its faction changed. */
+  private factionCardCheck(): void {
+    const sel = this.selected;
+    const now = sel ? this.factionStars.get(sel.key) : undefined;
+    const key = now ? `${now.faction}:${now.kind}` : '';
+    if (sel && key !== this.factionCardKey && !this.info.editing) this.info.rerender(this.nav.target);
+    this.factionCardKey = key;
   }
 
   /** No faction drawn (switched off, or before new networks). */
@@ -3203,6 +3272,7 @@ export class App {
     const before = this.factionMarks;
     this.factionMarks = new Map();
     this.factionStars = new Map();
+    this.factionJumps = [];
     this.factionPaths = new Set();
     this.stylePlan = this.planOf(this.store.get());
     for (const path of before.keys()) this.starfield.restyleNode(path);
@@ -3248,6 +3318,8 @@ export class App {
         const sim = run.sim;
         let text = t('factionState', { year, colonies, stations, credits, income: formatNumber(sim.incomeAt(year), 1) });
         if (sim.exhausted && run.shown === sim.events.length) text += ` · ${t('factionExhausted')}`;
+        // (the simulation is behind the clock: a fast clock or a jump ahead)
+        else if (this.factionSims && yearOfJd(this.planetJd()) > this.factionSims.year + 1) text += ` · ${t('factionCatchingUp')}`;
         say(text);
       }
     }

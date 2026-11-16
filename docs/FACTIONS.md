@@ -78,11 +78,20 @@ or station, and since when.
 * `src/factions/sim.ts`: `FactionSim`, one faction's simulation on a graph of places and links;
   `FactionsSim` runs several together, year by year as far as the clock asks (`advanceTo`), and
   closes a system taken by one to the others (by the stable key of its brightest star, so also in
-  their own networks; a closed place on a cheapest path makes the faction compute its costs anew). The cheapest cost from the faction's systems to every
-  place is kept up to date as systems are added (costs only fall, a Dijkstra search from each new
-  system), so finding the next route needs no search over the whole network; the colonies' income
-  is summed in constant time (their first years are in order, those at the maximum are a prefix).
-  The 250 ly region (46,000 systems settled) is simulated in well under a second.
+  their own networks). Each faction keeps one Dijkstra search running over the whole simulation:
+  a new system enters its frontier at cost 0, and the search goes on only as far as the next
+  route needs (costs only fall, so no place is searched again unless its cost fell). A place
+  closed by another faction leaves some costs too low; they are lower bounds, so a chosen route
+  without a closed place is still the cheapest, and only a route through a closed place makes the
+  faction search again from all its systems. The colonies' income is summed in constant time
+  (their first years are in order, those at the maximum are a prefix).
+* Speed (1.22): two factions with 150 ly regions are simulated from 2027 until both regions are
+  settled in about 0.1 s in all (two 250 ly regions, 35,000 systems: 0.4 s); version 1.20 took
+  minutes for that, as every closed place made the other faction search its whole network again
+  from each of its systems. The app gives the simulation at most about 6 ms per frame and draws
+  the last year simulated meanwhile (*catching up with the clock*), so even a clock at 100,000
+  years a second or a jump far ahead never freezes the map; the rims and links of new systems are
+  added to what is drawn, not drawn again.
 * `src/factions/world.ts`: the faction's graph from a jump network (which places it settles, the
   stars of each place), and the stored parameters (`localStorage`, `galactic-map:factions`).
 * `src/app.ts` (*factions*): loads the region's nodes, computes the network and runs the
