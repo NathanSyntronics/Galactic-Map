@@ -3,8 +3,6 @@ export type Lang = 'en' | 'de';
 export type Quality = 'low' | 'medium' | 'high' | 'ultra';
 export type MissingStyle = 'dim' | 'hide' | 'normal';
 export type JumpColor = 'stars' | 'uniform' | 'length';
-/** How a jump's length counts when routes are compared (network/route JumpCost). */
-export type JumpCostKind = 'linear' | 'poly' | 'exp';
 
 export interface Settings {
   lang: Lang;
@@ -68,12 +66,10 @@ export interface Settings {
   jumpConnect: boolean;
   jumpColor: JumpColor;
   jumpOpacity: number;
-  /** Route costs: a jump's length as it is, or long jumps dearer (polynomial, exponential). */
-  jumpCost: JumpCostKind;
-  /** Exponent of the polynomial cost. */
-  jumpCostPower: number;
-  /** Factor of the exponential cost. */
-  jumpCostFactor: number;
+  /** Route costs (network/route JumpCost): exponential k^(d − 1) instead of polynomial d^k. */
+  jumpCostExp: boolean;
+  /** k of the jump cost: 1 is the length (polynomial) or one per jump (exponential). */
+  jumpCostK: number;
   /** Route flyby: seconds per star. */
   flybyStep: number;
 }
@@ -85,9 +81,9 @@ export const DEFAULT_SETTINGS: Settings = {
   labels: true,
   labelCount: 30,
   labelDesignations: true,
-  showBrownDwarfs: false,
+  showBrownDwarfs: true,
   showWhiteDwarfs: true,
-  maxDistErr: 20,
+  maxDistErr: 5,
   namedAlways: true,
   starSize: 4,
   brightness: 1,
@@ -116,10 +112,9 @@ export const DEFAULT_SETTINGS: Settings = {
   jumpHub: 1,
   jumpConnect: true,
   jumpColor: 'length',
-  jumpOpacity: 0.6,
-  jumpCost: 'linear',
-  jumpCostPower: 2,
-  jumpCostFactor: 3,
+  jumpOpacity: 0.5,
+  jumpCostExp: false,
+  jumpCostK: 1,
   flybyStep: 2.5,
 };
 
@@ -162,7 +157,6 @@ const CHOICES: Partial<Record<keyof Settings, readonly unknown[]>> = {
   quality: ['low', 'medium', 'high', 'ultra'],
   missingStyle: ['dim', 'hide', 'normal'],
   jumpColor: ['stars', 'uniform', 'length'],
-  jumpCost: ['linear', 'poly', 'exp'],
   planetSpeed: PLANET_SPEEDS,
   flybyStep: [0.5, 1, 2.5, 5],
 };
@@ -176,8 +170,7 @@ const RANGES: Partial<Record<keyof Settings, [number, number]>> = {
   jumpBright: [0, 20],
   jumpHub: [0, 2],
   jumpOpacity: [0.05, 1],
-  jumpCostPower: [0.5, 5],
-  jumpCostFactor: [0.5, 10],
+  jumpCostK: [0.5, 5],
 };
 
 export const QUALITY_BUDGET: Record<Quality, number> = {

@@ -90,8 +90,13 @@ describe('stored settings', () => {
       jumpHub: 1,
       jumpConnect: true,
       jumpColor: 'length',
-      jumpOpacity: 0.6,
+      jumpOpacity: 0.5,
+      // routes: the cost of a jump is its length
+      jumpCostExp: false,
+      jumpCostK: 1,
     });
+    // the stars shown: up to 5 % distance uncertainty (named stars always), brown dwarfs too
+    expect(DEFAULT_SETTINGS).toMatchObject({ maxDistErr: 5, namedAlways: true, showBrownDwarfs: true });
   });
 
   it('ignores unknown choices and clamps slider values when reading stored settings', () => {

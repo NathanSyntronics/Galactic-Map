@@ -29,30 +29,27 @@ This document is the specification the implementation follows.
 
 ## What counts as the best route
 
-* Mode **fewest jumps** (default): the smallest number of jumps; among those the shortest total
-  distance.
-* Mode **shortest distance**: the smallest sum of jump lengths; among those the fewest jumps.
+* The best route has the smallest sum of jump costs (below); among routes of equal cost the
+  shorter one.
 * Ties beyond that are broken deterministically (by the places' stable keys), so the same stars
   and settings always give the same route.
 
 ### Jump costs
 
-In both modes a jump counts with its length d, or, set under *Layers → Jump network → Cost of a
-jump in routes*, with a cost that makes long jumps dearer (`jumpCostFn` in
-`src/network/route.ts`; R is the jump range):
+A jump of length d (light years) costs, set under *Layers → Jump network* (`jumpCostFn` in
+`src/network/route.ts`):
 
-| setting | cost of a jump of length d |
-|---|---|
-| linear (default) | d |
-| polynomial, exponent p (0.5 to 5) | R · (d / R)^p |
-| exponential, factor k (0.5 to 10) | R · (e^(k·d/R) − 1) / (e^k − 1) |
+| setting | cost of a jump of d light years | k = 1 |
+|---|---|---|
+| polynomial (default) | d^k | the distance: the shortest way (default) |
+| exponential | k^(d − 1) | 1 per jump: the fewest jumps, among those the shortest way |
 
-A jump of the full range costs R either way, and every jump costs more than nothing, so the
-search stays a Dijkstra search. The larger p or k, the more a route prefers several short jumps
-to one long one (p below 1 does the opposite). With *fewest jumps* the costs only decide between
-routes with the same number of jumps. The lengths and totals shown stay the distances. From the
-Sun to Vega (jump range 9 ly): linear 7 jumps and 53.4 ly, polynomial (p = 3) 9 jumps and 58.2
-ly, exponential (k = 6) 11 jumps and 70.9 ly.
+A jump of one light year costs 1 either way, and every jump costs more than nothing, so the
+search stays a Dijkstra search; k goes from 0.5 to 5. The larger k, the more a route prefers
+several short jumps to one long one (k below 1 does the opposite). The lengths shown stay the
+distances; for k other than 1 the route box adds the total cost. Version 1.17 had the costs
+R · (d/R)^p and R · (e^(k·d/R) − 1)/(e^k − 1) and a choice of fewest jumps or shortest distance;
+the latter is now exponential with k = 1.
 
 ## The corridor
 

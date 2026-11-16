@@ -117,7 +117,8 @@ The settings panel (☰) has five tabs (the last one open is remembered in the b
   the Earth (the inner Solar System, 2 AU around the Sun) and the Sun (10 ly), both seen straight
   down onto the ecliptic with the Galactic Centre to the left, and the Galaxy (the Milky Way from
   above, 100,000 ly); the labels; the galactic grid and the height lines (the Sun's too).
-* **Stars:** brown dwarfs (off by default) and white dwarfs; a maximum distance uncertainty, which
+* **Stars:** brown dwarfs and white dwarfs (both shown by default); a maximum distance uncertainty
+  (5 % by default), which
   named stars ignore unless switched off (Betelgeuse's distance is uncertain by 12.5 %); star
   size (0.2× to 12×, 4× by default), brightness and colour saturation; the level of detail (how
   many stars may be loaded at once; it matters only for view radii of a few hundred light years and
@@ -254,46 +255,12 @@ it until they change something, and *Back to the site's dataset* returns to it. 
 data of their own do not download it (the app only checks that it exists). With an `[exact]` key
 column it is applied right away, in steps so that the map stays smooth; otherwise applying it
 first loads the name index (`search.json`, 16.5 MB, and `systems.json`). Large files are fine: the
-CSV reader and the value index are built for hundreds of thousands of rows (the shipped dataset,
-176,000 rows and 9.3 MB, 1.7 MB compressed, is read and applied in about 0.3 s on a desktop
-computer and takes about 17 MB of memory).
+CSV reader and the value index are built for hundreds of thousands of rows (a dataset of 176,000
+rows and 9.3 MB, 1.7 MB compressed, is read and applied in about 0.3 s on a desktop computer and
+takes about 17 MB of memory).
 
-**Example factions.** This repository ships such a dataset: nine factions (attribute *Faction*,
-whole system; the capitals also have *Capital* = `yes`), with German names (*Fraktion*,
-*Hauptstadt* = `ja`, *Liga von Wega* …): four small ones around the Sun and five large ones
-around distant giants, from 1,000 to 100,000 systems. Choose *Colour by → Faction* to see them;
-with the jump network's *Line colour → Star colours* the links take the faction colours too.
-
-| Faction | German | Capital | Distance | Systems | Colour |
-|---|---|---|---|---|---|
-| Commonwealth of Sol | Commonwealth von Sol | Sun | – | 90 | blue |
-| League of Vega | Liga von Wega | Vega | 25 ly | 60 | orange |
-| Realm of Arcturus | Reich von Arktur | Arcturus | 37 ly | 40 | red |
-| Pact of Pollux | Pakt von Pollux | Pollux | 34 ly | 20 | green |
-| Union of Betelgeuse | Union von Beteigeuze | Betelgeuse | 498 ly | 100,000 | light green |
-| Theocracy of Antares | Theokratie von Antares | Antares | 554 ly | 50,000 | pink |
-| Star Kingdom of Polaris | Königreich des Polarsterns | Polaris | 433 ly | 20,000 | yellow |
-| Syndicate of Canopus | Syndikat von Canopus | Canopus | 309 ly | 5,000 | teal |
-| Republic of Spica | Republik Spica | Spica | 250 ly | 1,000 | purple |
-
-The large territories reach 50 ly (Spica) to 254 ly (Betelgeuse) from their capitals; Betelgeuse's
-fills most of the map's edge region in the direction of Orion (the territories were computed when
-the star data ended at 650 ly; the stars farther out belong to no faction).
-
-The territories follow the jump network with the default settings. They grow from their capitals
-along its links, all at once: a faction claims the places (systems or single stars) that are
-linked to its territory, nearest to its capital first, until it has its size, and a place belongs
-to one faction at most. So every territory is one connected part of the network. The small
-factions grow together in the network of the 100 ly around the Sun; each large one grows in a
-network region of its own around its capital (100 to 360 ly; the capitals are 400 ly or more
-apart, so they cannot meet), which is checked to hold the territory a jump margin inside it. Text
-values are coloured in alphabetical order, so the names set the colours: the Sun and Vega, which
-share the longest border, get blue and orange, which stay distinct with red-green colour
-blindness, and the large factions come after the small ones in the alphabet, so the small ones
-keep their colours. `npm run factions` (`tools/make-factions.mjs`, about 15 s) recomputes them
-from the star data in `public/data/`. It writes exact keys (so a first visit loads no name index
-for them), the German names once per value, and checks that importing the file gives every star
-of a territory its faction, and that looking the keys up by name instead gives the same values.
+This repository ships no such dataset at the moment (the example factions of earlier versions
+were removed in 1.18).
 
 ### Jump network
 
@@ -349,12 +316,14 @@ specified in [`docs/ROUTES.md`](docs/ROUTES.md):
   the result. Start, destination and mode are kept in the browser and the route is computed again
   after a reload. If the star data was rebuilt, each end is looked for by its designation near its
   stored position (any star), else in the name index (named stars).
-* **Best route.** *Fewest jumps* (default; among those the shortest distance) or *shortest
-  distance* (among those the fewest jumps); ties are broken by the stars' stable keys, so the same
-  stars and settings always give the same route, and swapping start and destination gives it
-  reversed. A jump can count with its length (linear, the default) or with a cost that makes long
-  jumps dearer: polynomial with an exponent, or exponential with a factor (settings under the jump
-  network; [`docs/ROUTES.md`](docs/ROUTES.md), "Jump costs").
+* **Best route.** The route with the smallest sum of jump costs. A jump of d light years costs
+  d^k (polynomial) or k^(d − 1) (exponential, a checkbox), with k set under the jump network
+  (1 by default: polynomial, the cost is the distance, so the shortest way). Exponential with k = 1
+  costs one per jump: the fewest jumps, among those the shortest way. A larger k makes long jumps
+  dearer, so routes take more, shorter jumps; the route box then shows the total cost
+  ([`docs/ROUTES.md`](docs/ROUTES.md), "Jump costs"). Ties are broken by the stars' stable keys,
+  so the same stars and settings always give the same route, and swapping start and destination
+  gives it reversed.
 * **Long routes.** The network is computed along a corridor around the straight line, from the
   shown stars within `w + 3 · range` of it, and the path is searched among the places within `w`.
   `w` starts at twice the jump range and is doubled while there is no path, up to 128 ly. The
@@ -421,7 +390,6 @@ under **CC BY-SA 4.0**. The rest of the code is under the MIT licence.
 pipeline/   Python: download catalogues → cross-match → positions → physics → systems
             → names → LOD octree (public/data/)
 src/        TypeScript + three.js web app
-tools/      make-factions.mjs – the example factions (public/user/attributes.csv)
             bench-route.mjs – benchmark of the route search (synthetic and Sun–Betelgeuse corridors)
 docs/       DATA_FORMAT.md – the binary format shared by both sides
             JUMP_NETWORK.md, ROUTES.md – specifications of the jump network and route planning
@@ -458,7 +426,7 @@ It handles the following cases:
   wide binaries among them are not searched for. Gaia DR4 (2 December 2026) can replace DR3 for
   these stars with one setting, keeping their DR3 designations ([`docs/GAIA_DR4.md`](docs/GAIA_DR4.md)).
 * **Quality cut.** Stars with a parallax error above 100 % or beyond 15 kpc are dropped. The
-  app can additionally hide stars by distance uncertainty (20 % by default).
+  app can additionally hide stars by distance uncertainty (5 % by default; named stars stay).
 
 Multiple systems (`systems.py`) are grouped from four sources:
 * the census hierarchy;
@@ -539,7 +507,6 @@ cd ..
 npm install
 npm run dev        # http://localhost:5173
 npm run build      # static site in dist/
-npm run factions   # example factions from the star data (public/user/attributes.csv)
 npm run bench:route  # route search benchmark (see docs/ROUTES.md, Measurements)
 ```
 

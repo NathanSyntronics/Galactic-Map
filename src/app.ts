@@ -172,9 +172,8 @@ const ROUTE_KEYS: (keyof Settings)[] = [
   'maxDistErr',
   'namedAlways',
   'missingStyle',
-  'jumpCost',
-  'jumpCostPower',
-  'jumpCostFactor',
+  'jumpCostExp',
+  'jumpCostK',
 ];
 /** The route is computed again this long after the last change of a setting (sliders change continuously). */
 const ROUTE_DELAY_MS = 400;
@@ -540,7 +539,7 @@ export class App {
             kSun: s.jumpSun,
             connect: s.jumpConnect,
             capacity: this.capacityRule(s),
-            cost: { kind: s.jumpCost, power: s.jumpCostPower, factor: s.jumpCostFactor },
+            cost: { exp: s.jumpCostExp, k: s.jumpCostK },
           };
         },
         style: (data, colors, sizes) => computeStyle(data, this.store.get(), this.stylePlan, colors, sizes),

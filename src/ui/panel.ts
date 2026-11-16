@@ -20,7 +20,6 @@ import {
   starSizeText,
   starSizeToSlider,
   type JumpColor,
-  type JumpCostKind,
   type MissingStyle,
   type Quality,
   type Settings,
@@ -166,7 +165,7 @@ export class SettingsPanel {
     else {
       this.sync();
       if (changed.some((k) => k === 'colorBy' || k === 'sizeBy' || k === 'jumps')) this.renderLayers();
-      if (changed.some((k) => k === 'jumps' || k === 'jumpBy' || k === 'colorBy' || k === 'sizeBy' || k === 'jumpCost')) this.renderJumps();
+      if (changed.some((k) => k === 'jumps' || k === 'jumpBy' || k === 'colorBy' || k === 'sizeBy')) this.renderJumps();
     }
   }
 
@@ -581,23 +580,11 @@ export class SettingsPanel {
       box.appendChild(el('p', 'hint', t('jumpHubHint')));
       box.appendChild(this.checkbox('jumpConnect', () => s().jumpConnect, (v) => set({ jumpConnect: v })));
       box.appendChild(el('p', 'hint', t('jumpConnectHint')));
-      // how a jump's length counts in routes: three stops, and the exponent or the factor
-      const COSTS: [JumpCostKind, MessageKey][] = [
-        ['linear', 'jumpCostLinear'],
-        ['poly', 'jumpCostPoly'],
-        ['exp', 'jumpCostExp'],
-      ];
-      const costStop = () => Math.max(0, COSTS.findIndex(([k]) => k === s().jumpCost));
-      box.appendChild(this.slider('jumpCost', 0, COSTS.length - 1, 1, costStop, (v) => set({ jumpCost: COSTS[v][0] }), () => t(COSTS[costStop()][1])));
-      if (s().jumpCost === 'poly') {
-        box.appendChild(
-          this.slider('jumpCostPower', 0.5, 5, 0.1, () => s().jumpCostPower, (v) => set({ jumpCostPower: v }), () => formatNumber(s().jumpCostPower, 1)),
-        );
-      } else if (s().jumpCost === 'exp') {
-        box.appendChild(
-          this.slider('jumpCostFactor', 0.5, 10, 0.5, () => s().jumpCostFactor, (v) => set({ jumpCostFactor: v }), () => formatNumber(s().jumpCostFactor, 1)),
-        );
-      }
+      // how a jump's length counts in routes: d^k, or k^(d − 1)
+      box.appendChild(
+        this.slider('jumpCostK', 0.5, 5, 0.1, () => s().jumpCostK, (v) => set({ jumpCostK: v }), () => formatNumber(s().jumpCostK, 1)),
+      );
+      box.appendChild(this.checkbox('jumpCostExp', () => s().jumpCostExp, (v) => set({ jumpCostExp: v })));
       box.appendChild(el('p', 'hint', t('jumpCostHint')));
       box.appendChild(
         this.select<JumpColor>(

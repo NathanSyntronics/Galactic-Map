@@ -27,7 +27,12 @@ export interface RouteNames {
 
 const rangeText = (r: number) => `${formatNumber(r, Number.isInteger(r) ? 0 : 1)} ${t('ly')}`;
 
-export function jumpsText(n: number): string {
+/** A route's total cost: two decimals below 10, one below 1000, none above. */
+export function costText(c: number): string {
+  return formatNumber(c, c < 10 ? 2 : c < 1000 ? 1 : 0);
+}
+
+function jumpsText(n: number): string {
   return n === 1 ? t('routeJumpsOne') : t('routeJumps', { n: formatNumber(n) });
 }
 
@@ -61,7 +66,9 @@ export function routeStatusText(s: RouteBoxState, names: RouteNames): { text: st
       return { text: t('routeComputing', { w: formatLy(st.width) }), warn: false };
     case 'found': {
       const r = st.route;
-      const text = `${jumpsText(r.jumps)} · ${formatLy(r.total)} · ${t('routeStraight', { d: formatLy(r.straight) })}`;
+      let text = `${jumpsText(r.jumps)} · ${formatLy(r.total)} · ${t('routeStraight', { d: formatLy(r.straight) })}`;
+      // the total cost, unless the cost is the distance or one per jump (k = 1)
+      if (r.cost !== null && r.cost !== undefined) text += ` · ${t('routeCost', { c: costText(r.cost) })}`;
       return { text, warn: false };
     }
     case 'unreachable':
@@ -166,7 +173,8 @@ export class RouteBox {
       }
       this.onFlyby();
     });
-    controls.append(this.flyBtn, this.stepSel, this.modeSel, this.showAllBtn, this.listBtn, this.retryBtn);
+    // (no choice of fewest jumps or shortest distance: the jump cost decides, see JumpCost)
+    controls.append(this.flyBtn, this.stepSel, this.showAllBtn, this.listBtn, this.retryBtn);
 
     this.statusEl.setAttribute('aria-live', 'polite');
     this.progress.appendChild(this.bar);
@@ -228,7 +236,6 @@ export class RouteBox {
     this.stepSel.hidden = this.flyBtn.hidden;
     this.showAllBtn.hidden = !route;
     this.listBtn.hidden = !route;
-    this.modeSel.hidden = !state.from || !state.to;
     if (route !== this.listRoute) {
       this.listRoute = route;
       this.listBuilt = false;

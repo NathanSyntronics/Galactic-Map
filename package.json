@@ -1,7 +1,7 @@
 {
   "name": "galactic-map",
   "private": true,
-  "version": "1.17.0",
+  "version": "1.18.0",
   "description": "Interactive 3D map of the solar neighbourhood built from real star catalogs",
   "type": "module",
   "scripts": {
@@ -10,7 +10,6 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "factions": "node tools/make-factions.mjs",
     "bench:route": "node tools/bench-route.mjs"
   },
   "dependencies": {

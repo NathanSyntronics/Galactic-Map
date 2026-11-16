@@ -13,6 +13,7 @@ import {
   type FilterCriteria,
   type PlanetCriterion,
   type SortKey,
+  type SystemCriterion,
 } from '../data/filter';
 import { parseNumber } from '../data/csv';
 import { formatLy, formatNumber, getLang, locale, t, type MessageKey } from '../i18n';
@@ -230,7 +231,13 @@ export class FilterBox {
       ], c.planets, (v) => this.set({ planets: v })),
     );
     r.appendChild(this.check('filterNamed', c.named, (v) => this.set({ named: v })));
-    r.appendChild(this.check('filterMultiple', c.multiple, (v) => this.set({ multiple: v })));
+    r.appendChild(
+      this.select<SystemCriterion>('filterSystems', [
+        ['both', 'filterSystemsBoth'],
+        ['single', 'filterSystemsSingle'],
+        ['multiple', 'filterSystemsMultiple'],
+      ], c.systems, (v) => this.set({ systems: v })),
+    );
     r.appendChild(this.attrControls());
 
     // actions

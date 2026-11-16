@@ -6,7 +6,7 @@
 import { designationOf, type NodeData } from '../data/format';
 import { nodesInCapsule, type Aabb, type Vec3 } from './capsule';
 import { MAX_PAIRS, MAX_PLACES, computeNetwork, placeOfStar, type CapacityRule, type JumpNetwork, type PlaceSource, type PlaceSet } from './places';
-import { planRoute, type CorridorGraph, type JumpCost, type RouteMode, type RouteTry } from './route';
+import { jumpCostFn, plainCost, planRoute, type CorridorGraph, type JumpCost, type RouteMode, type RouteTry } from './route';
 
 /** A corridor whose nodes hold more data than this is refused before loading (Sun–Betelgeuse at w = 128: 25 MB). */
 export const MAX_CORRIDOR_BYTES = 64e6;
@@ -108,6 +108,8 @@ export interface RouteResult {
   found: boolean;
   jumps: number;
   total: number;
+  /** Sum of the jump costs (see JumpCost); null for the plain costs (length, one per jump). */
+  cost: number | null;
   /** Straight-line distance between the two chosen stars. */
   straight: number;
   /** Search corridor width of the search that gave the waypoints. */
@@ -426,7 +428,8 @@ export class RoutePlanner<N extends CorridorNode> {
     let corridor: N[] = [];
     let searchStart = 0;
 
-    const plan = await planRoute<CorridorNet>({ from: from.pos, to: to.pos, range: opt.range, mode, cost: opt.cost, signal }, async (c) => {
+    // (the cost function decides: exponential k = 1 is the fewest jumps, see JumpCost)
+    const plan = await planRoute<CorridorNet>({ from: from.pos, to: to.pos, range: opt.range, mode: 'distance', cost: opt.cost ?? { exp: false, k: 1 }, signal }, async (c) => {
       if (searchStart) stats.searchMs += now() - searchStart;
       await this.host.expand?.(from.pos, to.pos, c.networkWidth);
       if (signal.aborted) return { refused: 'cancelled' };
@@ -486,7 +489,7 @@ export class RoutePlanner<N extends CorridorNode> {
 
     if ('route' in plan && plan.route) this.corridor = { net: plan.route.graph.net, from: from.pos, to: to.pos, width: plan.route.width };
     const straight = distance(from.pos, to.pos);
-    const result = (t: RouteTry<CorridorNet>): RouteResult => routeResult(t, mode, opt.range, straight, stats);
+    const result = (t: RouteTry<CorridorNet>): RouteResult => routeResult(t, mode, opt.range, straight, stats, opt.cost);
     switch (plan.status) {
       case 'found':
         return this.finish({ kind: 'found', route: result(plan.route) });
@@ -654,7 +657,8 @@ export class RoutePlanner<N extends CorridorNode> {
 }
 
 /** The waypoints and numbers of a search. */
-function routeResult(t: RouteTry<CorridorNet>, mode: RouteMode, range: number, straight: number, stats: RouteStats): RouteResult {
+function routeResult(t: RouteTry<CorridorNet>, mode: RouteMode, range: number, straight: number, stats: RouteStats, cost?: JumpCost): RouteResult {
+  const costOf = jumpCostFn(cost);
   const { graph, path } = t;
   const { places } = graph;
   const waypoints = path.places.map((p, k): Waypoint => ({
@@ -668,6 +672,7 @@ function routeResult(t: RouteTry<CorridorNet>, mode: RouteMode, range: number, s
     found: path.found,
     jumps: path.jumps,
     total: path.total,
+    cost: plainCost(cost) ? null : path.lengths.reduce((s, l) => s + costOf(l), 0),
     straight,
     width: t.width,
     short: path.found ? 0 : path.closestDistance,

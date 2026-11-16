@@ -14,6 +14,8 @@ export type ClassKey = (typeof CLASS_KEYS)[number];
 /** 'any': planets do not matter; 'planets': known planets; 'habitable': a potentially habitable one. */
 export type PlanetCriterion = 'any' | 'planets' | 'habitable';
 export type CentreKind = 'sun' | 'view';
+/** 'single': only stars that are not part of a multiple system; 'multiple': only members of one. */
+export type SystemCriterion = 'both' | 'single' | 'multiple';
 
 /** An attribute's value: a text equal to `text` (ignoring case), or a number in [min, max]. */
 export interface AttrCriterion {
@@ -31,8 +33,7 @@ export interface FilterCriteria {
   classes: ClassKey[];
   planets: PlanetCriterion;
   named: boolean;
-  /** Only members of multiple systems. */
-  multiple: boolean;
+  systems: SystemCriterion;
   attr: AttrCriterion | null;
 }
 
@@ -46,13 +47,13 @@ export const DEFAULT_CRITERIA: FilterCriteria = {
   classes: [],
   planets: 'any',
   named: false,
-  multiple: false,
+  systems: 'both',
   attr: null,
 };
 
 /** The criteria from stored JSON (anything malformed: the default). */
 export function readCriteria(v: unknown): FilterCriteria {
-  const o = (v && typeof v === 'object' ? v : {}) as Partial<FilterCriteria>;
+  const o = (v && typeof v === 'object' ? v : {}) as Partial<FilterCriteria> & { multiple?: unknown };
   const d = DEFAULT_CRITERIA;
   const radius = typeof o.radius === 'number' && Number.isFinite(o.radius) ? clampRadius(o.radius) : d.radius;
   const classes = Array.isArray(o.classes) ? CLASS_KEYS.filter((k) => o.classes!.includes(k)) : d.classes;
@@ -63,7 +64,8 @@ export function readCriteria(v: unknown): FilterCriteria {
     classes,
     planets: o.planets === 'planets' || o.planets === 'habitable' ? o.planets : 'any',
     named: o.named === true,
-    multiple: o.multiple === true,
+    // (version 1.14 had a checkbox "only members of multiple systems")
+    systems: o.systems === 'single' || o.systems === 'multiple' ? o.systems : o.multiple === true ? 'multiple' : 'both',
     attr,
   };
 }
@@ -130,7 +132,7 @@ export function starMatcher(c: FilterCriteria, ctx: StarContext): (node: NodeDat
       if (!p || (c.planets === 'habitable' && p === 'planets')) return false;
     }
     if (c.named && !node.names.has(i) && !(node.flags[i] & Flag.SUN)) return false;
-    if (c.multiple && !(node.flags[i] & Flag.IN_SYSTEM)) return false;
+    if (c.systems !== 'both' && (c.systems === 'multiple') !== ((node.flags[i] & Flag.IN_SYSTEM) !== 0)) return false;
     if (attr) {
       if (!value || !attrMatches(value(node, i), attr)) return false;
     }
@@ -140,7 +142,7 @@ export function starMatcher(c: FilterCriteria, ctx: StarContext): (node: NodeDat
 
 /** Whether a filter selects anything beyond the distance (the list then is every star). */
 export function hasCriteria(c: FilterCriteria): boolean {
-  return c.classes.length > 0 || c.planets !== 'any' || c.named || c.multiple || c.attr !== null;
+  return c.classes.length > 0 || c.planets !== 'any' || c.named || c.systems !== 'both' || c.attr !== null;
 }
 
 /**

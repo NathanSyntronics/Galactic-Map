@@ -7,6 +7,7 @@ import {
   findPath,
   jumpCostFn,
   networkWidth,
+  plainCost,
   planRoute,
   type CorridorGraph,
   type Path,
@@ -490,38 +491,32 @@ describe('route through a computed corridor network', () => {
 });
 
 describe('jump costs', () => {
-  it('costs a jump of the full range R either way, long jumps dearer with a larger exponent or factor', () => {
-    const R = 9;
-    const lin = jumpCostFn({ kind: 'linear', power: 2, factor: 3 }, R);
-    const poly = jumpCostFn({ kind: 'poly', power: 2, factor: 3 }, R);
-    const exp = jumpCostFn({ kind: 'exp', power: 2, factor: 3 }, R);
-    for (const f of [lin, poly, exp]) expect(f(R)).toBeCloseTo(R, 9);
-    expect(lin(4)).toBe(4);
-    expect(poly(4.5)).toBeCloseTo(9 * 0.25, 9);
-    expect(exp(4.5)).toBeCloseTo((9 * Math.expm1(1.5)) / Math.expm1(3), 9);
-    // positive and growing
-    for (const f of [poly, exp]) {
-      expect(f(0.01)).toBeGreaterThan(0);
-      expect(f(2)).toBeLessThan(f(3));
+  it('polynomial d^k and exponential k^(d - 1): 1 for one light year, k = 1 the length or one per jump', () => {
+    for (const k of [0.5, 1, 2, 3.7]) {
+      expect(jumpCostFn({ exp: false, k })(1)).toBeCloseTo(1, 12);
+      expect(jumpCostFn({ exp: true, k })(1)).toBeCloseTo(1, 12);
     }
-    // exponent 1 and a tiny factor are linear
-    expect(jumpCostFn({ kind: 'poly', power: 1, factor: 3 }, R)(3.3)).toBe(3.3);
-    expect(jumpCostFn({ kind: 'exp', power: 2, factor: 1e-9 }, R)(3.3)).toBe(3.3);
-    expect(jumpCostFn(undefined, R)(3.3)).toBe(3.3);
+    expect(jumpCostFn({ exp: false, k: 1 })(4.2)).toBe(4.2);
+    expect(jumpCostFn({ exp: true, k: 1 })(4.2)).toBe(1);
+    expect(jumpCostFn({ exp: false, k: 2 })(3)).toBeCloseTo(9, 12);
+    expect(jumpCostFn({ exp: true, k: 2 })(5)).toBeCloseTo(16, 12);
+    expect(jumpCostFn(undefined)(3.3)).toBe(3.3);
+    expect(plainCost({ exp: true, k: 1 }) && plainCost({ exp: false, k: 1 }) && !plainCost({ exp: true, k: 2 })).toBe(true);
   });
 
-  it('makes routes take more, shorter jumps; the lengths shown stay the distances', () => {
+  it('makes routes take more, shorter jumps; exponential k = 1 is the fewest jumps; the lengths stay the distances', () => {
     // start 0 and goal 1 eight light years apart, linked directly and through 2 (a little off the line)
     const g = graph([[0, 0, 0], [8, 0, 0], [4, 0.9, 0]], [[0, 1], [0, 2], [2, 1]]);
-    const linear = findPath(g, 0, 1, { mode: 'distance' });
-    expect(linear.places).toEqual([0, 1]);
-    for (const kind of ['poly', 'exp'] as const) {
-      const p = findPath(g, 0, 1, { mode: 'distance', cost: jumpCostFn({ kind, power: 2, factor: 3 }, 9) });
+    expect(findPath(g, 0, 1, { mode: 'distance', cost: jumpCostFn({ exp: false, k: 1 }) }).places).toEqual([0, 1]);
+    expect(findPath(g, 0, 1, { mode: 'distance', cost: jumpCostFn({ exp: true, k: 1 }) }).places).toEqual([0, 1]);
+    for (const exp of [false, true]) {
+      const p = findPath(g, 0, 1, { mode: 'distance', cost: jumpCostFn({ exp, k: 2 }) });
       expect(p.places).toEqual([0, 2, 1]);
       expect(p.total).toBeCloseTo(2 * Math.hypot(4, 0.9), 5);
       expectValid(g, p, 0);
     }
-    // fewest jumps: the costs only decide between routes with as many jumps
-    expect(findPath(g, 0, 1, { mode: 'jumps', cost: jumpCostFn({ kind: 'poly', power: 3, factor: 3 }, 9) }).places).toEqual([0, 1]);
+    // constant cost: of two routes with as many jumps the shorter one
+    const h = graph([[0, 0, 0], [8, 0, 0], [4, 3, 0], [4, 1, 0]], [[0, 2], [2, 1], [0, 3], [3, 1]]);
+    expect(findPath(h, 0, 1, { mode: 'distance', cost: jumpCostFn({ exp: true, k: 1 }) }).places).toEqual([0, 3, 1]);
   });
 });

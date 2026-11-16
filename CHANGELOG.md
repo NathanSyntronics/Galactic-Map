@@ -2,6 +2,18 @@
 
 Every round of changes that goes live raises the version by 0.01 (README, *Versions*).
 
+## 1.18 (2026-11-16)
+
+* Route costs simpler: a jump of d light years costs d^k (polynomial) or k^(d − 1) (exponential,
+  a checkbox), with one slider for k. A jump of one light year costs 1 either way; k = 1 is the
+  shortest way (polynomial, the default) or the fewest jumps (exponential), so the route box no
+  longer needs its choice of fewest jumps or shortest distance. For k other than 1 it shows the
+  route's total cost.
+* New defaults: distance uncertainty up to 5 % (named stars stay), brown dwarfs shown, jump lines
+  at 50 % opacity.
+* Filter: "Systems" with only single stars, only multiple systems, or both.
+* The example factions are removed (the site's attribute dataset): factions are being redesigned.
+
 ## 1.17 (2026-11-16)
 
 * "Always show named stars" (Stars, under the distance uncertainty; on by default): with the

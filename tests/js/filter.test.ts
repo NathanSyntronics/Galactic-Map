@@ -77,7 +77,8 @@ describe('filter criteria', () => {
     expect(all(crit({ planets: 'habitable' }))).toEqual([]);
     expect(all(crit({ planets: 'habitable' }), { planetClass: (_d, i) => (i === 0 ? 'habitable' : undefined) })).toEqual([0]);
     expect(all(crit({ named: true }))).toEqual([0]);
-    expect(all(crit({ multiple: true }))).toEqual([1]);
+    expect(all(crit({ systems: 'multiple' }))).toEqual([1]);
+    expect(all(crit({ systems: 'single' }))).toEqual([0, 2, 3, 4, 5]);
     expect(all(crit({ classes: ['M'], planets: 'planets', named: true }))).toEqual([0]);
   });
 
@@ -94,11 +95,13 @@ describe('filter criteria', () => {
     const m = starMatcher(crit({ attr: { id: '@teff', min: 3500, max: 8000 } }), { ...noPlanets, value });
     expect([0, 1, 2, 3, 4, 5].filter((i) => m(d, i))).toEqual([0, 1]);
     expect(hasCriteria(crit({}))).toBe(false);
-    expect(hasCriteria(crit({ multiple: true }))).toBe(true);
+    expect(hasCriteria(crit({ systems: 'single' }))).toBe(true);
   });
 
   it('reads stored criteria defensively', () => {
     expect(readCriteria(null)).toEqual(DEFAULT_CRITERIA);
+    // the checkbox of version 1.14
+    expect(readCriteria({ multiple: true }).systems).toBe('multiple');
     expect(readCriteria({ radius: 1e9, classes: ['M', 'X', 'BD'], planets: 'many', centre: 'view', attr: { id: '@teff', min: 'x', max: 5 } })).toEqual({
       ...DEFAULT_CRITERIA,
       radius: MAX_FILTER_RADIUS,

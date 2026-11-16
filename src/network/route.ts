@@ -10,30 +10,27 @@ import { jumpMargin } from './places';
 export type RouteMode = 'jumps' | 'distance';
 
 /**
- * How a jump's length counts when routes are compared (docs/ROUTES.md, "Jump costs"): 'linear'
- * the length itself; 'poly' R · (d / R)^power; 'exp' R · (e^(factor · d / R) − 1) / (e^factor − 1),
- * with R the jump range. A jump of the full range costs R either way; above 1, the power or the
- * factor makes long jumps dearer, so that routes take more, shorter jumps. The lengths shown stay
- * the distances.
+ * How a jump of length d (light years) counts when routes are compared (docs/ROUTES.md, "Jump
+ * costs"): polynomial d^k, or exponential k^(d − 1). Both cost 1 for a jump of one light year;
+ * k = 1 makes the polynomial cost the length (the shortest way) and the exponential one constant
+ * (the fewest jumps). A larger k makes long jumps dearer, so that routes take more, shorter jumps.
  */
-export type JumpCostKind = 'linear' | 'poly' | 'exp';
 export interface JumpCost {
-  kind: JumpCostKind;
-  power: number;
-  factor: number;
+  exp: boolean;
+  k: number;
 }
 
 /** The cost of a jump of length d (see JumpCost); positive for every d > 0. */
-export function jumpCostFn(cost: JumpCost | undefined, range: number): (d: number) => number {
-  if (!cost || cost.kind === 'linear' || !(range > 0)) return (d) => d;
-  if (cost.kind === 'poly') {
-    const p = cost.power;
-    return p === 1 ? (d) => d : (d) => range * Math.pow(d / range, p);
-  }
-  const k = cost.factor;
-  if (!(k > 1e-6)) return (d) => d;
-  const norm = range / Math.expm1(k);
-  return (d) => norm * Math.expm1((k * d) / range);
+export function jumpCostFn(cost: JumpCost | undefined): (d: number) => number {
+  if (!cost) return (d) => d;
+  const k = cost.k;
+  if (cost.exp) return k === 1 ? () => 1 : (d) => Math.pow(k, d - 1);
+  return k === 1 ? (d) => d : (d) => Math.pow(d, k);
+}
+
+/** Whether a cost is one of the two limits: the length itself, or one per jump (no cost shown). */
+export function plainCost(cost: JumpCost | undefined): boolean {
+  return !cost || cost.k === 1;
 }
 
 /** Widest search corridor in light years. */
@@ -215,7 +212,7 @@ function search(
   to: number,
   mode: RouteMode,
   before: (p: number, q: number) => boolean,
-  cost: (d: number) => number = (d) => d,
+  cost?: (d: number) => number,
 ): Path {
   const n = graph.count;
   const lens = graph.links.length;
@@ -243,10 +240,12 @@ function search(
     for (let k = adj.start[u], e = adj.start[u + 1]; k < e; k++) {
       const v = adj.to[k];
       if (done[v]) continue;
-      // (the cost of the jump: its length, or more for long jumps, see JumpCost)
-      const len = cost(+lens[adj.link[k]]);
-      const n1 = byJumps ? c1[u] + 1 : c1[u] + len;
-      const n2 = byJumps ? c2[u] + len : c2[u] + 1;
+      // the cost of the jump (see JumpCost); with a cost function the length decides between equal
+      // costs (the fewest jumps of exponential k = 1: then the shortest way), else the jumps
+      const len = +lens[adj.link[k]];
+      const c = cost ? cost(len) : len;
+      const n1 = byJumps ? c1[u] + 1 : c1[u] + c;
+      const n2 = byJumps ? c2[u] + c : c2[u] + (cost ? len : 1);
       if (n1 < c1[v] || (n1 === c1[v] && n2 < c2[v])) {
         c1[v] = n1;
         c2[v] = n2;
@@ -407,7 +406,7 @@ export async function planRoute<G extends CorridorGraph>(
 ): Promise<RoutePlan<G>> {
   const tried: number[] = [];
   let last: RouteTry<G> | null = null;
-  const cost = jumpCostFn(req.cost, req.range);
+  const cost = req.cost ? jumpCostFn(req.cost) : undefined;
   for (const width of corridorWidths(req.range, req.maxWidth ?? MAX_CORRIDOR)) {
     if (req.signal?.aborted) return { status: 'cancelled', tried };
     tried.push(width);
