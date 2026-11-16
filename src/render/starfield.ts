@@ -1,11 +1,13 @@
 import {
-  AdditiveBlending,
+  AddEquation,
   BufferAttribute,
   BufferGeometry,
   Camera,
   Color,
+  CustomBlending,
   Group,
   Matrix3,
+  OneFactor,
   Points,
   ShaderMaterial,
   Sphere,
@@ -77,7 +79,10 @@ void main() {
   // only stars bright enough, seen from here, to be loaded in every part of the view (see
   // completenessCut): no denser cubes where finer nodes happen to be loaded
   float lb = aImp - 0.8685889638 * log(max(length(rel), 1e-12));
-  if (!found) a *= smoothstep(uImpCut - IMP_SOFT, uImpCut, lb);
+  // (a star shown only because a faction or the filter has it, below the cut: fainter, or the
+  // territory of a large faction seen from far away would glare as one patch)
+  float above = smoothstep(uImpCut - IMP_SOFT, uImpCut, lb);
+  a *= found ? mix(FOUND_BELOW_CUT, 1.0, above) : above;
   if (a <= 0.0 || aSize <= 0.0) {
     gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
     gl_PointSize = 0.0;
@@ -96,12 +101,16 @@ void main() {
   float depth = max(-mv.z, 1e-12);
   float px = 2.0 * aSize * uSizeMul * uScale / depth;
   float intensity = 1.0;
+  // how far below the smallest sprite the star would be: 0 for a sprite of its own size, up to 1
+  // for a faint point (there a rim is replaced by a tint, see below)
+  float point = 0.0;
   if (px < uMinPx) {
     // stars that would be smaller than the minimum sprite are drawn at the minimum size but
     // dimmed roughly like their apparent brightness, down to a density-dependent floor
     float f = px / uMinPx;
     // (in a crowded view the point-like stars are dimmed together, see star-buffer crowdFactor)
     intensity = max(f * sqrt(f), uMinAlpha) * uCrowd;
+    point = 1.0 - smoothstep(0.3, 0.8, f);
     px = uMinPx;
   }
   px = min(px, uMaxPx);
@@ -110,6 +119,7 @@ void main() {
   vRing = 0.0;
   vRingColor = vec4(0.0);
   vRingWidth = 0.0;
+  vec4 tint = vec4(0.0);
   if ((uMarks > 0.5 && aMark > 0.5) || found) {
     // a thin rim just outside the star's visible body (its core on a large sprite, the soft disk
     // on a small one): the sprite grows to hold it
@@ -127,6 +137,13 @@ void main() {
     } else if (aMark > 2.5) {
       vRingColor = vec4(1.0, 0.76, 0.24, 1.0);
       vRingWidth = 1.0;
+    }
+    if (aMark > 2.5) {
+      // far away (a faint point) a system of a faction or found by the filter is tinted in its
+      // colour instead of rimmed: thousands of rims on top of each other would merge into one
+      // glaring patch; the tinted stars keep the region's look
+      tint = vec4(vRingColor.rgb, point * (vRingColor.a > 0.9 ? 0.9 : 0.6));
+      vRingColor.a *= 1.0 - point;
     } else {
       vRingColor = aMark > 1.5 ? vec4(0.31, 0.88, 0.54, 1.0) : vec4(0.35, 0.65, 1.0, 1.0);
       vRingWidth = 0.75;
@@ -134,7 +151,7 @@ void main() {
   }
   gl_PointSize = px;
   gl_Position = projectionMatrix * mv;
-  vColor = aColor;
+  vColor = mix(aColor, tint.rgb, tint.a);
   vAlpha = a * intensity;
   vFade = a;
   vPx = px;
@@ -173,6 +190,9 @@ void main() {
     a = clamp(profile * vAlpha * uBrightness, 0.0, 1.0);
     col = mix(vColor, vec3(1.0), core * 0.3 * large);
   }
+  // the star's own light (no rim): the exposure meter reads it from the alpha channel, so that the
+  // rims of a large faction or filter do not darken the whole view (see star-buffer.ts)
+  float own = a * max(max(col.r, col.g), col.b);
   if (vMark > 0.5) {
     // the planets' rim: blue, green with a potentially habitable planet; gold: found by the filter
     // (fades with the sphere only)
@@ -183,7 +203,8 @@ void main() {
     if (t > 0.0) col = (col * a + rc * ring) / t;
     a = min(t, 1.0);
   }
-  gl_FragColor = vec4(col, a);
+  // premultiplied: the colour adds col · a, the alpha channel the star's own light
+  gl_FragColor = vec4(col * a, own);
 }
 `;
 
@@ -197,6 +218,8 @@ export function spritePx(size: number, sizeMul: number, scale: number, depth: nu
 export const NO_CUT = -1e9;
 /** Width (dex of apparent brightness) over which stars fade in below the cut. */
 export const IMP_SOFT = 0.15;
+/** Brightness of a faction's (or the filter's) star that only they show (below the cut). */
+export const FOUND_BELOW_CUT = 0.3;
 
 /**
  * Importance of star i, as the octree orders the stars (pipeline octree.importance_of): log L,
@@ -246,7 +269,7 @@ export function completenessCut(
 
 export function createStarMaterial(): ShaderMaterial {
   return new ShaderMaterial({
-    defines: { IMP_SOFT: IMP_SOFT.toFixed(3) },
+    defines: { IMP_SOFT: IMP_SOFT.toFixed(3), FOUND_BELOW_CUT: FOUND_BELOW_CUT.toFixed(3) },
     vertexShader,
     fragmentShader,
     uniforms: {
@@ -272,7 +295,13 @@ export function createStarMaterial(): ShaderMaterial {
     transparent: true,
     depthWrite: false,
     depthTest: false,
-    blending: AdditiveBlending,
+    // additive, premultiplied (see the fragment shader); the alpha channel adds the stars' own light
+    blending: CustomBlending,
+    blendEquation: AddEquation,
+    blendSrc: OneFactor,
+    blendDst: OneFactor,
+    blendSrcAlpha: OneFactor,
+    blendDstAlpha: OneFactor,
   });
 }
 

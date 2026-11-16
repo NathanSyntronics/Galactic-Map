@@ -1786,10 +1786,9 @@ label.check input {
   max-width: min(300px, calc(100vw - 24px));
 }
 
+/* (a long line wraps rather than hiding figures) */
 .legend-faction-text {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 
 .legend-faction-label {

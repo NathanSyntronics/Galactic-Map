@@ -484,7 +484,10 @@ The stars are stored in an octree (`pipeline/galmap/octree.py`):
   100,000 stars the point-like stars are dimmed by (100,000 / n)^0.6, and an exposure meter (32 x
   32 blocks of the buffer, read back three times a second without waiting) lowers the exposure
   once the 6th brightest block averages more than 0.4: millions of stars in view no longer merge
-  into one white blob. Ordinary views measure up to about 0.35 and are drawn as before.
+  into one white blob. Ordinary views measure up to about 0.35 and are drawn as before. The meter
+  sees the stars' own light only (the buffer's alpha channel), not the rims of marked stars: a
+  faction's thousands of rims seen from afar would otherwise darken all other stars. Far away,
+  where a marked star is only a point, it takes its rim's colour instead of the rim.
 * The writer (`pipeline/galmap/ooc.py`) works out of core: stars are spooled to disk in chunks
   and split into buckets of at most 8 million stars; the levels above the buckets are built
   exactly from each bucket's brightest candidates, and each bucket's subtree is built and

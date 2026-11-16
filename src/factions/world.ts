@@ -1,37 +1,84 @@
 // The world a faction grows in (docs/FACTIONS.md): the jump network around its home star as a
 // FactionGraph, which places it settles, and the stars of each place (for their rims).
 import { CLASS_KEYS, classKeyOf, type ClassKey } from '../data/filter';
+import { NODE_KEY_SHIFT } from '../data/octree';
 import type { JumpNetwork } from '../network/places';
 import { SOLAR_EMPIRE, type FactionDef, type FactionGraph } from './sim';
 
+/**
+ * The stars of each place, compactly: place p's are start[p] .. start[p + 1] - 1, each a source
+ * of the network (its node) and the star's index there.
+ */
+export interface PlaceMembers {
+  start: Int32Array;
+  source: Int32Array;
+  index: Int32Array;
+}
+
 export interface FactionWorld {
   graph: FactionGraph;
-  /** Stars of each place: node paths and indices (a system has several). */
-  members: { path: string; index: number }[][];
+  /** Stars of each place (a system has several). */
+  members: PlaceMembers;
   net: JumpNetwork;
+}
+
+/** The stars of each place of a network (in node order, then by index). */
+export function placeMembers(net: JumpNetwork): PlaceMembers {
+  const { places } = net;
+  const n = places.count;
+  const start = new Int32Array(n + 1);
+  const sourceOf = new Map(places.sources.map((s, k) => [s.data.path, k]));
+  let total = 0;
+  for (const own of places.starPlace.values()) {
+    for (let i = 0; i < own.length; i++) {
+      if (own[i] < 0) continue;
+      start[own[i] + 1]++;
+      total++;
+    }
+  }
+  for (let p = 0; p < n; p++) start[p + 1] += start[p];
+  const fill = start.slice(0, n);
+  const source = new Int32Array(total);
+  const index = new Int32Array(total);
+  for (const [path, own] of places.starPlace) {
+    const s = sourceOf.get(path) ?? -1;
+    for (let i = 0; i < own.length; i++) {
+      const p = own[i];
+      if (p < 0) continue;
+      source[fill[p]] = s;
+      index[fill[p]++] = i;
+    }
+  }
+  return { start, source, index };
 }
 
 /**
  * The faction's graph of a network: its places and links; a place is settled when its brightest
  * shown star is of one of the classes, and (singleOnly) when it is a star of its own, not a system.
+ * With the network's node keys (see buildPlaces) a star's key finds its place directly.
  */
-export function factionWorld(net: JumpNetwork, def: Pick<FactionDef, 'targets' | 'singleOnly'>): FactionWorld {
+export function factionWorld(net: JumpNetwork, def: Pick<FactionDef, 'targets' | 'singleOnly'>, nodeKey?: (path: string) => number): FactionWorld {
   const { places, links } = net;
-  const n = places.count;
-  const members: { path: string; index: number }[][] = Array.from({ length: n }, () => []);
-  for (const [path, own] of places.starPlace) {
-    for (let i = 0; i < own.length; i++) if (own[i] >= 0) members[own[i]].push({ path, index: i });
+  const members = placeMembers(net);
+  const graph: FactionGraph = { count: places.count, keys: places.keys, links, target: targetsOf(net, members, def) };
+  if (nodeKey) {
+    const byKey = new Map<number, Int32Array>();
+    for (const [path, own] of places.starPlace) byKey.set(nodeKey(path), own);
+    graph.placeOf = (key) => {
+      const node = Math.floor(key / NODE_KEY_SHIFT);
+      return byKey.get(node)?.[key - node * NODE_KEY_SHIFT] ?? -1;
+    };
   }
-  return { graph: { count: n, keys: places.keys, links, target: targetsOf(net, members, def) }, members, net };
+  return { graph, members, net };
 }
 
 /** Which places a faction settles (see factionWorld). */
-export function targetsOf(net: JumpNetwork, members: { path: string; index: number }[][], def: Pick<FactionDef, 'targets' | 'singleOnly'>): Uint8Array {
+export function targetsOf(net: JumpNetwork, members: PlaceMembers, def: Pick<FactionDef, 'targets' | 'singleOnly'>): Uint8Array {
   const { places } = net;
   const want = new Set<ClassKey>(def.targets);
   const out = new Uint8Array(places.count);
   for (let p = 0; p < places.count; p++) {
-    if (def.singleOnly && (members[p].length !== 1 || places.system[p] >= 0)) continue;
+    if (def.singleOnly && (members.start[p + 1] - members.start[p] !== 1 || places.system[p] >= 0)) continue;
     const src = places.sources[places.repSource[p]];
     const k = classKeyOf(src.data, places.repIndex[p]);
     if (k && want.has(k)) out[p] = 1;
@@ -41,8 +88,8 @@ export function targetsOf(net: JumpNetwork, members: { path: string; index: numb
 
 /** (Version 1.19 stored other parameters: those are not read.) */
 const STORE_KEY = 'galactic-map:factions:v2';
-/** Largest region (ly): 250 ly around the Sun hold some 130,000 places, close to the network's limit. */
-export const MAX_REGION = 250;
+/** Largest region (ly): 500 ly around the Sun hold some 900,000 places (docs/FACTIONS.md, "The region"). */
+export const MAX_REGION = 500;
 /** At most this many factions (the star shader has as many rim colours). */
 export const MAX_FACTIONS = 8;
 /** Colours of new factions, in turn (the Solar Empire's first). */

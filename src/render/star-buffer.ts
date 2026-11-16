@@ -87,7 +87,8 @@ const METER = 32;
 /** Highest block average the meter's 8-bit cells hold (log2(1 + light) / METER_LOG). */
 const METER_LOG = 6;
 
-// the block average of the light (brightest channel), 4 x 4 samples per block, log-encoded
+// the block average of the stars' own light (the alpha channel: brightest channel of each star's
+// colour, without the rims of factions, filter and planets), 4 x 4 samples per block, log-encoded
 const meterShader = /* glsl */ `
 uniform sampler2D tStars;
 varying vec2 vUv;
@@ -96,8 +97,7 @@ void main() {
   for (int i = 0; i < 4; i++) {
     for (int j = 0; j < 4; j++) {
       vec2 o = (vec2(float(i), float(j)) - 1.5) / (4.0 * ${METER}.0);
-      vec3 c = texture2D(tStars, vUv + o).rgb;
-      sum += max(max(c.r, c.g), c.b);
+      sum += texture2D(tStars, vUv + o).a;
     }
   }
   gl_FragColor = vec4(clamp(log2(1.0 + sum / 16.0) / ${METER_LOG}.0, 0.0, 1.0), 0.0, 0.0, 1.0);

@@ -116,6 +116,28 @@ describe('factions', () => {
 });
 
 describe('faction world', () => {
+  it('lists the stars of each place compactly and finds places by key', async () => {
+    const { placeMembers } = await import('../../src/factions/world');
+    const { KeyIndex } = await import('../../src/factions/sim');
+    // two nodes: place 0 holds r0:1 and r1:0 (a system), place 1 r0:0, place 2 r1:2
+    const net = {
+      places: {
+        count: 3,
+        sources: [{ data: { path: 'r0' } }, { data: { path: 'r1' } }],
+        starPlace: new Map([
+          ['r0', Int32Array.from([1, 0, -1])],
+          ['r1', Int32Array.from([0, -1, 2])],
+        ]),
+      },
+    } as unknown as import('../../src/network/places').JumpNetwork;
+    const m = placeMembers(net);
+    expect([...m.start]).toEqual([0, 2, 3, 4]);
+    expect([...m.source]).toEqual([0, 1, 0, 1]);
+    expect([...m.index]).toEqual([1, 0, 0, 2]);
+    const idx = new KeyIndex([30, 10, 20, 10.5], 4);
+    expect([30, 10, 20, 10.5, 11].map((k) => idx.get(k))).toEqual([0, 1, 2, 3, -1]);
+  });
+
   it('settles single stars of the chosen classes', async () => {
     const { targetsOf, readDef } = await import('../../src/factions/world');
     const { Flag } = await import('../../src/data/format');
@@ -135,7 +157,7 @@ describe('faction world', () => {
         sources: [{ data }],
       },
     } as unknown as import('../../src/network/places').JumpNetwork;
-    const members = [[{ path: 'r0', index: 0 }], [{ path: 'r0', index: 1 }, { path: 'r0', index: 2 }], [{ path: 'r0', index: 3 }], [{ path: 'r0', index: 4 }]];
+    const members = { start: Int32Array.from([0, 1, 3, 4, 5]), source: new Int32Array(5), index: Int32Array.from([0, 1, 2, 3, 4]) };
     expect([...targetsOf(net, members, { targets: ['F', 'G', 'K'], singleOnly: true })]).toEqual([1, 0, 1, 0]);
     expect([...targetsOf(net, members, { targets: ['F', 'G', 'K'], singleOnly: false })]).toEqual([1, 1, 1, 0]);
     expect([...targetsOf(net, members, { targets: ['M'], singleOnly: true })]).toEqual([0, 0, 0, 1]);
@@ -143,7 +165,7 @@ describe('faction world', () => {
     const d = readDef({ startYear: 2100.4, incomeStep: -3, region: 1e6, targets: ['G', 'X'], color: 'red' });
     expect(d.startYear).toBe(2100);
     expect(d.incomeStep).toBe(0.001);
-    expect(d.region).toBe(250);
+    expect(d.region).toBe(500);
     expect(d.targets).toEqual(['G']);
     expect(d.color).toBe(SOLAR_EMPIRE.color);
   });
@@ -204,6 +226,22 @@ describe('factions in steps', () => {
     };
     const whole = run(false);
     expect(run(true)).toEqual(whole);
+    // also when every search pauses after one place (the deadline long past)
+    const batch = FactionSim.SEARCH_BATCH;
+    FactionSim.SEARCH_BATCH = 1;
+    try {
+      const sims = [
+        new FactionSim(g, 0, { ...def, id: 'a', incomeStep: 0.5 }, { exp: false, k: 1 }),
+        new FactionSim(g, n - 1, { ...def, id: 'b', incomeStep: 0.5 }, { exp: false, k: 1 }),
+      ];
+      const all = new FactionsSim(sims);
+      let calls = 0;
+      for (; calls < 1e7 && all.year < 2400; calls++) all.advanceTo(2400, -1);
+      expect(calls).toBeGreaterThan(1000);
+      expect(sims.map((s) => s.events.map((e) => `${e.year}:${e.place}:${e.kind}`).join(' '))).toEqual(whole);
+    } finally {
+      FactionSim.SEARCH_BATCH = batch;
+    }
     // both grew, and no place belongs to both
     const [pa, pb] = whole.map((h) => new Set(h.split(' ').map((e) => e.split(':')[1])));
     expect(pa.size).toBeGreaterThan(100);

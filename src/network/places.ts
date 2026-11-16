@@ -105,6 +105,18 @@ export function jumpMargin(range: number): number {
  * by system, then places closer than MERGE_DISTANCE are merged.
  */
 export function buildPlaces(sources: PlaceSource[], opt: PlaceOptions): PlaceSet {
+  const steps = placeSteps(sources, opt);
+  for (;;) {
+    const r = steps.next();
+    if (r.done) return r.value;
+  }
+}
+
+/**
+ * buildPlaces in steps: it pauses (yields) after each source and between its phases, so that a
+ * caller can spread a large set (900,000 places) over several frames.
+ */
+export function* placeSteps(sources: PlaceSource[], opt: PlaceOptions): Generator<void, PlaceSet, void> {
   const { x: cx, y: cy, z: cz } = opt.centre;
   const r2 = opt.radius * opt.radius;
   const to = opt.to;
@@ -196,6 +208,7 @@ export function buildPlaces(sources: PlaceSource[], opt: PlaceOptions): PlaceSet
         break outer;
       }
     }
+    yield;
   }
 
   const repPositions = (): Float64Array => {
@@ -211,9 +224,11 @@ export function buildPlaces(sources: PlaceSource[], opt: PlaceOptions): PlaceSet
     return out;
   };
   let positions = repPositions();
+  yield;
 
   // places closer than MERGE_DISTANCE become one, represented by the most luminous member
   const close = overflow || n < 2 ? null : closePairs(positions, n, MERGE_DISTANCE);
+  yield;
   if (close && close.count > 0) {
     const parent = new Int32Array(n);
     for (let k = 0; k < n; k++) parent[k] = k;
@@ -267,7 +282,9 @@ export function buildPlaces(sources: PlaceSource[], opt: PlaceOptions): PlaceSet
     system = nSystem;
     members = nMembers;
     n = m;
+    yield;
     positions = repPositions();
+    yield;
   }
 
   const capacities = new Int32Array(n);

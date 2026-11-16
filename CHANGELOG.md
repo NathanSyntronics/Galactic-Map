@@ -2,6 +2,17 @@
 
 Every round of changes that goes live raises the version by 0.01 (README, *Versions*).
 
+## 1.23 (2026-11-16)
+
+* Zoomed far out over large factions, the other stars no longer fade away: the automatic exposure
+  measures the stars' own light, not the thousands of faction rims, and far away a faction's star
+  (only a point there) takes its faction's colour instead of a rim. Faction and filter stars below
+  the level of detail are drawn fainter.
+* A faction's region can be up to 500 ly (before: 250 ly). Its network (900,000 places at 500 ly)
+  is computed while the map goes on, partly in a background worker, and needs much less memory than
+  before; the simulation also pauses within long route searches, so the map keeps running.
+* Long faction names and figures in the legend wrap instead of being cut off.
+
 ## 1.22 (2026-11-16)
 
 * Factions no longer freeze the map at a fast clock: their simulation is several hundred times

@@ -26,6 +26,7 @@ import {
 } from './data/octree';
 import { formatLy, formatNumber, getLang, jumpStatsText, localName, setLang, t, type MessageKey } from './i18n';
 import { VERSION } from './version';
+import { computeJumpLinksAsync } from './network/links-async';
 import {
   MAX_PAIRS,
   MAX_PLACES,
@@ -35,6 +36,7 @@ import {
   linksOfStar,
   networkServes,
   placeOfStar,
+  placeSteps,
   type CapacityRule,
   type JumpNetwork,
   type NetworkOptions,
@@ -68,6 +70,7 @@ import {
   SIZE_UNIFORM,
   attributeInfo,
   buildPlan,
+  hexToRgb,
   numericScale,
   planetClass,
   planetsOf,
@@ -108,7 +111,7 @@ import { FilterBox, type FilterAttribute, type FilterRow } from './ui/filter-box
 import { FactionBox, factionName, type FactionChange, type HomeStar } from './ui/faction-box';
 import { COLONY, FactionSim, FactionsSim, type FactionDef, type FactionEvent } from './factions/sim';
 import { factionWorld, readDefs, saveDefs, targetsOf, type FactionWorld } from './factions/world';
-import { FactionLines, type FactionJump } from './render/faction-lines';
+import { FactionLines } from './render/faction-lines';
 import { RouteBox, type RouteNames } from './ui/route-box';
 import { CLOCK_MAX_JD, CLOCK_MIN_JD, PlanetTimeControl, formatClockDate, yearOfJd } from './ui/time-control';
 import { ProbeCard } from './ui/probe-card';
@@ -190,8 +193,13 @@ const ROUTE_DELAY_MS = 400;
  * around the Sun take 39 MB (630,000 stars in the nodes that reach into it), 1000 ly 166 MB.
  */
 const FILTER_MAX_BYTES = 48e6;
-/** Most data loaded for a faction's region (its network is computed from all of it). */
-const FACTION_MAX_BYTES = 48e6;
+/**
+ * Most data loaded for a faction's region (its network is computed from all of it): 500 ly around
+ * the Sun take 84 MB.
+ */
+const FACTION_MAX_BYTES = 100e6;
+/** Most candidate pairs of a faction's network (500 ly around the Sun: 2.5 million). */
+const FACTION_MAX_PAIRS = 8_000_000;
 /** A change of the jump network's settings rebuilds the factions' networks this long after the last one. */
 const FACTION_DELAY_MS = 800;
 /** The factions' rims and links are drawn again at most this often while their systems change. */
@@ -217,6 +225,8 @@ interface FactionRun {
   stations: number;
   /** Nodes of the region loaded so far. */
   loaded: number;
+  /** Its network is being computed. */
+  building: boolean;
   error: 'noHome' | 'network' | null;
 }
 
@@ -307,15 +317,13 @@ export class App {
   private readonly factionLines = new FactionLines();
   private factionRuns: FactionRun[] = [];
   private factionToken = 0;
+  /** The factions' networks are computed one after the other. */
+  private factionBuild: Promise<void> = Promise.resolve();
   /** The factions' simulations, run together (null until every network is there). */
   private factionSims: FactionsSim | null = null;
   /** Rim code per star of the factions' systems drawn (see MARK_FACTION). */
   private factionMarks = new Map<string, Uint8Array>();
-  /** The faction of each star drawn ("path:index"): which, colony or station, since when. */
-  private factionStars = new Map<string, { faction: number; kind: number; year: number }>();
-  /** The jumps drawn, in the order of the events. */
-  private factionJumps: FactionJump[] = [];
-  /** The selected star's faction as its card shows it ("faction:kind", '' none). */
+  /** The selected star's faction as its card shows it (its rim code, '' none). */
   private factionCardKey = '';
   /** Nodes drawn (also) for the factions' systems. */
   private factionPaths = new Set<string>();
@@ -2982,7 +2990,7 @@ export class App {
     }
     this.applyFactionColours();
     for (const def of this.factionDefs.slice(0, MAX_FACTION_COLOURS)) {
-      const run: FactionRun = { def, centre: new Vector3(), home: null, nodes: [], world: null, sim: null, shown: 0, error: null, loaded: 0, colonies: 0, stations: 0 };
+      const run: FactionRun = { def, centre: new Vector3(), home: null, nodes: [], world: null, sim: null, shown: 0, error: null, loaded: 0, building: false, colonies: 0, stations: 0 };
       this.factionRuns.push(run);
       void this.prepareFaction(run, token);
     }
@@ -3075,9 +3083,8 @@ export class App {
   private factionProgress(): void {
     const loader = this.loader;
     if (!loader) return;
-    let built = false;
     for (const run of this.factionRuns) {
-      if (run.world || run.error || !run.nodes.length) continue;
+      if (run.world || run.error || run.building || !run.nodes.length) continue;
       let loaded = 0;
       let failed = 0;
       for (const n of run.nodes) {
@@ -3089,17 +3096,30 @@ export class App {
         this.factionStatusYear = NaN;
       }
       if (loaded + failed < run.nodes.length) continue;
-      this.buildFactionWorld(run);
-      built = true;
+      // one network after the other (each takes a few frames' time in one piece)
+      const token = this.factionToken;
+      run.building = true;
+      this.factionBuild = this.factionBuild.then(() => this.buildFactionWorld(run, token)).catch((err) => console.error('faction network failed', err));
     }
-    if (built) this.startFactionSims();
   }
 
-  private buildFactionWorld(run: FactionRun): void {
+  /**
+   * The faction's network and world, then (once every faction's is there) the simulations. The
+   * work is spread over frames and the links are computed in a worker: a region of 500 ly holds
+   * 900,000 places, which would otherwise stop the map for seconds.
+   */
+  private async buildFactionWorld(run: FactionRun, token: number): Promise<void> {
+    if (token !== this.factionToken) return;
     const s = this.store.get();
     // the stars shown with the current settings, as for the jump network on the map
     const plan = buildPlan(s, this.attrs);
     const sources: PlaceSource[] = [];
+    let slice = performance.now();
+    const pause = async (): Promise<boolean> => {
+      await new Promise((r) => requestAnimationFrame(r));
+      slice = performance.now();
+      return token === this.factionToken;
+    };
     for (const n of run.nodes) {
       const data = this.loader?.get(n.path);
       if (!data) continue;
@@ -3107,24 +3127,33 @@ export class App {
       const sizes = new Float32Array(data.count);
       computeStyle(data, s, plan, colors, sizes);
       sources.push({ data, colors, sizes });
+      if (performance.now() - slice > FACTION_FRAME_MS && !(await pause())) return;
     }
-    const net = computeNetwork(sources, {
-      centre: { x: run.centre.x, y: run.centre.y, z: run.centre.z },
-      radius: run.def.region,
-      range: s.jumpRange,
-      hub: s.jumpHub,
-      kSun: s.jumpSun,
-      connect: s.jumpConnect,
-      capacity: this.capacityRule(s),
-      nodeKey: (path) => this.nodeKey(path),
-      maxCandidates: MAX_PAIRS,
-    });
-    if (net.overflow) {
+    const centre = { x: run.centre.x, y: run.centre.y, z: run.centre.z };
+    const steps = placeSteps(sources, { centre, radius: run.def.region, capacity: this.capacityRule(s), nodeKey: (path) => this.nodeKey(path) });
+    let step = steps.next();
+    while (!step.done) {
+      if (performance.now() - slice > FACTION_FRAME_MS && !(await pause())) return;
+      step = steps.next();
+    }
+    const places = step.value;
+    if (!(await pause())) return;
+    const links = await computeJumpLinksAsync(places, { range: s.jumpRange, hub: s.jumpHub, kSun: s.jumpSun, connect: s.jumpConnect, maxCandidates: FACTION_MAX_PAIRS });
+    if (token !== this.factionToken) return;
+    run.building = false;
+    if (links.overflow) {
       run.error = 'network';
       this.factionStatusYear = NaN;
-      return;
+    } else {
+      // (the stars' colours and sizes are not needed any more)
+      for (const src of sources) {
+        src.colors = new Uint8Array(0);
+        src.sizes = new Float32Array(0);
+      }
+      const net: JumpNetwork = { places, centre, region: run.def.region, range: s.jumpRange, links, overflow: null };
+      run.world = factionWorld(net, run.def, (path) => this.nodeKey(path));
     }
-    run.world = factionWorld(net, run.def);
+    this.startFactionSims();
   }
 
   /** Per frame: the factions simulated up to the year on the clock, drawn when their systems change. */
@@ -3175,8 +3204,9 @@ export class App {
       const { sim, world } = run;
       if (!sim || !world) return;
       const count = sim.countAt(year);
+      const rgb = hexToRgb(run.def.color);
       for (let e = run.shown; e < count; e++) {
-        this.drawFactionEvent(run, f, sim.events[e], touched);
+        this.drawFactionEvent(run, f, sim.events[e], touched, rgb);
         added = true;
       }
       run.shown = count;
@@ -3193,33 +3223,36 @@ export class App {
       for (let i = 0; i < m.length && i < rn.marks.length; i++) if (m[i] && rn.marks[i] !== MARK_FILTER) rn.marks[i] = m[i];
       (rn.points.geometry.getAttribute('aMark') as BufferAttribute).needsUpdate = true;
     }
-    this.factionLines.set(this.factionJumps, this.factionOrigin());
+    this.factionLines.flush();
     if (fresh) this.lodDirty = true;
     this.candidatesDirty = true;
     this.factionCardCheck();
   }
 
-  /** One event: its stars' rims and faction, and the jump that reached it. */
-  private drawFactionEvent(run: FactionRun, f: number, ev: FactionEvent, touched: Set<string>): void {
+  /** One event: its stars' rims and faction, and the jump that reached it (in the faction's colour, RGB). */
+  private drawFactionEvent(run: FactionRun, f: number, ev: FactionEvent, touched: Set<string>, rgb: readonly number[]): void {
     const world = run.world!;
     const colony = ev.kind === COLONY;
     if (colony) run.colonies++;
     else run.stations++;
     const code = MARK_FACTION + 2 * f + (colony ? 0 : 1);
-    for (const m of world.members[ev.place]) {
-      let a = this.factionMarks.get(m.path);
+    const { start, source, index } = world.members;
+    const sources = world.net.places.sources;
+    for (let j = start[ev.place]; j < start[ev.place + 1]; j++) {
+      const path = sources[source[j]].data.path;
+      let a = this.factionMarks.get(path);
       if (!a) {
-        a = new Uint8Array(this.loader?.get(m.path)?.count ?? 8192);
-        this.factionMarks.set(m.path, a);
+        a = new Uint8Array(sources[source[j]].data.count);
+        this.factionMarks.set(path, a);
       }
-      a[m.index] = code;
-      this.factionStars.set(`${m.path}:${m.index}`, { faction: f, kind: ev.kind, year: ev.year });
-      touched.add(m.path);
+      a[index[j]] = code;
+      touched.add(path);
     }
     if (ev.from >= 0) {
       const pos = world.net.places.positions;
-      const at = (p: number) => ({ x: pos[3 * p], y: pos[3 * p + 1], z: pos[3 * p + 2] });
-      this.factionJumps.push({ a: at(ev.from), b: at(ev.place), color: run.def.color, faint: !colony });
+      const a = 3 * ev.from;
+      const b = 3 * ev.place;
+      this.factionLines.add(pos[a], pos[a + 1], pos[a + 2], pos[b], pos[b + 1], pos[b + 2], rgb, !colony);
     }
   }
 
@@ -3231,8 +3264,7 @@ export class App {
   private redrawFactions(year: number): void {
     const before = this.factionMarks;
     this.factionMarks = new Map();
-    this.factionStars = new Map();
-    this.factionJumps = [];
+    this.factionLines.clear(this.factionOrigin());
     const touched = new Set<string>();
     this.factionRuns.forEach((run, f) => {
       run.shown = 0;
@@ -3241,7 +3273,8 @@ export class App {
       const { sim, world } = run;
       if (!sim || !world) return;
       const count = sim.countAt(year);
-      for (let e = 0; e < count; e++) this.drawFactionEvent(run, f, sim.events[e], touched);
+      const rgb = hexToRgb(run.def.color);
+      for (let e = 0; e < count; e++) this.drawFactionEvent(run, f, sim.events[e], touched, rgb);
       run.shown = count;
     });
     this.factionPaths = new Set(this.factionMarks.keys());
@@ -3252,7 +3285,7 @@ export class App {
     for (const path of new Set([...before.keys(), ...marks.keys()])) {
       if (!same(before.get(path), marks.get(path))) this.starfield.restyleNode(path);
     }
-    this.factionLines.set(this.factionJumps, this.factionOrigin());
+    this.factionLines.flush();
     this.lodDirty = true;
     this.candidatesDirty = true;
     this.factionCardCheck();
@@ -3261,8 +3294,8 @@ export class App {
   /** The selected star's card again when its faction changed. */
   private factionCardCheck(): void {
     const sel = this.selected;
-    const now = sel ? this.factionStars.get(sel.key) : undefined;
-    const key = now ? `${now.faction}:${now.kind}` : '';
+    const code = sel ? this.factionCode(sel.key) : 0;
+    const key = code ? String(code) : '';
     if (sel && key !== this.factionCardKey && !this.info.editing) this.info.rerender(this.nav.target);
     this.factionCardKey = key;
   }
@@ -3271,21 +3304,33 @@ export class App {
   private clearFactionState(): void {
     const before = this.factionMarks;
     this.factionMarks = new Map();
-    this.factionStars = new Map();
-    this.factionJumps = [];
     this.factionPaths = new Set();
     this.stylePlan = this.planOf(this.store.get());
     for (const path of before.keys()) this.starfield.restyleNode(path);
-    this.factionLines.set([], { x: 0, y: 0, z: 0 });
+    this.factionLines.clear({ x: 0, y: 0, z: 0 });
+    this.factionLines.flush();
     this.legend.setFactions(null);
   }
 
   /** The faction of a star (for its card): its name and colour, colony or station, since when. */
   private factionOfStar(info: StarInfo): FactionMembership | null {
-    const m = this.factionStars.get(info.key);
-    const run = m ? this.factionRuns[m.faction] : undefined;
-    if (!m || !run) return null;
-    return { name: factionName(run.def), color: run.def.color, colony: m.kind === COLONY, since: m.year };
+    const code = this.factionCode(info.key);
+    const run = code ? this.factionRuns[(code - MARK_FACTION) >> 1] : undefined;
+    if (!run?.sim || !run.world) return null;
+    // since when: the event of its place among those drawn
+    const at = info.key.lastIndexOf(':');
+    const place = placeOfStar(run.world.net.places, info.key.slice(0, at), Number(info.key.slice(at + 1)));
+    const ev = place < 0 ? undefined : run.sim.events.slice(0, run.shown).find((e) => e.place === place);
+    if (!ev) return null;
+    return { name: factionName(run.def), color: run.def.color, colony: ev.kind === COLONY, since: ev.year };
+  }
+
+  /** The rim code (MARK_FACTION …) of a star drawn as a faction's ("path:index"), 0 for none. */
+  private factionCode(key: string): number {
+    const at = key.lastIndexOf(':');
+    if (at <= 0) return 0;
+    const code = this.factionMarks.get(key.slice(0, at))?.[Number(key.slice(at + 1))] ?? 0;
+    return code >= MARK_FACTION ? code : 0;
   }
 
   /** Each faction's state line in the panel, and the legend's rows. */

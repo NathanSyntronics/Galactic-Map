@@ -46,16 +46,22 @@ can also be deleted. At most eight factions. They are stored in the browser.
 ## The region
 
 The faction grows in the jump network of the stars within its *region* around its home: 150 ly by
-default, at most 250 ly. The network is computed with the settings of the jump network (range,
+default, at most 500 ly. The network is computed with the settings of the jump network (range,
 links per star, hubs, connecting groups) and from the stars shown (brown and white dwarfs,
-distance uncertainty). Changing them computes it again. Its size:
+distance uncertainty). Changing them computes it again. Its size around the Sun:
 
-| region | places | loading and network (desktop) |
-|---|---|---|
-| 100 ly | 8,600 | 1.4 s |
-| 150 ly | 28,700 | 2.6 s |
-| 200 ly | 66,900 | 5.8 s |
-| 250 ly | 128,600 | 10.9 s |
+| region | places | data loaded | network (desktop) |
+|---|---|---|---|
+| 100 ly | 8,600 | 13 MB | < 0.1 s |
+| 150 ly | 28,700 | 18 MB | 0.1 s |
+| 250 ly | 128,600 | 31 MB | 0.3 s |
+| 500 ly | 902,000 | 84 MB | 2 s |
+
+The network is computed while the map goes on (in pieces between frames, its links in a worker).
+A large region needs memory: one faction with a 500 ly region takes about 0.4 GB in all, two
+about 0.7 GB (on a phone with little memory, smaller regions are safer). Two factions in 500 ly
+regions around the Sun and Arcturus settle 163,000 systems (by 2372); their simulation takes
+about 2.5 s, spread over the frames.
 
 The Solar Empire alone in its 150 ly region, with the default parameters:
 
@@ -94,6 +100,14 @@ or station, and since when.
   added to what is drawn, not drawn again.
   Once a faction has nothing left to settle and every colony earns its maximum, its later years
   follow from a formula (the pool grows by the same income each year) instead of being simulated.
+  A search for the next route that runs far through a large network pauses at the frame's
+  deadline too and goes on in the next frame (`SEARCHING`), with the same result.
+* Memory (1.23, for 500 ly regions): the stars of each place are kept in three typed arrays
+  (`placeMembers`), the simulation's adjacency holds link numbers, a system taken by one faction is
+  found in the others' networks through their stars (`placeOf`) instead of a map of all keys, and
+  the jumps drawn go straight into a growing vertex buffer, of which only the new part is uploaded.
+* `src/network/links-async.ts` and `links-worker.ts`: the faction's links computed in a worker;
+  `placeSteps` (`src/network/places.ts`) groups the stars into places in steps between frames.
 * `src/factions/world.ts`: the faction's graph from a jump network (which places it settles, the
   stars of each place), and the stored parameters (`localStorage`, `galactic-map:factions`).
 * `src/app.ts` (*factions*): loads the region's nodes, computes the network and runs the

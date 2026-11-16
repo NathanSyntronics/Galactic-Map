@@ -52,10 +52,17 @@ export interface FactionGraph {
   links: { count: number; a: ArrayLike<number>; b: ArrayLike<number>; length: ArrayLike<number> };
   /** 1 where the faction settles (a colony at the end of a route). */
   target: Uint8Array;
+  /**
+   * The place that holds the star of a key (-1: none), where the graph can tell it directly;
+   * otherwise the keys are indexed (KeyIndex).
+   */
+  placeOf?: (key: number) => number;
 }
 
 export const COLONY = 1;
 export const STATION = 2;
+/** buy(): the search for the next route reached the deadline; it goes on in the next call. */
+export const SEARCHING = -2;
 
 /** A system becomes the faction's: a station on the way or a colony at the end of a route. */
 export interface FactionEvent {
@@ -172,6 +179,8 @@ export const MAX_YEARS = 5_000_000;
  * at the lowest cost (ties: the smaller key).
  */
 export class FactionSim {
+  /** Places searched between looks at the deadline (see buy). */
+  static SEARCH_BATCH = 2048;
   readonly events: FactionEvent[] = [];
   /** Owner state per place: 0, COLONY or STATION. */
   readonly owned: Uint8Array;
@@ -191,9 +200,9 @@ export class FactionSim {
   steady: { year: number; credits: number; income: number } | null = null;
   /** Places were closed since the costs were computed (some costs may be too low now). */
   private closed = false;
-  private readonly start: number[];
-  private readonly to: number[];
-  private readonly len: number[];
+  /** Adjacency (both directions): the links of place p are link[start[p] .. start[p + 1] - 1]. */
+  private readonly start: Int32Array;
+  private readonly link: Int32Array;
   private readonly cost: (d: number) => number;
   private route: Step[] | null = null;
   private routePos = 0;
@@ -238,17 +247,12 @@ export class FactionSim {
       deg[L.b[i] + 1]++;
     }
     for (let p = 0; p < n; p++) deg[p + 1] += deg[p];
-    this.start = Array.from(deg);
-    const fill = this.start.slice(0, n);
-    this.to = new Array(deg[n]);
-    this.len = new Array(deg[n]);
+    this.start = deg;
+    const fill = deg.slice(0, n);
+    this.link = new Int32Array(deg[n]);
     for (let i = 0; i < L.count; i++) {
-      const a = L.a[i];
-      const b = L.b[i];
-      this.to[fill[a]] = b;
-      this.len[fill[a]++] = +L.length[i];
-      this.to[fill[b]] = a;
-      this.len[fill[b]++] = +L.length[i];
+      this.link[fill[L.a[i]]++] = i;
+      this.link[fill[L.b[i]]++] = i;
     }
     if (home >= 0 && home < n) {
       this.owned[home] = COLONY;
@@ -356,11 +360,13 @@ export class FactionSim {
    * Pays the next jump of the route if the pool holds its cost (planning a new route first if
    * there is none): returns the place that became the faction's, or -1.
    */
-  buy(year: number): number {
+  buy(year: number, deadline = Infinity): number {
     if (year < this.def.startYear || this.homeTaken) return -1;
     if (!this.route) {
       if (this.exhausted) return -1;
-      this.route = this.nextRoute();
+      const route = this.nextRoute(deadline);
+      if (route === false) return SEARCHING;
+      this.route = route;
       this.routePos = 0;
       if (!this.route) {
         this.exhausted = true;
@@ -443,10 +449,12 @@ export class FactionSim {
   private expand(u: number, cost: number): void {
     const keys = this.graph.keys;
     const { best, pred, jump, work } = this;
+    const { a, b, length } = this.graph.links;
     for (let k = this.start[u]; k < this.start[u + 1]; k++) {
-      const v = this.to[k];
+      const i = this.link[k];
+      const v = a[i] === u ? b[i] : a[i];
       if (this.owned[v] || this.blocked[v]) continue;
-      const j = this.cost(this.len[k]);
+      const j = this.cost(length[i]);
       const c = cost + j;
       if (c < best[v] || (c === best[v] && pred[v] >= 0 && keys[u] < keys[pred[v]])) {
         const fell = c < best[v];
@@ -459,9 +467,15 @@ export class FactionSim {
   }
 
   /** The cheapest route from the faction's systems to a place it settles (null: none left). */
-  private nextRoute(): Step[] | null {
+  private nextRoute(deadline: number): Step[] | null | false {
     const w = this.work;
+    let pops = 0;
     while (w.size) {
+      // (a long search, far through a large network, goes on in the next call: false)
+      if (pops++ >= FactionSim.SEARCH_BATCH) {
+        pops = 0;
+        if (performance.now() > deadline) return false;
+      }
       const u = w.pop();
       const cost = w.topCost;
       if (cost > this.best[u] || this.blocked[u]) continue;
@@ -488,6 +502,47 @@ export class FactionSim {
 }
 
 /**
+ * Places by their stable key: the keys sorted, with the place of each (12 bytes a place, a third
+ * of a Map's). A key held by several places gives the last of them.
+ */
+export class KeyIndex {
+  private readonly sorted: Float64Array;
+  private readonly place: Int32Array;
+
+  constructor(keys: ArrayLike<number>, count: number) {
+    this.sorted = Float64Array.from({ length: count }, (_, p) => keys[p]).sort();
+    this.place = new Int32Array(count).fill(-1);
+    for (let p = 0; p < count; p++) {
+      const k = this.find(keys[p]);
+      // (equal keys: the next free slot of the run, so that each place has one)
+      let at = k;
+      while (at + 1 < count && this.sorted[at + 1] === keys[p] && this.place[at] >= 0) at++;
+      this.place[at] = p;
+    }
+  }
+
+  /** The first index of `key` in the sorted keys (-1: none). */
+  private find(key: number): number {
+    let lo = 0;
+    let hi = this.sorted.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (this.sorted[mid] < key) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo < this.sorted.length && this.sorted[lo] === key ? lo : -1;
+  }
+
+  /** The place of a key (-1: none). */
+  get(key: number): number {
+    let k = this.find(key);
+    if (k < 0) return -1;
+    while (k + 1 < this.sorted.length && this.sorted[k + 1] === key) k++;
+    return this.place[k];
+  }
+}
+
+/**
  * Several factions growing together: year by year, each gets its income, then they buy their
  * jumps in turn (one each, round and round, as long as any can), so that none is served first. A
  * system (by the stable key of its brightest star) that one faction takes is closed to the others,
@@ -497,19 +552,24 @@ export class FactionsSim {
   year: number;
   /** A year begun (incomes paid) but not finished: its purchases go on in the next call. */
   private pending: number | null = null;
-  /** The faction whose turn it is to buy in the year begun. */
+  /** The faction whose turn it is to buy in the year begun, and the tries without a purchase in a row. */
   private turn = 0;
+  private tries = 0;
   /** Purchases checked against the deadline in groups of this many. */
   private static readonly CHECK_EVERY = 4;
-  private readonly places: Map<number, number>[];
+  /** Each faction's places by key (only with several factions). */
+  private readonly placeOf: ((key: number) => number)[];
 
   constructor(readonly sims: FactionSim[]) {
     this.year = Math.min(...sims.map((s) => s.def.startYear)) - 1;
-    this.places = sims.map((s) => {
-      const m = new Map<number, number>();
-      for (let p = 0; p < s.graph.count; p++) m.set(s.graph.keys[p], p);
-      return m;
-    });
+    this.placeOf =
+      sims.length > 1
+        ? sims.map((s) => {
+            if (s.graph.placeOf) return s.graph.placeOf;
+            const index = new KeyIndex(s.graph.keys, s.graph.count);
+            return (key: number) => index.get(key);
+          })
+        : [];
     // the homes, in order: a later faction whose home another one holds never starts
     const homes = new Set<number>();
     sims.forEach((s, i) => {
@@ -529,8 +589,8 @@ export class FactionsSim {
     const key = this.sims[i].graph.keys[place];
     this.sims.forEach((o, j) => {
       if (j === i) return;
-      const p = this.places[j].get(key);
-      if (p !== undefined) o.block(p);
+      const p = this.placeOf[j](key);
+      if (p >= 0) o.block(p);
     });
   }
 
@@ -556,20 +616,23 @@ export class FactionsSim {
         for (const s of this.sims) s.beginYear(y);
         this.pending = y;
         this.turn = 0;
+        this.tries = 0;
       }
       // purchases in turn (one each, round and round) until none of them can buy any more: as many
-      // tries without a purchase in a row as there are factions. A pause mid-year keeps whose turn
-      // it is, so that a year continued in the next call goes on exactly as in one go
+      // tries without a purchase in a row as there are factions. A pause mid-year (after a
+      // purchase, or in a long search for a route) keeps whose turn it is and the tries, so that a
+      // year continued in the next call goes on exactly as in one go
       const n = this.sims.length;
-      for (let idle = 0; idle < n; ) {
+      while (this.tries < n) {
         const i = this.turn;
+        const p = this.sims[i].buy(y, deadline);
+        if (p === SEARCHING) return;
         this.turn = (i + 1) % n;
-        const p = this.sims[i].buy(y);
         if (p < 0) {
-          idle++;
+          this.tries++;
           continue;
         }
-        idle = 0;
+        this.tries = 0;
         this.taken(i, p);
         if (++bought % FactionsSim.CHECK_EVERY === 0 && performance.now() > deadline) return;
       }
