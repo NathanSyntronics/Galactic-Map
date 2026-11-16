@@ -92,6 +92,8 @@ or station, and since when.
   the last year simulated meanwhile (*catching up with the clock*), so even a clock at 100,000
   years a second or a jump far ahead never freezes the map; the rims and links of new systems are
   added to what is drawn, not drawn again.
+  Once a faction has nothing left to settle and every colony earns its maximum, its later years
+  follow from a formula (the pool grows by the same income each year) instead of being simulated.
 * `src/factions/world.ts`: the faction's graph from a jump network (which places it settles, the
   stars of each place), and the stored parameters (`localStorage`, `galactic-map:factions`).
 * `src/app.ts` (*factions*): loads the region's nodes, computes the network and runs the

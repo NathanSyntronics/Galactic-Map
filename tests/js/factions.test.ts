@@ -47,6 +47,20 @@ describe('factions', () => {
     expect([...sim.owned]).toEqual([COLONY, STATION, COLONY, COLONY]);
   });
 
+  it('stops simulating year by year once nothing changes but the pool', () => {
+    const sim = new FactionSim(graph(), 0, { ...def, incomeStep: 1, maxIncome: 5 }, EXP2);
+    const all = new FactionsSim([sim]);
+    all.advanceTo(2100);
+    // all settled by 2032, every colony at its maximum (5) a few years later: 3 colonies, 15 a year
+    expect(sim.steady).not.toBeNull();
+    expect(sim.incomeAt(2100)).toBe(15);
+    const at2100 = sim.creditsAt(2100);
+    all.advanceTo(1_000_000);
+    expect(all.year).toBe(1_000_000);
+    expect(sim.creditsAt(1_000_000)).toBeCloseTo(at2100 + 15 * (1_000_000 - 2100), 3);
+    expect((sim as unknown as { pool: number[] }).pool.length).toBeLessThan(20);
+  });
+
   it('sums the incomes of the colonies like one by one', () => {
     const d = { ...def, incomeStep: 0.7, maxIncome: 9 };
     const sim = new FactionSim(graph(), 0, d);

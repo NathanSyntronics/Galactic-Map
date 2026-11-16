@@ -9,6 +9,9 @@ Every round of changes that goes live raises the version by 0.01 (README, *Versi
   three minutes), it takes at most a few milliseconds per frame and catches up over the next
   frames (the panel says so meanwhile), and new colonies and stations are added to the drawing
   instead of drawing all again.
+* Once a faction has settled everything within reach and all its colonies earn their maximum, its
+  later years are not simulated one by one (its pool grows by the same income every year): the
+  clock can run at any speed, up to two million years ahead.
 
 ## 1.21 (2026-11-16)
 

@@ -161,8 +161,8 @@ interface Step {
   cost: number;
 }
 
-/** Most years simulated (a date far in the future stops here). */
-export const MAX_YEARS = 100_000;
+/** Most years simulated (beyond the clock's range of two million years either way). */
+export const MAX_YEARS = 5_000_000;
 
 /**
  * The growth of one faction, simulated year by year as far as asked (advanceTo). Each year the
@@ -184,6 +184,11 @@ export class FactionSim {
   homeTaken = false;
   /** Places another faction holds: closed to this one. */
   readonly blocked: Uint8Array;
+  /**
+   * From this year on nothing changes but the pool: nothing is left to settle and every colony
+   * earns its maximum. Later years are not simulated one by one (see creditsAt).
+   */
+  steady: { year: number; credits: number; income: number } | null = null;
   /** Places were closed since the costs were computed (some costs may be too low now). */
   private closed = false;
   private readonly start: number[];
@@ -286,6 +291,10 @@ export class FactionSim {
   advanceTo(year: number): void {
     const last = Math.min(year, this.def.startYear + MAX_YEARS);
     while (this.year < last) {
+      if (this.steady) {
+        this.year = last;
+        return;
+      }
       const y = this.year + 1;
       this.beginYear(y);
       while (this.buy(y) >= 0);
@@ -295,7 +304,7 @@ export class FactionSim {
 
   /** The year's income into the pool (nothing before the first year). */
   beginYear(year: number): void {
-    if (year < this.def.startYear || this.homeTaken) return;
+    if (this.steady || year < this.def.startYear || this.homeTaken) return;
     const inc = this.income(year);
     this.credits += inc;
     this.incomes.push(inc);
@@ -303,17 +312,30 @@ export class FactionSim {
 
   endYear(year: number): void {
     this.year = year;
-    if (year < this.def.startYear || this.homeTaken) return;
+    if (this.steady || year < this.def.startYear || this.homeTaken) return;
     this.pool.push(this.credits);
+    // nothing left to do but earn: the later years follow from this one
+    if (this.exhausted && !this.route && this.maxed === this.firstYears.length) {
+      this.steady = { year, credits: this.credits, income: this.incomes[this.incomes.length - 1] ?? 0 };
+    }
+  }
+
+  /** Whether the years from now on change nothing but the pool (or it never starts). */
+  get idle(): boolean {
+    return !!this.steady || this.homeTaken;
   }
 
   /** Credits at the end of a simulated year, and the income of that year. */
   creditsAt(year: number): number {
+    const st = this.steady;
+    if (st && year > st.year) return st.credits + st.income * (year - st.year);
     const k = year - this.def.startYear;
     return k < 0 ? 0 : this.pool[Math.min(k, this.pool.length - 1)] ?? 0;
   }
 
   incomeAt(year: number): number {
+    const st = this.steady;
+    if (st && year > st.year) return st.income;
     const k = year - this.def.startYear;
     return k < 0 ? 0 : this.incomes[Math.min(k, this.incomes.length - 1)] ?? 0;
   }
@@ -522,6 +544,12 @@ export class FactionsSim {
     // (every call gets on by at least a year or a few purchases, whatever the deadline)
     let worked = false;
     while (this.year < last) {
+      // nothing changes any more but the pools: straight to the year asked
+      if (this.pending === null && this.sims.every((s) => s.idle)) {
+        this.year = last;
+        for (const s of this.sims) s.year = last;
+        return;
+      }
       if (worked && performance.now() > deadline) return;
       const y = this.year + 1;
       if (this.pending !== y) {
