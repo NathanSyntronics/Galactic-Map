@@ -161,6 +161,9 @@ describe('faction world', () => {
     expect([...targetsOf(net, members, { targets: ['F', 'G', 'K'], singleOnly: true })]).toEqual([1, 0, 1, 0]);
     expect([...targetsOf(net, members, { targets: ['F', 'G', 'K'], singleOnly: false })]).toEqual([1, 1, 1, 0]);
     expect([...targetsOf(net, members, { targets: ['M'], singleOnly: true })]).toEqual([0, 0, 0, 1]);
+    // a year typed with a thousands separator is still the year (shown without one)
+    const { ungroup } = await import('../../src/ui/faction-box');
+    expect(['2.027', '2,027', '2 027', '2027', '-1.000', '2.5', '12.34'].map(ungroup)).toEqual(['2027', '2027', '2027', '2027', '-1000', '2.5', '12.34']);
     // stored parameters are checked
     const d = readDef({ startYear: 2100.4, incomeStep: -3, region: 1e6, targets: ['G', 'X'], color: 'red' });
     expect(d.startYear).toBe(2100);

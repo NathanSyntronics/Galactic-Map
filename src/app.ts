@@ -403,6 +403,8 @@ export class App {
   private lastCandidates = 0;
   private selectedPaths = new Set<string>();
   private inView = 0;
+  /** Of them, those the level of detail draws anyway (not only as a faction's or the filter's): the faint stars' brightness follows their number. */
+  private litInView = 0;
   private lastTime = performance.now();
   private hashTimer = 0;
   private lastTap = { time: 0, x: 0, y: 0 };
@@ -1753,8 +1755,12 @@ export class App {
 
   /** Whether star i lies (mostly) below the completeness cut, seen from the camera at (-ex, -ey, -ez). */
   private belowCut(rn: RenderedNode, i: number, ex: number, ey: number, ez: number, cut: number): boolean {
-    // (the stars a filter found are always drawn)
-    if (rn.marks[i] >= MARK_FILTER) return false;
+    // (the stars a filter or a faction has are always drawn)
+    return rn.marks[i] < MARK_FILTER && this.underCut(rn, i, ex, ey, ez, cut);
+  }
+
+  /** Whether a star is below the completeness cut, whatever its marks. */
+  private underCut(rn: RenderedNode, i: number, ex: number, ey: number, ez: number, cut: number): boolean {
     const d2 = ex * ex + ey * ey + ez * ez;
     return rn.imp[i] - Math.log10(Math.max(d2, 1e-24)) < cut - IMP_SOFT / 2;
   }
@@ -2004,6 +2010,7 @@ export class App {
     const r2 = s.radius * s.radius;
     const cands: LabelCandidate[] = [];
     let inView = 0;
+    let lit = 0;
     // the best named stars and unnamed stars by label priority, among those on screen (a large
     // view holds tens of thousands of named stars; candidates are rebuilt after each view change)
     const named = new TopK<{ d: NodeData; i: number; size: number }>(namedCandidateLimit(s.labelCount));
@@ -2037,8 +2044,11 @@ export class App {
         const dd = dx * dx + dy * dy + dz * dz;
         if (dd > r2 && !(closeUp && Math.sqrt(dd) - starRadiusLy(d, i) <= s.radius)) continue;
         if (rn.sizes[i] <= 0 || (rn.markedOnly && rn.marks[i] < MARK_FILTER)) continue;
-        if (cut > NO_CUT && this.belowCut(rn, i, x - cx, y - cy, z - cz, cut)) continue;
+        const under = cut > NO_CUT && this.underCut(rn, i, x - cx, y - cy, z - cz, cut);
+        if (under && rn.marks[i] < MARK_FILTER) continue;
         inView++;
+        // (a faction's or the filter's star below the cut is a marker: it does not make the view crowded)
+        if (!under) lit++;
         if (labelMode === 'none') continue;
         const sun = (d.flags[i] & Flag.SUN) !== 0;
         if (labelMode === 'sun' && !sun) continue;
@@ -2112,6 +2122,7 @@ export class App {
     }
     this.labels.candidates = cands;
     this.inView = inView;
+    this.litInView = lit;
     // only the view-dependent values: rebuilding the card here would swallow clicks on its buttons
     if (this.selected) this.info.updateView(this.nav.target);
     if (this.selectedGalaxy !== null) this.galaxyCard.updateView(this.nav.target);
@@ -3907,8 +3918,8 @@ export class App {
     // the more stars are in view, the fainter the faintest ones, so dense regions do not saturate;
     // in the half-float buffer even tiny shares add up: beyond 100,000 stars the floor falls with
     // the count (their light together about constant)
-    u.uMinAlpha.value = minStarAlpha(this.inView, !!this.starBuffer);
-    u.uCrowd.value = crowdFactor(this.inView, !!this.starBuffer);
+    u.uMinAlpha.value = minStarAlpha(this.litInView, !!this.starBuffer);
+    u.uCrowd.value = crowdFactor(this.litInView, !!this.starBuffer);
     u.uMinPx.value = 2.6 * this.renderer.getPixelRatio();
     u.uMarks.value = s.planetMarks ? 1 : 0;
     this.updateGalaxies(s, u.uScale.value);
@@ -3952,7 +3963,7 @@ export class App {
       // after a pending restyle (shown stars), and spaced so that it takes at most ~20 % of the time
       if (this.jumpDirty && ready && !this.styleDirty && now - this.lastJump >= Math.max(250, 4 * this.jumpCost)) this.recomputeJumps();
       // like the faint stars: the more stars in view, the fainter the lines, so dense regions stay readable
-      const density = MathUtils.clamp(Math.sqrt(1500 / Math.max(this.inView, 1)), 0.2, 1);
+      const density = MathUtils.clamp(Math.sqrt(1500 / Math.max(this.litInView, 1)), 0.2, 1);
       this.jumpLines.update(c, s.radius, s.jumpOpacity * density);
     }
     this.updateFactions(s);

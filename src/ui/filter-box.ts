@@ -16,7 +16,7 @@ import {
   type SystemCriterion,
 } from '../data/filter';
 import { parseNumber } from '../data/csv';
-import { formatLy, formatNumber, getLang, locale, t, type MessageKey } from '../i18n';
+import { formatLy, formatNumber, getLang, locale, numberText, t, type MessageKey } from '../i18n';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -167,7 +167,7 @@ export class FilterBox {
     const input = el('input', 'filter-number');
     input.type = 'text';
     input.inputMode = 'decimal';
-    input.value = formatNumber(c.radius, c.radius < 10 ? 1 : 0);
+    input.value = numberText(c.radius < 10 ? Math.round(c.radius * 10) / 10 : Math.round(c.radius));
     input.setAttribute('aria-label', `${t('filterRadius')} (${t('ly')})`);
     const chips: HTMLButtonElement[] = [];
     const syncChips = () => chips.forEach((b, k) => b.classList.toggle('active', RADIUS_PRESETS[k] === this.criteria.radius));

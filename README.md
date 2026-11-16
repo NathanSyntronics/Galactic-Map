@@ -487,7 +487,10 @@ The stars are stored in an octree (`pipeline/galmap/octree.py`):
   into one white blob. Ordinary views measure up to about 0.35 and are drawn as before. The meter
   sees the stars' own light only (the buffer's alpha channel), not the rims of marked stars: a
   faction's thousands of rims seen from afar would otherwise darken all other stars. Far away,
-  where a marked star is only a point, it takes its rim's colour instead of the rim.
+  where a marked star is only a point, it takes its rim's colour instead of the rim. Stars drawn
+  only because a faction or the filter has them (below the level of detail) count neither for the
+  number of stars in view (the floor and the dimming above) nor for the meter: a large faction
+  leaves the brightness of all other stars as it is.
 * The writer (`pipeline/galmap/ooc.py`) works out of core: stars are spooled to disk in chunks
   and split into buckets of at most 8 million stars; the levels above the buckets are built
   exactly from each bucket's brightest candidates, and each bucket's subtree is built and

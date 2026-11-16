@@ -67,6 +67,7 @@ varying float vMark;
 varying float vRing;
 varying vec4 vRingColor;
 varying float vRingWidth;
+varying float vMeter;
 void main() {
   // the epoch position (exact relative to the camera close by) plus the motion since then
   vec3 rel = (position - uCamLocal) + aVel * uDt;
@@ -82,7 +83,10 @@ void main() {
   // (a star shown only because a faction or the filter has it, below the cut: fainter, or the
   // territory of a large faction seen from far away would glare as one patch)
   float above = smoothstep(uImpCut - IMP_SOFT, uImpCut, lb);
-  a *= found ? mix(FOUND_BELOW_CUT, 1.0, above) : above;
+  float shown = found ? mix(FOUND_BELOW_CUT, 1.0, above) : above;
+  a *= shown;
+  // the exposure meter counts only the light the star has unmarked (none below the cut)
+  vMeter = found ? above / shown : 1.0;
   if (a <= 0.0 || aSize <= 0.0) {
     gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
     gl_PointSize = 0.0;
@@ -170,6 +174,7 @@ varying float vMark;
 varying float vRing;
 varying vec4 vRingColor;
 varying float vRingWidth;
+varying float vMeter;
 void main() {
   vec2 c = gl_PointCoord * 2.0 - 1.0;
   float rc2 = dot(c, c);
@@ -192,7 +197,7 @@ void main() {
   }
   // the star's own light (no rim): the exposure meter reads it from the alpha channel, so that the
   // rims of a large faction or filter do not darken the whole view (see star-buffer.ts)
-  float own = a * max(max(col.r, col.g), col.b);
+  float own = a * max(max(col.r, col.g), col.b) * vMeter;
   if (vMark > 0.5) {
     // the planets' rim: blue, green with a potentially habitable planet; gold: found by the filter
     // (fades with the sphere only)

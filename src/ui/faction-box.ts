@@ -4,7 +4,7 @@ import { CLASS_KEYS, type ClassKey } from '../data/filter';
 import { parseNumber } from '../data/csv';
 import { SOLAR_EMPIRE, type FactionDef } from '../factions/sim';
 import { MAX_FACTIONS, MAX_REGION, newFaction } from '../factions/world';
-import { formatNumber, getLang, t, type MessageKey } from '../i18n';
+import { getLang, numberText, t, type MessageKey } from '../i18n';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -14,6 +14,12 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: 
 }
 
 const CLASS_LABEL: Partial<Record<ClassKey, MessageKey>> = { BD: 'filterClassBD', WD: 'filterClassWD' };
+
+/** A whole number as typed, without thousands separators ("2.027", "2,027", "2 027": 2027). */
+export function ungroup(text: string): string {
+  const s = text.trim();
+  return /^[+-]?\d{1,3}([.,' \u00a0\u202f]\d{3})+$/.test(s) ? s.replace(/[.,' \u00a0\u202f]/g, '') : s;
+}
 
 /** What a change of a faction's parameters needs: a new simulation, or new networks first. */
 export type FactionChange = 'sim' | 'world';
@@ -198,18 +204,22 @@ export class FactionBox {
         change,
       );
     };
-    const num = (key: MessageKey, value: number, lo: number, hi: number, put: (v: number) => void, digits = 1) => {
+    /** A number field; shown as it is typed (no thousands separators, which would read as a decimal point). */
+    const num = (key: MessageKey, value: number, lo: number, hi: number, put: (v: number) => void, integer = false) => {
       const lab = el('label', 'row select');
       lab.appendChild(el('span', '', t(key)));
       const inp = el('input', 'filter-number');
       inp.type = 'text';
-      inp.inputMode = 'decimal';
-      inp.value = formatNumber(value, Number.isInteger(value) ? 0 : digits);
+      inp.inputMode = integer ? 'numeric' : 'decimal';
+      inp.value = numberText(value);
       inp.addEventListener('change', () => {
-        const v = parseNumber(inp.value.trim(), getLang() === 'de');
+        const v = parseNumber(integer ? ungroup(inp.value) : inp.value.trim(), getLang() === 'de');
         const ok = v !== null && v >= lo && v <= hi;
         inp.classList.toggle('invalid', !ok);
-        if (ok) put(v);
+        if (ok) {
+          inp.value = numberText(integer ? Math.round(v) : v);
+          put(v);
+        }
       });
       lab.appendChild(inp);
       return lab;
@@ -231,8 +241,8 @@ export class FactionBox {
       details.appendChild(nameRow);
     }
     details.append(
-      num('factionStartYear', d.startYear, -100_000, 100_000, (v) => set({ startYear: Math.round(v) }, 'sim')),
-      num('factionIncomeStep', d.incomeStep, 0.001, 1e6, (v) => set({ incomeStep: v }, 'sim'), 2),
+      num('factionStartYear', d.startYear, -100_000, 100_000, (v) => set({ startYear: Math.round(v) }, 'sim'), true),
+      num('factionIncomeStep', d.incomeStep, 0.001, 1e6, (v) => set({ incomeStep: v }, 'sim')),
       num('factionMaxIncome', d.maxIncome, 0, 1e9, (v) => set({ maxIncome: v }, 'sim')),
     );
     details.appendChild(el('div', 'filter-label', t('factionTargets')));
@@ -259,7 +269,7 @@ export class FactionBox {
     singleBox.addEventListener('change', () => set({ singleOnly: singleBox.checked }, 'sim'));
     single.append(singleBox, el('span', '', t('filterSystemsSingle')));
     details.appendChild(single);
-    details.appendChild(num('factionRegion', d.region, 20, MAX_REGION, (v) => set({ region: v }, 'world'), 0));
+    details.appendChild(num('factionRegion', d.region, 20, MAX_REGION, (v) => set({ region: Math.round(v) }, 'world'), true));
     details.appendChild(el('p', 'hint', t('factionRegionHint')));
     const colour = el('label', 'row select');
     colour.appendChild(el('span', '', t('factionColor')));

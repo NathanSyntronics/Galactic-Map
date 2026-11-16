@@ -2,6 +2,15 @@
 
 Every round of changes that goes live raises the version by 0.01 (README, *Versions*).
 
+## 1.24 (2026-11-16)
+
+* Large factions no longer dim the other stars at any zoom: the stars shown only because a faction
+  (or the filter) has them no longer count as stars in view, which made the faint stars of the
+  whole view fainter (by up to half), nor for the exposure.
+* Number fields (a faction's first year, region; the filter's radius) are shown without thousands
+  separators: "2.026" was read back as 2.026 when the field was changed. A year typed as "2.030"
+  is 2030.
+
 ## 1.23 (2026-11-16)
 
 * Zoomed far out over large factions, the other stars no longer fade away: the automatic exposure
