@@ -27,7 +27,7 @@ export interface FactionDef {
   targets: ClassKey[];
   /** Only stars that are not part of a multiple system. */
   singleOnly: boolean;
-  /** Most colonies: then it stops growing (its region grows as far as needed, see FactionGraph.growable). */
+  /** Most colonies: then it stops growing (its region grows as far as needed, see FactionGraph.outer). */
   maxColonies: number;
 }
 
@@ -58,17 +58,18 @@ export interface FactionGraph {
    */
   placeOf?: (key: number) => number;
   /**
-   * The graph is the network of a region that can grow: once nothing is left within reach in it,
-   * the faction asks for a larger one (GROW) instead of stopping.
+   * 1 for the places near the edge of the region computed so far, whose links may still change
+   * with a larger region: a search that reaches one asks for the larger region first (GROW), so
+   * that the faction grows as in a network without an edge. Absent: the region is final.
    */
-  growable?: boolean;
+  outer?: Uint8Array;
 }
 
 export const COLONY = 1;
 export const STATION = 2;
 /** buy(): the search for the next route reached the deadline; it goes on in the next call. */
 export const SEARCHING = -2;
-/** buy(): nothing is left in the faction's region: it goes on once the graph is larger (moveTo) or final (finalRegion). */
+/** buy(): the search reached the edge of the faction's region: it goes on once the graph is larger (moveTo) or final (finalRegion). */
 export const GROW = -3;
 
 /** A system becomes the faction's: a station on the way or a colony at the end of a route. */
@@ -285,7 +286,8 @@ export class FactionSim {
   /**
    * The same faction on a larger graph (its region grown): its systems, the places closed to it,
    * its events and its route mapped by `map` (old place to new, -1: gone); the search for the next
-   * route starts again from all its systems. Its history so far stays as it was.
+   * route starts again from all its systems. Its history so far stays as it was: before the
+   * search reached the old graph's outer places, the larger graph gives the same routes.
    */
   moveTo(graph: FactionGraph, map: (place: number) => number): void {
     const n = graph.count;
@@ -322,9 +324,9 @@ export class FactionSim {
     this.recompute();
   }
 
-  /** The graph's region cannot grow any more: with nothing left in it, the faction stops. */
+  /** The graph's region cannot grow any more: its outer places are searched like the others. */
   finalRegion(): void {
-    this.graph.growable = false;
+    this.graph.outer = undefined;
   }
 
   private addColony(firstYear: number): void {
@@ -434,8 +436,7 @@ export class FactionSim {
       }
       const route = this.nextRoute(deadline);
       if (route === false) return SEARCHING;
-      // nothing left in its region: a larger one first, where it can grow
-      if (!route && this.graph.growable) return GROW;
+      if (route === 'grow') return GROW;
       this.route = route;
       this.routePos = 0;
       if (!this.route) {
@@ -537,7 +538,7 @@ export class FactionSim {
   }
 
   /** The cheapest route from the faction's systems to a place it settles (null: none left). */
-  private nextRoute(deadline: number): Step[] | null | false {
+  private nextRoute(deadline: number): Step[] | null | false | 'grow' {
     const w = this.work;
     let pops = 0;
     while (w.size) {
@@ -549,6 +550,12 @@ export class FactionSim {
       const u = w.pop();
       const cost = w.topCost;
       if (cost > this.best[u] || this.blocked[u]) continue;
+      if (this.graph.outer?.[u]) {
+        // the edge of the region computed so far: a larger region first (its links there may
+        // differ); the place goes back into the frontier
+        w.push(u, cost, this.graph.keys[u]);
+        return 'grow';
+      }
       this.expand(u, cost);
       if (this.owned[u] || !this.graph.target[u]) continue;
       const steps: Step[] = [];

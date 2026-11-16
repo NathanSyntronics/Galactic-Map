@@ -48,11 +48,14 @@ can also be deleted. At most eight factions. They are stored in the browser.
 The faction grows in the jump network of the stars within its *region* around its home, computed
 with the settings of the jump network (range, links per star, hubs, connecting groups) and from
 the stars shown (brown and white dwarfs, distance uncertainty); changing them starts it again.
-The region starts at 100 ly. Once nothing is left within reach in it, it grows by a quarter (125,
-156, 195, 244, 305, 381 ly, then 500 ly at most) and the faction goes on there; meanwhile its
-simulation waits (the panel says *its region grows to … ly*). The history so far stays as it was.
-A region that grew only as far as a search reached (instead of being filled first) turned out much
-larger: a faction's territory has far-reaching arms, and the farthest one decided the size.
+The region starts at 100 ly. As soon as the faction's search for its next route reaches the edge
+of the region (its outer three jump ranges, whose links a larger region may change), the region
+grows by a quarter (125, 156, 195, 244, 305, 381 ly, then 500 ly at most) and the faction goes on
+there; meanwhile its simulation waits (the panel says *its region grows to … ly*). So a faction
+grows as in a jump network without an edge, with the far-reaching arms its routes make, and its
+history so far stays as it was (up to 500 ly, where the edge is final). Its farthest arm, not the
+bulk of its systems, decides how large the region gets: the Solar Empire alone reaches its 500 ly
+region with 9,400 colonies.
 
 Its size around the Sun:
 
@@ -65,19 +68,16 @@ Its size around the Sun:
 
 The network is computed while the map goes on (in pieces between frames, its links in a worker).
 A large region needs memory: one faction with a 500 ly region takes about 0.4 GB in all. Two
-factions around the Sun and Arcturus grow to 500 ly by 2150 and stop there in 2157 with 52,000
-colonies together (nothing left within reach), in about 0.8 GB; a smaller *most colonies* keeps
+factions around the Sun and Arcturus reach 500 ly around 2130 and stop in 2153 with 52,000
+colonies together (nothing left within reach), in about 0.9 GB; a smaller *most colonies* keeps
 them smaller.
 
 The Solar Empire alone, with the default parameters (50,000 colonies at most):
 
-| jump costs | first steps | 2100 | 2200 | regions settled (100, 125, 156, 195, 244, 305, 381 ly) | 50,000 colonies |
+| jump costs | first steps | 2100 | 2200 | region grows beyond 100, 125, 156, 195, 244, 305, 381 ly | 50,000 colonies |
 |---|---|---|---|---|---|
-| linear (default) | station Lalande 21185 (2039), colony Groombridge 1618 (2044), Epsilon Eridani (2051), Tau Ceti (2052) | 276 colonies, 250 stations | (done) | 2116, 2124, 2132, 2139, 2145, 2152, 2158 | 2166 (with 101,865 stations) |
-| exponential, k = 2 | stations Alpha Centauri (2040), Luhman 16 (2044), Sirius (2076), …, colony Pi³ Orionis (2089) | 4 colonies, 11 stations | 91 colonies, 197 stations | 2285, 2309, 2331, 2352, 2372, 2392, 2411 | 2434 |
-
-A settled region holds the same number of colonies whatever the costs (1,065 within 100 ly,
-33,404 within 381 ly): every place to settle within reach is taken before it grows.
+| linear (default) | station Lalande 21185 (2039), colony Groombridge 1618 (2044), Epsilon Eridani (2051), Tau Ceti (2052) | 281 colonies, 216 stations | (done) | 2069, 2071, 2089, 2098, 2107, 2113, 2137 | 2163 (with 100,291 stations) |
+| exponential, k = 2 | stations Alpha Centauri (2040), Luhman 16 (2044), Sirius (2076), …, colony Pi³ Orionis (2089) | 4 colonies, 11 stations | 90 colonies, 186 stations | 2173, 2185, 2189, 2210, 2214, 2286, 2330 | 2418 |
 
 ## On the map
 
@@ -117,8 +117,8 @@ or station, and since when.
   the jumps drawn go straight into a growing vertex buffer, of which only the new part is uploaded.
 * `src/network/links-async.ts` and `links-worker.ts`: the faction's links computed in a worker;
   `placeSteps` (`src/network/places.ts`) groups the stars into places in steps between frames.
-* Growth (1.25): a faction whose search finds nothing left in a region that can grow
-  (`FactionGraph.growable`) returns `GROW`; `FactionsSim` waits (`growing`) until the app has
+* Growth (1.25, 1.26): a faction whose search reaches an outer place of its region
+  (`FactionGraph.outer`) puts it back and returns `GROW`; `FactionsSim` waits (`growing`) until the app has
   computed the larger region (`nextRegion`) and moved the faction onto it (`FactionSim.moveTo`:
   its systems, the places closed to it and its events found again by their stars, the search
   started again), or marked it final (`finalRegion`), then `grown` closes the other factions'

@@ -4,7 +4,8 @@ import { COLONY, FactionSim, FactionsSim, SOLAR_EMPIRE, STATION, colonyIncome, t
 /**
  * A grid of w x w places (keys: their numbers), links to the right and down with varied lengths,
  * every seventh place to settle; `part(cx, cy, r)` is its part within r of (cx, cy) as its own
- * graph that can grow, with the part's place of each grid key.
+ * graph, whose places farther than r - 1 are outer (their links may lack a neighbour), with the
+ * part's place of each grid key.
  */
 function grid(w: number) {
   const a: number[] = [];
@@ -21,10 +22,13 @@ function grid(w: number) {
   const part = (cx: number, cy: number, r: number): FactionGraph => {
     const index = new Map<number, number>();
     const keys: number[] = [];
+    const outer: number[] = [];
     for (let p = 0; p < w * w; p++) {
-      if (Math.hypot((p % w) - cx, Math.floor(p / w) - cy) > r) continue;
+      const d = Math.hypot((p % w) - cx, Math.floor(p / w) - cy);
+      if (d > r) continue;
       index.set(p, keys.length);
       keys.push(p);
+      outer.push(d > r - 1 ? 1 : 0);
     }
     const pa: number[] = [];
     const pb: number[] = [];
@@ -41,7 +45,7 @@ function grid(w: number) {
       links: { count: pa.length, a: pa, b: pb, length: pl },
       target: Uint8Array.from(keys, (k) => target[k]),
       placeOf: (key) => index.get(key) ?? -1,
-      growable: true,
+      outer: Uint8Array.from(outer),
     };
   };
   return { full, part };
@@ -162,26 +166,34 @@ describe('factions', () => {
 });
 
 describe('growing regions', () => {
-  it('fills its region, then grows it, keeping its history, whatever the steps', () => {
+  it('grows its region where its search reaches the edge, with the history of the whole network', () => {
     const w = 41;
-    const { part } = grid(w);
+    const { full, part } = grid(w);
     const homes = [20 * w + 10, 20 * w + 30];
     const history = (sims: FactionSim[]) => sims.map((s) => s.events.map((e) => `${e.year}:${s.graph.keys[e.place]}:${e.kind}`).join(' '));
+    const make = (graph: (i: number) => FactionGraph, home: (g: FactionGraph, i: number) => number) =>
+      homes.map((_, i) => {
+        const g = graph(i);
+        return new FactionSim(g, home(g, i), { ...def, id: `f${i}`, incomeStep: 0.5 }, { exp: false, k: 1 });
+      });
+    const whole = make(() => full, (_, i) => homes[i]);
+    new FactionsSim(whole).advanceTo(2400);
+
     const run = (chunked: boolean) => {
       const radius = [4, 4];
-      const sims = homes.map((h, i) => {
-        const g = part(h % w, Math.floor(h / w), radius[i]);
-        return new FactionSim(g, g.placeOf!(h), { ...def, id: `f${i}`, incomeStep: 0.5 }, { exp: false, k: 1 });
-      });
+      const sims = make(
+        (i) => part(homes[i] % w, Math.floor(homes[i] / w), radius[i]),
+        (g, i) => g.placeOf!(homes[i]),
+      );
       const all = new FactionsSim(sims);
-      const before: string[][] = [];
-      for (let k = 0; k < 1_000_000 && all.year < 3000; k++) {
-        all.advanceTo(3000, chunked && k % 3 === 0 ? -1 : Infinity);
+      let growths = 0;
+      for (let k = 0; k < 100_000 && all.year < 2400; k++) {
+        all.advanceTo(2400, chunked && k % 3 === 0 ? -1 : Infinity);
         const i = all.growing;
         if (i === null) continue;
+        growths++;
         const s = sims[i];
-        // grown only when nothing is left in it: every target in reach is taken
-        before.push(history(sims));
+        const before = history(sims);
         radius[i] *= 1.5;
         if (radius[i] > 50) s.finalRegion();
         else {
@@ -191,19 +203,14 @@ describe('growing regions', () => {
         }
         all.grown(i);
         // the history so far is the same on the larger graph
-        expect(history(sims)).toEqual(before[before.length - 1]);
+        expect(history(sims)).toEqual(before);
       }
-      return { history: history(sims), growths: before.length, sims };
+      return { history: history(sims), growths };
     };
-    const whole = run(false);
-    expect(whole.growths).toBeGreaterThan(6);
-    expect(run(true).history).toEqual(whole.history);
-    // in the end every place to settle is a colony, and no place belongs to both
-    const [pa, pb] = whole.history.map((h) => new Set(h.split(' ').map((e) => e.split(':')[1])));
-    expect([...pa].filter((p) => pb.has(p))).toEqual([]);
-    const colonies = new Set(whole.history.flatMap((h) => h.split(' ').filter((e) => e.endsWith(`:${COLONY}`)).map((e) => Number(e.split(':')[1]))));
-    for (let p = 3; p < w * w; p += 7) expect(colonies.has(p)).toBe(true);
-    expect(whole.sims.every((s) => s.exhausted)).toBe(true);
+    const grown = run(false);
+    expect(grown.growths).toBeGreaterThan(4);
+    expect(grown.history).toEqual(history(whole));
+    expect(run(true).history).toEqual(history(whole));
   });
 
   it('stops at its most colonies', () => {

@@ -2,6 +2,13 @@
 
 Every round of changes that goes live raises the version by 0.01 (README, *Versions*).
 
+## 1.26 (2026-11-16)
+
+* A faction's region grows again as soon as its search for the next route reaches the edge, not
+  only once the region is filled: the faction grows with its far-reaching arms, as in a network
+  without an edge (up to 500 ly). The Solar Empire alone reaches 500 ly with 9,400 colonies and
+  has 50,000 in 2163.
+
 ## 1.25 (2026-11-16)
 
 * A faction no longer has a fixed region: it starts in 100 ly around its home, and once nothing is

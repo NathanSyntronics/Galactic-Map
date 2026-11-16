@@ -227,7 +227,7 @@ interface FactionRun {
   loaded: number;
   /** Radius (ly) of its region around its home: of its world, or of the larger one being made (growing). */
   radius: number;
-  /** A larger region is being loaded and computed (nothing was left within reach in its world). */
+  /** A larger region is being loaded and computed (its search reached the edge of its world). */
   growing: boolean;
   /** Its network is being computed. */
   building: boolean;
@@ -3104,9 +3104,9 @@ export class App {
   }
 
   /**
-   * Nothing is left within reach in faction i's region (FactionsSim.growing): the region grows by
+   * Faction i's search reached the edge of its region (FactionsSim.growing): the region grows by
    * REGION_GROWTH (its nodes loaded, its network computed, the simulation moved onto it), or, at
-   * REGION_MAX, it becomes final. The simulation waits meanwhile.
+   * REGION_MAX, its edge becomes final. The simulation waits meanwhile.
    */
   private growFaction(i: number): void {
     const all = this.factionSims;
@@ -3221,8 +3221,9 @@ export class App {
         src.sizes = new Float32Array(0);
       }
       const net: JumpNetwork = { places, centre, region: radius, range: s.jumpRange, links, overflow: null };
-      // (below the largest region it grows once nothing is left in it)
-      world = factionWorld(net, run.def, (path) => this.nodeKey(path), radius < REGION_MAX);
+      // the places near the edge, whose links a larger region may change, make it grow (up to REGION_MAX)
+      const inner = radius >= REGION_MAX ? undefined : radius - jumpMargin(s.jumpRange);
+      world = factionWorld(net, run.def, (path) => this.nodeKey(path), inner);
     }
     if (run.growing) {
       this.applyGrowth(run, world);

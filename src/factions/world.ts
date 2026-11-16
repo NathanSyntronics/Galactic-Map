@@ -55,13 +55,27 @@ export function placeMembers(net: JumpNetwork): PlaceMembers {
 /**
  * The faction's graph of a network: its places and links; a place is settled when its brightest
  * shown star is of one of the classes, and (singleOnly) when it is a star of its own, not a system.
- * With the network's node keys (see buildPlaces) a star's key finds its place directly.
- * `growable`: the region can grow (FactionGraph.growable).
+ * With the network's node keys (see buildPlaces) a star's key finds its place directly. The places
+ * farther than `inner` from the network's centre are its outer places (FactionGraph.outer): the
+ * region grows when the faction's search reaches them.
  */
-export function factionWorld(net: JumpNetwork, def: Pick<FactionDef, 'targets' | 'singleOnly'>, nodeKey?: (path: string) => number, growable = false): FactionWorld {
+export function factionWorld(net: JumpNetwork, def: Pick<FactionDef, 'targets' | 'singleOnly'>, nodeKey?: (path: string) => number, inner?: number): FactionWorld {
   const { places, links } = net;
   const members = placeMembers(net);
-  const graph: FactionGraph = { count: places.count, keys: places.keys, links, target: targetsOf(net, members, def), growable };
+  const graph: FactionGraph = { count: places.count, keys: places.keys, links, target: targetsOf(net, members, def) };
+  if (inner !== undefined) {
+    const outer = new Uint8Array(places.count);
+    const { x, y, z } = net.centre;
+    const pos = places.positions;
+    const r2 = inner * inner;
+    for (let p = 0; p < places.count; p++) {
+      const dx = pos[3 * p] - x;
+      const dy = pos[3 * p + 1] - y;
+      const dz = pos[3 * p + 2] - z;
+      if (dx * dx + dy * dy + dz * dz > r2) outer[p] = 1;
+    }
+    graph.outer = outer;
+  }
   if (nodeKey) {
     const byKey = new Map<number, Int32Array>();
     for (const [path, own] of places.starPlace) byKey.set(nodeKey(path), own);
@@ -91,8 +105,8 @@ export function targetsOf(net: JumpNetwork, members: PlaceMembers, def: Pick<Fac
 const STORE_KEY = 'galactic-map:factions:v2';
 /**
  * The region a faction grows in (docs/FACTIONS.md, "The region"): first this radius (ly) around
- * its home, then larger by this factor whenever nothing is left within reach in it, at most
- * REGION_MAX (500 ly around the Sun hold some 900,000 places).
+ * its home, then larger by this factor whenever its search reaches the edge, at most REGION_MAX
+ * (500 ly around the Sun hold some 900,000 places).
  */
 export const REGION_START = 100;
 export const REGION_GROWTH = 1.25;
